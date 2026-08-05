@@ -7,9 +7,9 @@
 //
 // Chaque fichier db/migrations/NNN_*.sql est exécuté une seule fois,
 // dans une transaction, et tracé dans la table schema_migrations.
-require('dotenv').config();
 const fs   = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const { pool, close, describeTarget } = require('../src/config/database');
 
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');

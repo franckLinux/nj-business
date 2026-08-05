@@ -20,7 +20,7 @@
 ### 1 — Cloner et installer
 ```bash
 git clone <repo>
-cd caisse-pro
+cd caisse-pro/backend
 npm install
 ```
 
@@ -30,6 +30,7 @@ Prérequis : **PostgreSQL 14+** installé
 ([téléchargement](https://www.postgresql.org/download/windows/)) et service démarré.
 
 ```powershell
+cd backend
 .\setup-db.ps1
 ```
 
@@ -46,12 +47,12 @@ superutilisateur `postgres` vous est demandé une fois.
 ### 2 bis — Installation manuelle (Linux / macOS)
 
 ```bash
-sudo -u postgres psql -f db/setup-database.sql
+sudo -u postgres psql -f backend/db/setup-database.sql
 ```
 
 ### 3 — Configurer l'environnement
 ```bash
-cp .env.example .env
+cp .env.example .env    # à la racine du projet (partagé par backend/ et frontend/)
 # Éditer .env : PG_HOST/PG_DBNAME/PG_USER/PG_PASSWORD (ou DATABASE_URL)
 # En local, laisser PG_SSL=false
 ```
@@ -81,7 +82,7 @@ connexion.**
 ### 5 — Plan comptable SYSCOHADA
 
 Le référentiel est versionné avec le code dans
-`db/data/plan-comptable-syscohada.js` (626 comptes, classes 1 à 9) et chargé
+`backend/db/data/plan-comptable-syscohada.js` (626 comptes, classes 1 à 9) et chargé
 dans la table `plan_comptable_syscohada` par :
 
 ```bash
@@ -103,7 +104,7 @@ affiche l'état en base (nombre de comptes par classe et par source) sans rien
 en plus les comptes `syscohada` retirés du référentiel.
 
 Pour étendre le référentiel : ajouter les lignes `[compte, intitulé, nature?]`
-dans `db/data/plan-comptable-syscohada.js` puis relancer `npm run db:plan`. La
+dans `backend/db/data/plan-comptable-syscohada.js` puis relancer `npm run db:plan`. La
 classe est déduite du 1er chiffre du numéro de compte, la nature est déduite de
 la classe sauf mention explicite.
 
@@ -121,7 +122,7 @@ L'interface vanilla reste la référence sur `/`. Le frontend React est monté
 sur `/v2` et se construit à part :
 
 ```bash
-cd frontend
+cd ../frontend      # depuis backend/
 npm install
 npm run build      # → http://localhost:3000/v2
 npm run dev        # ou serveur Vite sur http://localhost:5173
@@ -135,38 +136,39 @@ npm run dev        # ou serveur Vite sur http://localhost:5173
 
 ```
 caisse-pro/
-├── server.js                   ← Entry point Express
-├── package.json
-├── .env.example                ← Variables d'environnement
+├── .env.example                 ← Variables d'environnement (partagées, à la racine)
+├── reset-pg-password.ps1        ← Dépannage : mot de passe superutilisateur perdu
 │
-├── setup-db.ps1                ← Installation de la base en une commande (Windows)
-├── reset-pg-password.ps1       ← Dépannage : mot de passe superutilisateur perdu
-│
-├── db/
-│   ├── setup-database.sql      ← Création du rôle + de la base (superutilisateur)
-│   ├── schema.sql              ← Schéma PostgreSQL multi-tenant complet
-│   ├── migrate.js              ← Runner de migrations unique (versionné)
-│   ├── seed-admin.js           ← Création du super admin
-│   └── migrations/             ← 001_*.sql … appliquées une seule fois
-│
-├── uploads/                    ← Pièces jointes (hors dépôt Git)
-│
-├── src/
-│   ├── config/
-│   │   └── database.js         ← Pool pg (PostgreSQL local)
-│   ├── middleware/
-│   │   ├── auth.js             ← Vérification JWT
-│   │   └── tenant.js           ← Isolation multi-tenant
-│   ├── services/
-│   │   └── storage.service.js  ← Écriture/suppression des pièces sur disque
-│   ├── routes/
-│   │   └── index.js            ← Tous les routeurs REST
-│   └── controllers/
-│       ├── auth.controller.js   ← Login / me / change-password
-│       ├── journal.controller.js← CRUD mouvements + RAN + soldes
-│       ├── budget.controller.js ← Budget + validation + attentes
-│       ├── rubriques.controller.js ← Rubriques dynamiques CRUD
-│       └── users.controller.js  ← Gestion utilisateurs
+├── backend/
+│   ├── server.js                ← Entry point Express
+│   ├── package.json
+│   ├── setup-db.ps1             ← Installation de la base en une commande (Windows)
+│   │
+│   ├── db/
+│   │   ├── setup-database.sql   ← Création du rôle + de la base (superutilisateur)
+│   │   ├── schema.sql           ← Schéma PostgreSQL multi-tenant complet
+│   │   ├── migrate.js           ← Runner de migrations unique (versionné)
+│   │   ├── seed-admin.js        ← Création du super admin
+│   │   └── migrations/          ← 001_*.sql … appliquées une seule fois
+│   │
+│   ├── uploads/                 ← Pièces jointes (hors dépôt Git)
+│   │
+│   └── src/
+│       ├── config/
+│       │   └── database.js         ← Pool pg (PostgreSQL local)
+│       ├── middleware/
+│       │   ├── auth.js             ← Vérification JWT
+│       │   └── tenant.js           ← Isolation multi-tenant
+│       ├── services/
+│       │   └── storage.service.js  ← Écriture/suppression des pièces sur disque
+│       ├── routes/
+│       │   └── index.js            ← Tous les routeurs REST
+│       └── controllers/
+│           ├── auth.controller.js   ← Login / me / change-password
+│           ├── journal.controller.js← CRUD mouvements + RAN + soldes
+│           ├── budget.controller.js ← Budget + validation + attentes
+│           ├── rubriques.controller.js ← Rubriques dynamiques CRUD
+│           └── users.controller.js  ← Gestion utilisateurs
 │
 ├── frontend/                   ← Frontend React + Vite (migration progressive)
 │   ├── MIGRATION.md            ← État du portage, page par page
@@ -266,9 +268,9 @@ caisse-pro/
 
 Les rubriques codées en dur dans `app_26.r` sont automatiquement seedées
 lors de la création d'un tenant via `seedRubriquesDefaut()` dans
-`src/controllers/rubriques.controller.js`. Elles peuvent ensuite être
+`backend/src/controllers/rubriques.controller.js`. Elles peuvent ensuite être
 modifiées librement depuis l'interface.
 
 Les mêmes tables PostgreSQL sont compatibles — la migration des données
 existantes peut se faire via un script de transformation
-`db/migrations/0XX_migrate_from_v1.sql` à créer en Phase P2.
+`backend/db/migrations/0XX_migrate_from_v1.sql` à créer en Phase P2.

@@ -1,5 +1,6 @@
 // server.js — CaissePro v2 Entry Point
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const express    = require('express');
 const helmet     = require('helmet');
@@ -7,7 +8,6 @@ const cors       = require('cors');
 const morgan     = require('morgan');
 const compression= require('compression');
 const rateLimit  = require('express-rate-limit');
-const path       = require('path');
 
 const app = express();
 
@@ -44,7 +44,7 @@ app.use('/api/', limiter);
 app.use('/api/auth/login', loginLimiter);
 
 // ── Frontend statique ─────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ── Pièces jointes stockées sur disque local ──────────────────────────────
 const storage = require('./src/services/storage.service');
@@ -63,7 +63,7 @@ app.use(storage.BASE_URL, express.static(storage.STORAGE_DIR, {
 // L'application vanilla reste servie sur / tant que toutes les pages ne sont
 // pas portées. Le build React n'est monté que s'il existe.
 const fs = require('fs');
-const reactDist = path.join(__dirname, 'frontend', 'dist');
+const reactDist = path.join(__dirname, '..', 'frontend', 'dist');
 if (fs.existsSync(path.join(reactDist, 'index.html'))) {
   app.use('/v2', express.static(reactDist));
   app.get('/v2/*', (req, res) => res.sendFile(path.join(reactDist, 'index.html')));
@@ -97,7 +97,7 @@ app.get('/api/health', async (req, res) => {
 
 // ── SPA fallback (toutes les routes inconnues → index.html) ───────────────
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
 // ── Gestion globale des erreurs ───────────────────────────────────────────

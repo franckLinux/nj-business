@@ -18,7 +18,8 @@
 //    • Les comptes du référentiel déjà présents sont réactivés (actif = true)
 //      et leur intitulé/classe/nature réalignés sur le référentiel.
 // ============================================================================
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
 const { pool, close, describeTarget } = require('../src/config/database');
 const { PLAN_COMPTABLE } = require('./data/plan-comptable-syscohada');
 
