@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(perl -CSD -pe 's/[^\\\\x00-\\\\x7F]//g' src/controllers/journal.controller.js)",
+      "Bash(perl -CSD -pe 's/[^\\\\x00-\\\\x7F]//g' _tmp_pasted/journal.controller.fixed.js)",
+      "Read(//tmp/**)",
+      "Bash(node -e ' *)",
+      "Bash(perl -CSD -pe 's/[^\\\\x00-\\\\x7F]//g' src/controllers/budget_caisse.controller.js)",
+      "Bash(perl -CSD -pe 's/[^\\\\x00-\\\\x7F]//g' _tmp_pasted/budget_caisse.controller.fixed.js)",
+      "Bash(perl -CSD -pe 's/[^\\\\x00-\\\\x7F]//g' public/sw.js)",
+      "Bash(perl -CSD -pe 's/[^\\\\x00-\\\\x7F]//g' _tmp_pasted/sw.fixed.js)",
+      "Bash(perl -CSD -pe 's/[^\\\\x00-\\\\x7F]//g' public/js/sw.js)",
+      "Bash(node --check src/controllers/journal.controller.js)",
+      "Bash(node db/run_migration_mouvements_attente.js)",
+      "Bash(node --check src/controllers/mouvements_attente.controller.js)",
+      "Bash(node --check src/services/notification.service.js)",
+      "Bash(node --check src/services/email.service.js)",
+      "Bash(node --check src/controllers/appel_fonds.controller.js)",
+      "Bash(node --check public/js/app.js)",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match 'node' } | Select-Object Id, ProcessName, Path)",
+      "Bash(node --check src/routes/index.js)",
+      "Bash(node --check public/js/sync.js)",
+      "Bash(node --check public/sw.js)",
+      "Bash(node --check public/js/sw.js)",
+      "Bash(node --check \"src/controllers/journal.controller.js\")",
+      "Bash(node --check \"db/run_migration_mouvements_attente.js\")"
+    ]
+  }
+}
