@@ -1,8 +1,8 @@
 <#
   setup-db.ps1 — Initialisation complète de la base CaissePro (Windows)
 
-  Utilisation (PowerShell, depuis la racine du projet) :
-      .\setup-db.ps1
+  Utilisation (PowerShell) :
+      .\tools\setup-db.ps1
 
   Le script :
     1. localise psql.exe (PATH ou installations standard PostgreSQL)
@@ -14,7 +14,12 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$root = $PSScriptRoot
+
+# Le script vit dans tools/ mais pilote le projet : on se place à la racine du
+# dépôt et on référence les fichiers absolument, pour qu'il fonctionne quel que
+# soit le répertoire depuis lequel il est appelé.
+$root   = Split-Path -Parent $PSScriptRoot
+$sqlDir = Join-Path $root 'backend\db'
 Set-Location $root
 
 function Find-Psql {
@@ -53,7 +58,7 @@ $plainPwd  = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 $env:PGPASSWORD = $plainPwd
 
 Write-Host "`n[1/3] Creation du role et de la base..." -ForegroundColor Cyan
-& $psql -U $superuser -h localhost -p 5432 -d postgres -v ON_ERROR_STOP=1 -f "db\setup-database.sql"
+& $psql -U $superuser -h localhost -p 5432 -d postgres -v ON_ERROR_STOP=1 -f (Join-Path $sqlDir 'setup-database.sql')
 if ($LASTEXITCODE -ne 0) {
     Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue
     Write-Host "Echec de la creation de la base. Verifiez que le service PostgreSQL est demarre." -ForegroundColor Red

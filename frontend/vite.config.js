@@ -12,8 +12,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Autorise l'import de ../public/css/app.css (source unique du style)
-    fs: { allow: [path.resolve(__dirname), path.resolve(__dirname, '..', 'public')] },
+    // legacy/ étant sous la racine Vite, l'import de legacy/css/app.css
+    // (source unique du style) ne demande plus de dérogation `fs.allow`.
     proxy: {
       '/api':     { target: 'http://localhost:3000', changeOrigin: true },
       '/uploads': { target: 'http://localhost:3000', changeOrigin: true },

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { api, configureApi } from '@/lib/api';
 import { MOIS, moisCourant, anneeCourante } from '@/lib/format';
 
-// Équivalent React de l'objet `state` global de public/js/app.js.
+// Équivalent React de l'objet `state` global de legacy/js/app.js.
 // Mêmes clés de localStorage que l'app vanilla (caisse_token / caisse_user) :
 // une session ouverte sur / reste valide sur /v2 et inversement.
 const AppContext = createContext(null);

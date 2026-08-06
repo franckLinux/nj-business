@@ -1,4 +1,4 @@
-// Constantes et formateurs — repris à l'identique de public/js/app.js
+// Constantes et formateurs — repris à l'identique de legacy/js/app.js
 // afin que l'affichage (libellés, séparateurs, devise) reste strictement le même.
 
 export const MOIS = [

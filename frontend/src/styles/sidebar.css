@@ -1,5 +1,5 @@
 /* frontend/src/styles/sidebar.css
-   Extrait tel quel du bloc <style> de public/index.html.
+   Extrait tel quel du bloc <style> de legacy/index.html.
    Garantit un rendu identique de la sidebar entre l'app vanilla et React. */
 
 /* ── Sidebar v2 : groupes collapsibles ──────────────────────────────── */

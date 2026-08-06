@@ -12,7 +12,8 @@
     "db:seed": "node db/seed-admin.js",
     "db:plan": "node db/seed-plan-comptable.js",
     "db:plan:status": "node db/seed-plan-comptable.js --status",
-    "db:setup": "npm run db:schema && npm run db:plan && npm run db:seed"
+    "db:setup": "node db/setup.js",
+    "db:setup:status": "node db/setup.js --status"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

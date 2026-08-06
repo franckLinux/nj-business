@@ -7,7 +7,7 @@ import { ToastProvider } from '@/context/ToastContext';
 
 // Source unique du style : la feuille de l'app vanilla est importée telle
 // quelle, ce qui garantit un rendu identique entre / et /v2.
-import '../../public/css/app.css';
+import '../legacy/css/app.css';
 import '@/styles/sidebar.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(

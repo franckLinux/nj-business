@@ -1,0 +1,28 @@
+{
+  "name": "caisse-pro-monorepo",
+  "version": "2.0.0",
+  "private": true,
+  "description": "CaissePro — monorepo : API Express/PostgreSQL (backend) + frontend React/Vite (frontend)",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "start": "npm run start --workspace=backend",
+    "dev": "npm run dev --workspace=backend",
+    "dev:api": "npm run dev --workspace=backend",
+    "dev:web": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=frontend",
+    "db:schema": "npm run db:schema --workspace=backend",
+    "db:migrate": "npm run db:migrate --workspace=backend",
+    "db:status": "npm run db:status --workspace=backend",
+    "db:seed": "npm run db:seed --workspace=backend",
+    "db:plan": "npm run db:plan --workspace=backend",
+    "db:plan:status": "npm run db:plan:status --workspace=backend",
+    "db:setup": "npm run db:setup --workspace=backend",
+    "deploy:check": "node tools/check-deploy.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

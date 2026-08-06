@@ -1,15 +1,17 @@
 # Migration du frontend vers React + Vite
 
-Migration **progressive**. L'application vanilla d'origine reste servie sur `/`
-et pleinement fonctionnelle ; le frontend React est monté sur `/v2`.
-Aucune bascule brutale : on porte page par page, on ne coupe `/` qu'à la fin.
+Migration **progressive**. L'application vanilla d'origine vit dans
+`frontend/legacy/`, reste servie sur `/` et pleinement fonctionnelle ; le
+frontend React est monté sur `/v2`. Aucune bascule brutale : on porte page par
+page, on ne coupe `/` qu'à la fin.
 
 ## Démarrer
 
+Le dépôt est un workspace npm : tout se lance depuis la **racine**.
+
 ```bash
-cd frontend
-npm install          # une seule fois
-npm run dev          # http://localhost:5173 (proxy /api → localhost:3000)
+npm install          # une seule fois, couvre backend/ et frontend/
+npm run dev:web      # http://localhost:5173 (proxy /api → localhost:3000)
 ```
 
 En parallèle, `npm run dev` à la racine pour l'API Express.
@@ -17,24 +19,24 @@ En parallèle, `npm run dev` à la racine pour l'API Express.
 Pour tester le rendu servi par Express :
 
 ```bash
-cd frontend && npm run build     # génère frontend/dist
-cd .. && npm run dev             # http://localhost:3000/v2
+npm run build        # génère frontend/dist
+npm run dev          # http://localhost:3000/v2
 ```
 
 ## Rendu identique — comment c'est garanti
 
-`frontend/src/main.jsx` importe **directement** `../../public/css/app.css`.
+`frontend/src/main.jsx` importe **directement** `../legacy/css/app.css`.
 Il n'y a donc **aucune copie** de la feuille de style : les deux frontends
 partagent le même fichier. Une correction CSS profite aux deux, et il est
 impossible qu'ils divergent.
 
 Seul `src/styles/sidebar.css` est un extrait — le bloc `<style>` qui était
-inline dans `public/index.html`. Si vous le modifiez, répercutez-le des deux
+inline dans `legacy/index.html`. Si vous le modifiez, répercutez-le des deux
 côtés jusqu'à la fin de la migration.
 
 Les composants reprennent la structure DOM et les classes CSS nœud par nœud.
 Le portage a été validé par comparaison des squelettes DOM (React en rendu
-statique vs `public/index.html`).
+statique vs `legacy/index.html`).
 
 ## État
 
@@ -44,7 +46,7 @@ statique vs `public/index.html`).
 | Sidebar + groupes      | ✅ migré | `components/Sidebar.jsx`, `NavGroup.jsx` |
 | Topbar + période       | ✅ migré | `components/Topbar.jsx` |
 | Tableau de bord        | ✅ migré | `pages/DashboardPage.jsx` |
-| Journal de caisse      | ⬜ à faire | `app.js` → `loadJournalPage` (l. 295) |
+| Journal de caisse      | ⬜ à faire | `legacy/js/app.js` → `loadJournalPage` (l. 295) |
 | Journaux de caisse     | ⬜ à faire | `loadJournauxRecap` (l. 2085) |
 | Suivi budgétaire       | ⬜ à faire | `loadBudget` (l. 2342) |
 | Prévisions de dépenses | ⬜ à faire | `loadPrevisions` (l. 2886) |
@@ -70,7 +72,7 @@ statique vs `public/index.html`).
 ## Porter une page
 
 1. Créer `src/pages/MaPage.jsx`.
-2. Reprendre le HTML généré par la fonction `loadXxx` de `public/js/app.js`
+2. Reprendre le HTML généré par la fonction `loadXxx` de `legacy/js/app.js`
    en JSX, **en gardant les mêmes classes CSS**.
 3. Remplacer les `api.get(...)` par le `api` de `@/lib/api` (même contrat :
    une erreur métier arrive sous la forme `{ error }`).
@@ -82,10 +84,14 @@ statique vs `public/index.html`).
 
 Quand toutes les pages sont portées :
 
-1. Déplacer `public/css/app.css`, `public/icons/`, `public/manifest.json`
-   dans `frontend/public/`.
-2. Passer `base: '/'` dans `vite.config.js` et retirer le `basename` du
-   `BrowserRouter`.
-3. Faire pointer `outDir` sur `../public` et supprimer les anciens
-   `public/js/*.js` et `public/index.html`.
-4. Retirer le montage `/v2` de `server.js`.
+1. Déplacer `legacy/css/app.css`, `legacy/icons/`, `legacy/manifest.json`,
+   `legacy/sw.js` dans `frontend/public/` (le dossier `public/` de Vite, dont
+   le contenu est copié tel quel dans `dist/`).
+2. Passer `base: '/'` dans `vite.config.js` et retirer le `basename="/v2"` du
+   `BrowserRouter` dans `main.jsx`.
+3. Corriger l'import CSS de `main.jsx` (`../legacy/css/app.css` → le nouvel
+   emplacement), puis supprimer `frontend/legacy/`.
+4. Dans `backend/server.js` : faire pointer `LEGACY_DIR` et le fallback SPA sur
+   `frontend/dist`, et retirer le montage `/v2` devenu redondant.
+5. Réintégrer le hors-ligne (`idb.js`, `sync.js`, service worker) — voir les
+   écarts connus ci-dessus.

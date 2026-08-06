@@ -1,3 +1,5 @@
 node_modules/
-dist/
 *.local
+
+# dist/ n'est PAS ignoré : PlanetHoster (Passenger) ne lance aucun build,
+# le bundle doit donc être construit en local et commité. Voir README.

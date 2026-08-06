@@ -18,9 +18,13 @@
 ## Installation rapide
 
 ### 1 — Cloner et installer
+
+Le dépôt est un **workspace npm** : une seule installation à la racine couvre
+`backend/` et `frontend/`, et toutes les commandes se lancent depuis la racine.
+
 ```bash
 git clone <repo>
-cd caisse-pro/backend
+cd caisse-pro
 npm install
 ```
 
@@ -30,8 +34,7 @@ Prérequis : **PostgreSQL 14+** installé
 ([téléchargement](https://www.postgresql.org/download/windows/)) et service démarré.
 
 ```powershell
-cd backend
-.\setup-db.ps1
+.\tools\setup-db.ps1
 ```
 
 Le script crée le rôle `caissepro` et la base `caissepro`, applique le schéma
@@ -39,7 +42,7 @@ et toutes les migrations, puis crée le compte super admin. Le mot de passe du
 superutilisateur `postgres` vous est demandé une fois.
 
 > **Mot de passe `postgres` perdu ?**
-> Ouvrez PowerShell **en tant qu'administrateur** et lancez `.\reset-pg-password.ps1`.
+> Ouvrez PowerShell **en tant qu'administrateur** et lancez `.\tools\reset-pg-password.ps1`.
 > Le script bascule temporairement PostgreSQL en authentification `trust`,
 > redéfinit le mot de passe, puis **restaure systématiquement** `pg_hba.conf`
 > (une sauvegarde horodatée est conservée à côté du fichier d'origine).
@@ -118,17 +121,80 @@ L'application sera disponible sur **http://localhost:3000**
 
 ### 7 — Frontend React (migration progressive)
 
-L'interface vanilla reste la référence sur `/`. Le frontend React est monté
-sur `/v2` et se construit à part :
+L'interface vanilla (`frontend/legacy/`) reste la référence sur `/`. Le frontend
+React est monté sur `/v2`. Tout se pilote depuis la racine :
 
 ```bash
-cd ../frontend      # depuis backend/
-npm install
-npm run build      # → http://localhost:3000/v2
-npm run dev        # ou serveur Vite sur http://localhost:5173
+npm run build      # construit frontend/dist → http://localhost:3000/v2
+npm run dev:web    # ou serveur Vite sur http://localhost:5173
 ```
 
 État du portage page par page : `frontend/MIGRATION.md`.
+
+---
+
+## Déploiement (PlanetHoster — Passenger)
+
+L'hébergement mutualisé n'exécute **ni build ni migration** au déploiement.
+Deux conséquences structurent la procédure :
+
+1. `frontend/dist` est **versionné** (et volontairement absent du `.gitignore`) :
+   le bundle doit être construit en local avant le push.
+2. Les migrations et les seeds se déclenchent par une **requête HTTP** protégée
+   par un token, faute d'accès shell.
+
+### Configuration du panneau Node.js
+
+| Réglage                | Valeur                          |
+|------------------------|---------------------------------|
+| Application root       | `caisse-pro/backend`            |
+| Application startup file | `server.js`                   |
+| Application mode       | `production`                    |
+| Node.js version        | 18 ou supérieure                |
+
+Pointer la racine sur `backend/` plutôt que sur le dépôt évite d'installer
+React, Chart.js et react-router sur le serveur : ils ne servent qu'au build,
+déjà fait en local. `backend/server.js` exporte l'app (`module.exports = app`),
+ce que Passenger exige.
+
+### Avant chaque push
+
+```bash
+npm run build && npm run deploy:check
+```
+
+`deploy:check` refuse de valider si le bundle est absent, plus ancien que les
+sources, ou exclu par `.gitignore` — les trois oublis qui ne se voient qu'une
+fois en production.
+
+### Variables d'environnement sur le serveur
+
+Créer un `.env` **à la racine du dépôt** (pas dans `backend/`) à partir de
+`.env.example`. `JWT_SECRET` et `SETUP_TOKEN` doivent différer de ceux du poste
+de développement. Générer un token :
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Initialiser la base à distance
+
+```bash
+curl -H "X-Setup-Token: VOTRE_TOKEN" https://votre-domaine.com/api/admin/setup
+```
+
+L'endpoint enchaîne schéma → migrations → plan comptable → super admin et
+retourne un rapport JSON détaillant chaque étape et sa durée. Il est
+**idempotent** : le relancer ne casse rien.
+
+Pour consulter l'état sans rien écrire :
+
+```bash
+curl -H "X-Setup-Token: VOTRE_TOKEN" https://votre-domaine.com/api/admin/setup/status
+```
+
+> **Videz `SETUP_TOKEN` une fois le déploiement initial terminé.** L'endpoint
+> redevient alors totalement invisible.
 
 ---
 
@@ -136,20 +202,33 @@ npm run dev        # ou serveur Vite sur http://localhost:5173
 
 ```
 caisse-pro/
+├── package.json                 ← Workspace npm : pilote backend/ et frontend/
 ├── .env.example                 ← Variables d'environnement (partagées, à la racine)
-├── reset-pg-password.ps1        ← Dépannage : mot de passe superutilisateur perdu
+│
+├── tools/
+│   ├── setup-db.ps1             ← Installation de la base en une commande (Windows)
+│   ├── reset-pg-password.ps1    ← Dépannage : mot de passe superutilisateur perdu
+│   └── check-deploy.js          ← Vérifications avant déploiement (npm run deploy:check)
 │
 ├── backend/
-│   ├── server.js                ← Entry point Express
+│   ├── server.js                ← Entry point Express (exporté pour Passenger)
 │   ├── package.json
-│   ├── setup-db.ps1             ← Installation de la base en une commande (Windows)
 │   │
 │   ├── db/
 │   │   ├── setup-database.sql   ← Création du rôle + de la base (superutilisateur)
 │   │   ├── schema.sql           ← Schéma PostgreSQL multi-tenant complet
-│   │   ├── migrate.js           ← Runner de migrations unique (versionné)
-│   │   ├── seed-admin.js        ← Création du super admin
-│   │   └── migrations/          ← 001_*.sql … appliquées une seule fois
+│   │   ├── migrations/          ← 001_*.sql … appliquées une seule fois
+│   │   │
+│   │   ├── lib/                 ← Logique partagée CLI ⇄ API (ne ferme pas le pool)
+│   │   │   ├── migrate.lib.js
+│   │   │   ├── seed-admin.lib.js
+│   │   │   ├── seed-plan.lib.js
+│   │   │   └── setup.js         ← Orchestrateur + verrou consultatif Postgres
+│   │   │
+│   │   ├── migrate.js           ← CLI migrations
+│   │   ├── seed-admin.js        ← CLI super admin
+│   │   ├── seed-plan-comptable.js ← CLI plan comptable
+│   │   └── setup.js             ← CLI « tout en un » (npm run db:setup)
 │   │
 │   ├── uploads/                 ← Pièces jointes (hors dépôt Git)
 │   │
@@ -158,11 +237,13 @@ caisse-pro/
 │       │   └── database.js         ← Pool pg (PostgreSQL local)
 │       ├── middleware/
 │       │   ├── auth.js             ← Vérification JWT
-│       │   └── tenant.js           ← Isolation multi-tenant
+│       │   ├── tenant.js           ← Isolation multi-tenant
+│       │   └── setupToken.js       ← Garde SETUP_TOKEN (initialisation distante)
 │       ├── services/
 │       │   └── storage.service.js  ← Écriture/suppression des pièces sur disque
 │       ├── routes/
-│       │   └── index.js            ← Tous les routeurs REST
+│       │   ├── index.js            ← Tous les routeurs REST
+│       │   └── admin-setup.route.js ← GET /api/admin/setup (déploiement)
 │       └── controllers/
 │           ├── auth.controller.js   ← Login / me / change-password
 │           ├── journal.controller.js← CRUD mouvements + RAN + soldes
@@ -170,24 +251,44 @@ caisse-pro/
 │           ├── rubriques.controller.js ← Rubriques dynamiques CRUD
 │           └── users.controller.js  ← Gestion utilisateurs
 │
-├── frontend/                   ← Frontend React + Vite (migration progressive)
-│   ├── MIGRATION.md            ← État du portage, page par page
-│   ├── vite.config.js
-│   └── src/
-│       ├── lib/                ← api.js, format.js
-│       ├── context/            ← AppContext (session, période), ToastContext
-│       ├── components/         ← Layout, Sidebar, Topbar, NavGroup
-│       └── pages/              ← LoginPage, DashboardPage, …
-│
-└── public/                     ← SPA Frontend vanilla (toujours en service)
-    ├── index.html
-    ├── css/app.css
-    └── js/app.js
+└── frontend/                   ← Tout ce qui est servi au navigateur
+    ├── MIGRATION.md            ← État du portage, page par page
+    ├── vite.config.js
+    ├── dist/                   ← Build React — VERSIONNÉ (l'hébergeur ne builde pas)
+    │
+    ├── src/                    ← React + Vite, servi sur /v2
+    │   ├── lib/                ← api.js, format.js
+    │   ├── context/            ← AppContext (session, période), ToastContext
+    │   ├── components/         ← Layout, Sidebar, Topbar, NavGroup
+    │   └── pages/              ← LoginPage, DashboardPage, …
+    │
+    └── legacy/                 ← SPA vanilla, servie sur / (toujours en service)
+        ├── index.html
+        ├── css/app.css         ← Source unique du style, importée aussi par React
+        └── js/app.js
 ```
 
 ---
 
 ## API REST — Endpoints
+
+### Initialisation (déploiement)
+
+Protégées par `SETUP_TOKEN` (en-tête `X-Setup-Token` ou `?token=`), **sans JWT** :
+elles servent précisément quand aucun compte n'existe encore.
+
+| Méthode | Route                     | Description                                  |
+|---------|---------------------------|----------------------------------------------|
+| GET     | /api/admin/setup          | Schéma + migrations + plan comptable + admin |
+| GET     | /api/admin/setup/status   | État de la base, sans écriture               |
+
+Options de `/api/admin/setup` : `&prune=1` (désactive les comptes SYSCOHADA
+obsolètes), `&reset_admin=1` (réinitialise le mot de passe du super admin —
+volontairement désactivé par défaut).
+
+Sans token valide, ces routes répondent **comme une URL inexistante** : aucun
+401, aucun 403, rien qui confirme leur présence. Les tentatives sont
+journalisées côté serveur. Débit limité à 10 requêtes par heure.
 
 ### Auth
 | Méthode | Route                    | Description               |

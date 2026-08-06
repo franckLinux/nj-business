@@ -4,6 +4,12 @@ const { authGuard, requireRole } = require('../middleware/auth');
 const { tenantGuard }             = require('../middleware/tenant');
 const { query }                   = require('../config/database');
 
+// ── Initialisation de la base (déploiement) ───────────────────────────────
+// Monté en premier, sans authGuard : ces routes servent précisément quand
+// aucun compte n'existe encore. Elles sont protégées par SETUP_TOKEN et
+// restent invisibles (404) tant que cette variable n'est pas renseignée.
+router.use('/admin', require('./admin-setup.route'));
+
 // ── Auth ──────────────────────────────────────────────────────────────────
 const authCtrl = require('../controllers/auth.controller');
 router.post('/auth/login',           authCtrl.login);

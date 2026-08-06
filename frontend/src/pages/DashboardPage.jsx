@@ -5,7 +5,7 @@ import { useApp } from '@/context/AppContext';
 import { MOIS, TYPES_ICONS, fmt } from '@/lib/format';
 
 // Tableau de bord — reprend exactement les KPI, les couleurs et les options
-// Chart.js de loadDashboard() dans public/js/app.js.
+// Chart.js de loadDashboard() dans legacy/js/app.js.
 export default function DashboardPage() {
   const { annee, devise } = useApp();
   const [data, setData] = useState(null);

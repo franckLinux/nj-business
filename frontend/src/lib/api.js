@@ -1,4 +1,4 @@
-// Couche API — reprend le contrat de public/js/app.js :
+// Couche API — reprend le contrat de legacy/js/app.js :
 // les réponses sont renvoyées telles quelles, une erreur métier arrive
 // sous la forme { error: '...' }. Les pages migrées gardent donc le même code.
 

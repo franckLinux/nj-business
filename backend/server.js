@@ -43,8 +43,11 @@ const loginLimiter = rateLimit({
 app.use('/api/', limiter);
 app.use('/api/auth/login', loginLimiter);
 
-// ── Frontend statique ─────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// ── Frontend vanilla (legacy) ─────────────────────────────────────────────
+// Servi à la racine tant que la migration React n'est pas terminée. Le service
+// worker et le manifest restent donc à la portée « / », la PWA est intacte.
+const LEGACY_DIR = path.join(__dirname, '..', 'frontend', 'legacy');
+app.use(express.static(LEGACY_DIR));
 
 // ── Pièces jointes stockées sur disque local ──────────────────────────────
 const storage = require('./src/services/storage.service');
@@ -97,7 +100,7 @@ app.get('/api/health', async (req, res) => {
 
 // ── SPA fallback (toutes les routes inconnues → index.html) ───────────────
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  res.sendFile(path.join(LEGACY_DIR, 'index.html'));
 });
 
 // ── Gestion globale des erreurs ───────────────────────────────────────────

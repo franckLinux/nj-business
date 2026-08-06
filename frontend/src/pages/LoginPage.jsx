@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 
 // Écran de connexion — même markup et mêmes libellés que #screen-login
-// dans public/index.html.
+// dans legacy/index.html.
 export default function LoginPage() {
   const { login } = useApp();
   const [username, setUsername] = useState('');
