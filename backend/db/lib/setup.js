@@ -13,6 +13,7 @@ const { pool, describeTarget } = require('../../src/config/database');
 const { runMigrations, migrationStatus }        = require('./migrate.lib');
 const { seedPlanComptable, planComptableStatus } = require('./seed-plan.lib');
 const { seedAdmin }                              = require('./seed-admin.lib');
+const { seedConfig, configStatus }               = require('./seed-config.lib');
 
 // Clé arbitraire mais stable : deux processus CaissePro sur la même base
 // doivent choisir le même entier pour que le verrou ait un sens.
@@ -24,17 +25,21 @@ const LOCK_KEY = 8410231;
  * rapport, ce qui permet de voir DEPUIS LE NAVIGATEUR quelle étape a lâché.
  *
  * @param {object}   [opts]
- * @param {boolean}  [opts.withSchema=true]  applique schema.sql (idempotent)
- * @param {boolean}  [opts.prune=false]      désactive les comptes obsolètes
- * @param {boolean}  [opts.resetAdmin=false] réinitialise le mot de passe admin
- * @param {Function} [opts.onProgress]       (étape, texte) => void, rendu CLI
+ * @param {boolean}  [opts.withSchema=true]   applique schema.sql (idempotent)
+ * @param {boolean}  [opts.prune=false]       désactive les comptes obsolètes
+ * @param {boolean}  [opts.resetAdmin=false]  réinitialise le mot de passe admin
+ * @param {boolean}  [opts.withConfig=false]  charge db/data/config-*.js
+ * @param {boolean}  [opts.configForce=false] écrase la config existante
+ * @param {Function} [opts.onProgress]        (étape, texte) => void, rendu CLI
  * @returns {Promise<{ok: boolean, cible: string, steps: object[], duree_ms: number}>}
  */
 const runSetup = async ({
-  withSchema = true,
-  prune      = false,
-  resetAdmin = false,
-  onProgress = () => {},
+  withSchema  = true,
+  prune       = false,
+  resetAdmin  = false,
+  withConfig  = false,
+  configForce = false,
+  onProgress  = () => {},
 } = {}) => {
   const debut  = Date.now();
   const steps  = [];
@@ -69,6 +74,9 @@ const runSetup = async ({
       );
       if (ok) ok = await etape('plan_comptable', () => seedPlanComptable({ client, prune }));
       if (ok) ok = await etape('admin', () => seedAdmin({ client, resetIfExists: resetAdmin }));
+      if (ok && withConfig) {
+        ok = await etape('config_metier', () => seedConfig({ client, force: configForce }));
+      }
 
       return { ok, cible: describeTarget(), steps, duree_ms: Date.now() - debut };
     } finally {
@@ -88,6 +96,7 @@ const getStatus = async () => {
       cible:          describeTarget(),
       migrations:     await migrationStatus({ client }),
       plan_comptable: await planComptableStatus({ client }).catch((err) => ({ error: err.message })),
+      config_metier:  await configStatus({ client }).catch((err) => ({ error: err.message })),
     };
   } finally {
     client.release();

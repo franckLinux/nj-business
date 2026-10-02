@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useLocation, useParams } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import TenantSelectorModal from './TenantSelectorModal';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 
@@ -21,10 +22,21 @@ const TITLES = {
 
 export default function Layout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const params = useParams();
-  const { journaux, peutVoirAttente } = useApp();
+  const {
+    journaux, peutVoirAttente, isAdmin, user, activeTenantId,
+    tenantSelectorOpen, openTenantSelector, closeTenantSelector, selectTenant,
+  } = useApp();
   const [badgeAttente, setBadgeAttente] = useState(0);
   const [badgeDepassements, setBadgeDepassements] = useState(0);
+
+  // Un super_admin/comptable_cabinet qui se connecte sans tenant actif doit
+  // choisir un client avant de continuer — reprend le bloc de launchApp()
+  // (legacy/js/app.js l. 6278-6280) qui ouvre showTenantSelector() au boot.
+  useEffect(() => {
+    if (isAdmin && !user?.tenantId && !activeTenantId) openTenantSelector();
+  }, [isAdmin, user, activeTenantId, openTenantSelector]);
 
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
   let title = TITLES[location.pathname] || 'Tableau de bord';
@@ -54,6 +66,15 @@ export default function Layout() {
           <Outlet />
         </section>
       </main>
+      {tenantSelectorOpen && (
+        <TenantSelectorModal
+          onSelect={(id, nom, dev) => {
+            selectTenant(id, nom, dev);
+            closeTenantSelector();
+            navigate('/');
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -1,0 +1,506 @@
+diff -ruN p2/backend/db/migrations/015_affectations_arret_profils.sql p3/backend/db/migrations/015_affectations_arret_profils.sql
+--- p2/backend/db/migrations/015_affectations_arret_profils.sql	1970-01-01 00:00:00.000000000 +0000
++++ p3/backend/db/migrations/015_affectations_arret_profils.sql	2026-10-02 12:36:32.001636200 +0000
+@@ -0,0 +1,48 @@
++-- ── 015 — Décisions du 02/10/2026 ──────────────────────────────────────────
++--  1. Le comptable cabinet n'accède qu'aux clients qui lui sont AFFECTÉS
++--     (table cabinet_affectations, gérée par le super_admin).
++--  2. L'arrêt de caisse par l'encadrement est réservé au DIRECTEUR
++--     (permission journaux.arreter). Le responsable d'arrêt désigné sur le
++--     journal garde la possibilité d'arrêter SON journal.
++--  3. Le directeur gère lui-même les profils métier de son client
++--     (permission roles.edit).
++-- Requiert la 014 (rôles système). Idempotente.
++
++-- ── 1. Affectations comptable ↔ client ────────────────────────────────────
++CREATE TABLE IF NOT EXISTS cabinet_affectations (
++  user_id    UUID        NOT NULL REFERENCES users(id)   ON DELETE CASCADE,
++  tenant_id  UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
++  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
++  PRIMARY KEY (user_id, tenant_id)
++);
++CREATE INDEX IF NOT EXISTS idx_cabinet_affectations_tenant ON cabinet_affectations(tenant_id);
++-- Volontairement AUCUNE affectation automatique : après déploiement, un
++-- comptable cabinet ne voit plus aucun client tant que le super_admin ne lui
++-- en a pas affecté (Configuration → Utilisateurs, sans client sélectionné → 🏢).
++
++-- ── 2 & 3. Nouvelles permissions ──────────────────────────────────────────
++INSERT INTO permissions(code, nom, module, description) VALUES
++  ('journaux.arreter', 'Arrêter une caisse (encadrement)', 'journaux',
++   'Arrêter n''importe quel journal du client, même sans en être le responsable d''arrêt désigné'),
++  ('roles.edit',       'Gérer les profils métier',         'roles',
++   'Créer, modifier et supprimer les profils métier du client et définir leurs permissions')
++ON CONFLICT (code) DO NOTHING;
++
++INSERT INTO role_permissions(role_id, permission_code)
++SELECT r.id, v.code
++  FROM roles r
++ CROSS JOIN (VALUES ('journaux.arreter'), ('roles.edit')) AS v(code)
++ WHERE r.code = 'directeur' AND r.tenant_id IS NULL AND r.is_system
++ON CONFLICT DO NOTHING;
++
++-- Les clients ayant un plafond configuré bloqueraient ces nouveaux codes :
++-- on les y ajoute (décision : le directeur de chaque client en bénéficie).
++INSERT INTO tenant_permissions(tenant_id, permission_code)
++SELECT DISTINCT tp.tenant_id, v.code
++  FROM tenant_permissions tp
++ CROSS JOIN (VALUES ('journaux.arreter'), ('roles.edit')) AS v(code)
++ON CONFLICT DO NOTHING;
++
++-- Un comptable cabinet ne doit plus arrêter les caisses de ses clients : la
++-- 014 ne lui avait rien donné de tel, rien à retirer. Les profils métier
++-- existants ne reçoivent pas journaux.arreter (droit d'encadrement).
+diff -ruN p2/backend/src/controllers/arret_caisse.controller.js p3/backend/src/controllers/arret_caisse.controller.js
+--- p2/backend/src/controllers/arret_caisse.controller.js	2026-10-02 12:35:58.848636200 +0000
++++ p3/backend/src/controllers/arret_caisse.controller.js	2026-10-02 12:37:11.136636200 +0000
+@@ -1,8 +1,11 @@
+ const { sequelize, Journal, ArretCaisse } = require('../models');
++const { userHasPermission } = require('../services/permission.service');
+ 
+ // ── POST /api/journaux/:id/arreter ────────────────────────────────────────
+-// Autorisé au responsable_arret du journal, ou à un directeur/super_admin/
+-// comptable_cabinet (RG-03 / RG-04).
++// Autorisé au responsable_arret désigné du journal, ou à qui détient
++// journaux.arreter (par défaut : le DIRECTEUR seul — décision du 02/10/2026,
++// migration 015). Le comptable cabinet n'arrête plus les caisses.
++// super_admin : toujours autorisé (getEffectivePermissions → null).
+ const arreter = async (req, res) => {
+   const { mois, annee, commentaire, solde_final } = req.body;
+   if (!mois || !annee) return res.status(400).json({ error: 'mois et annee requis.' });
+@@ -14,8 +17,10 @@
+     });
+     if (!journal) return res.status(404).json({ error: 'Journal introuvable.' });
+     const isResponsable = journal.responsable_arret === req.user.id;
+-    const isAdmin = ['directeur', 'super_admin', 'comptable_cabinet'].includes(req.user.role);
+-    if (!isResponsable && !isAdmin) {
++    const peutArreter = isResponsable || await userHasPermission(
++      { tenantId: req.tenantId, userId: req.user.id, role: req.user.role }, 'journaux.arreter'
++    );
++    if (!peutArreter) {
+       return res.status(403).json({ error: "Vous n'êtes pas le responsable d'arrêt de ce journal." });
+     }
+ 
+diff -ruN p2/backend/src/controllers/permissions.controller.js p3/backend/src/controllers/permissions.controller.js
+--- p2/backend/src/controllers/permissions.controller.js	2026-10-02 11:59:48.530636200 +0000
++++ p3/backend/src/controllers/permissions.controller.js	2026-10-02 12:37:11.136636200 +0000
+@@ -1,12 +1,23 @@
+ // src/controllers/permissions.controller.js
+ const { sequelize, Permission, TenantPermission, UserPermission, User } = require('../models');
+ const { getEffectivePermissions, getBasePermissions, verifierCodesAccordables } = require('../services/permission.service');
++const { isCabinet } = require('../middleware/auth');
++const { peutAccederTenant } = require('../services/affectation.service');
+ 
+ // ── Catalogue des permissions ──────────────────────────────────────────────
+ 
+ const getPermissions = async (req, res) => {
+   try {
+-    const permissions = await Permission.findAll({ order: [['module', 'ASC'], ['code', 'ASC']] });
++    let permissions = await Permission.findAll({ order: [['module', 'ASC'], ['code', 'ASC']], raw: true });
++    // Hors cabinet (ex. directeur qui compose un profil métier) : seulement
++    // les permissions qu'il détient lui-même — il ne peut pas en accorder
++    // davantage (voir roles.controller → setRolePermissions).
++    if (!isCabinet(req.user)) {
++      const miennes = new Set(await getEffectivePermissions({
++        tenantId: req.user.tenantId, userId: req.user.id, role: req.user.role,
++      }) || []);
++      permissions = permissions.filter((p) => miennes.has(p.code));
++    }
+     res.json(permissions);
+   } catch (err) {
+     console.error('[Permissions]', err.message);
+@@ -43,6 +54,9 @@
+ const getTenantPermissions = async (req, res) => {
+   const { tenantId } = req.params;
+   try {
++    if (!(await peutAccederTenant(req.user, tenantId))) {
++      return res.status(403).json({ error: 'Ce client ne vous est pas affecté.' });
++    }
+     const perms = await TenantPermission.findAll({ where: { tenant_id: tenantId }, attributes: ['permission_code'], raw: true });
+     // Aucun plafond = aucune restriction : on présente tout le catalogue coché.
+     // Sinon la modale s'ouvrait vide et décocher UNE case créait un plafond
+@@ -103,6 +117,9 @@
+   try {
+     const u = await User.findByPk(userId, { attributes: ['id', 'role', 'tenant_id'], raw: true });
+     if (!u) return res.status(404).json({ error: 'Utilisateur introuvable.' });
++    if (u.tenant_id && !(await peutAccederTenant(req.user, u.tenant_id))) {
++      return res.status(403).json({ error: 'Ce client ne vous est pas affecté.' });
++    }
+ 
+     const effectives = await getEffectivePermissions({
+       tenantId: u.tenant_id, userId: u.id, role: u.role,
+diff -ruN p2/backend/src/controllers/roles.controller.js p3/backend/src/controllers/roles.controller.js
+--- p2/backend/src/controllers/roles.controller.js	2026-10-02 12:00:21.752636200 +0000
++++ p3/backend/src/controllers/roles.controller.js	2026-10-02 12:37:11.136636200 +0000
+@@ -1,6 +1,6 @@
+ // src/controllers/roles.controller.js
+ const { sequelize, Role, RolePermission } = require('../models');
+-const { verifierCodesAccordables } = require('../services/permission.service');
++const { verifierCodesAccordables, getEffectivePermissions } = require('../services/permission.service');
+ 
+ // ── Liste des rôles du tenant ────────────────────────────────────────────────
+ const getRoles = async (req, res) => {
+@@ -103,6 +103,17 @@
+     const verif = await verifierCodesAccordables(codes, role.tenant_id);
+     if (verif.erreur) return res.status(400).json({ error: verif.erreur });
+     codes = verif.codes;
++    // Anti-escalade : hors super_admin (ex. directeur, permission roles.edit),
++    // on ne peut mettre dans un profil que des permissions que l'on détient.
++    if (req.user.role !== 'super_admin') {
++      const miennes = new Set(await getEffectivePermissions({
++        tenantId: req.tenantId, userId: req.user.id, role: req.user.role,
++      }) || []);
++      const hors = codes.filter((c) => !miennes.has(c));
++      if (hors.length) {
++        return res.status(403).json({ error: `Vous ne détenez pas : ${hors.join(', ')}. Impossible de les accorder.` });
++      }
++    }
+     await sequelize.transaction(async (t) => {
+       await RolePermission.destroy({ where: { role_id: id }, transaction: t });
+       if (codes.length > 0) {
+diff -ruN p2/backend/src/controllers/tenants.controller.js p3/backend/src/controllers/tenants.controller.js
+--- p2/backend/src/controllers/tenants.controller.js	2026-10-02 12:35:58.893636200 +0000
++++ p3/backend/src/controllers/tenants.controller.js	2026-10-02 12:37:11.136636200 +0000
+@@ -1,12 +1,18 @@
+ // src/controllers/tenants.controller.js
++const { Op } = require('sequelize');
+ const { Tenant } = require('../models');
++const { query, getClient } = require('../config/database');
++const { tenantsAccessibles } = require('../services/affectation.service');
+ const { seedRubriquesDefaut } = require('./rubriques.controller');
+ const { seedJournauxDefaut } = require('./journaux.controller');
+ 
+ // ── GET /api/tenants ───────────────────────────────────────────────────────
+ const getTenants = async (req, res) => {
+   try {
++    // Comptable cabinet : uniquement ses clients affectés (migration 015).
++    const accessibles = await tenantsAccessibles(req.user);
+     const tenants = await Tenant.findAll({
++      where: accessibles === null ? {} : { id: { [Op.in]: accessibles } },
+       attributes: ['id', 'slug', 'nom', 'actif', 'created_at'],
+       order: [['nom', 'ASC']],
+     });
+@@ -52,4 +58,55 @@
+   }
+ };
+ 
+-module.exports = { getTenants, createTenant, toggleActif };
++// ── Affectations d'un comptable cabinet (super_admin) ─────────────────────
++// GET /api/users/:userId/affectations → [tenant_id…]
++const getAffectations = async (req, res) => {
++  try {
++    const { rows } = await query('SELECT tenant_id FROM cabinet_affectations WHERE user_id = $1', [req.params.userId]);
++    res.json(rows.map((r) => r.tenant_id));
++  } catch (err) {
++    console.error('[Tenants] getAffectations :', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
++  }
++};
++
++// PUT /api/users/:userId/affectations { tenantIds: [...] } — remplace la liste.
++const setAffectations = async (req, res) => {
++  const { tenantIds } = req.body;
++  if (!Array.isArray(tenantIds)) return res.status(400).json({ error: 'tenantIds doit être un tableau.' });
++  try {
++    const { rows: [u] } = await query('SELECT role, tenant_id FROM users WHERE id = $1', [req.params.userId]);
++    if (!u) return res.status(404).json({ error: 'Utilisateur introuvable.' });
++    if (u.role !== 'comptable_cabinet' || u.tenant_id) {
++      return res.status(400).json({ error: 'Les affectations ne concernent que les comptables du cabinet.' });
++    }
++    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
++    const ids = [...new Set(tenantIds.map(String))];
++    if (ids.some((id) => !UUID_RE.test(id))) return res.status(400).json({ error: 'Identifiant client invalide.' });
++    // Transaction sur UNE connexion dédiée (query() passe par le pool).
++    const client = await getClient();
++    try {
++      await client.query('BEGIN');
++      await client.query('DELETE FROM cabinet_affectations WHERE user_id = $1', [req.params.userId]);
++      if (ids.length) {
++        await client.query(
++          `INSERT INTO cabinet_affectations(user_id, tenant_id)
++           SELECT $1, t.id FROM tenants t WHERE t.id = ANY($2::uuid[])`,
++          [req.params.userId, ids]
++        );
++      }
++      await client.query('COMMIT');
++    } catch (e) {
++      await client.query('ROLLBACK').catch(() => {});
++      throw e;
++    } finally {
++      client.release();
++    }
++    res.json({ ok: true, count: ids.length });
++  } catch (err) {
++    console.error('[Tenants] setAffectations :', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
++  }
++};
++
++module.exports = { getTenants, createTenant, toggleActif, getAffectations, setAffectations };
+diff -ruN p2/backend/src/middleware/tenant.js p3/backend/src/middleware/tenant.js
+--- p2/backend/src/middleware/tenant.js	2026-10-02 11:58:45.495636200 +0000
++++ p3/backend/src/middleware/tenant.js	2026-10-02 12:36:32.043636200 +0000
+@@ -2,6 +2,7 @@
+ // Garantit que chaque requête s'exécute dans le contexte du bon tenant
+ const { query } = require('../config/database');
+ const { isCabinet } = require('./auth');
++const { peutAccederTenant } = require('../services/affectation.service');
+ 
+ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ 
+@@ -11,7 +12,8 @@
+  *     son propre client, l'en-tête et l'URL sont ignorés ;
+  *  2. req.headers['x-tenant-id'] ou req.params.tenantId — UNIQUEMENT pour un
+  *     membre du cabinet (super_admin / comptable_cabinet sans client) qui
+- *     choisit le client à administrer.
++ *     choisit le client à administrer — pour un comptable_cabinet, parmi les
++ *     clients qui lui sont affectés (cabinet_affectations, migration 015).
+  * Tout autre compte sans client (ex. caissier créé hors contexte client) est
+  * refusé : auparavant il pouvait viser n'importe quel client via l'en-tête.
+  */
+@@ -34,6 +36,18 @@
+     return res.status(400).json({ error: 'Identifiant client invalide.' });
+   }
+ 
++  // Comptable cabinet : seulement les clients qui lui sont affectés (015).
++  if (!req.user.tenantId) {
++    try {
++      if (!(await peutAccederTenant(req.user, String(tenantId)))) {
++        return res.status(403).json({ error: 'Ce client ne vous est pas affecté.' });
++      }
++    } catch (err) {
++      console.error('[Tenant] contrôle affectation :', err.message);
++      return res.status(500).json({ error: 'Erreur serveur.' });
++    }
++  }
++
+   // Vérification que le tenant existe et est actif
+   try {
+     const { rows } = await query(
+diff -ruN p2/backend/src/routes/index.js p3/backend/src/routes/index.js
+--- p2/backend/src/routes/index.js	2026-10-02 12:00:21.752636200 +0000
++++ p3/backend/src/routes/index.js	2026-10-02 12:37:11.141636200 +0000
+@@ -164,7 +164,9 @@
+ // DELETE = revenir aux droits du rôle.
+ const permCtrl = require('../controllers/permissions.controller');
+ const { updatePermissionRules, codesArrayRules } = require('../validators/permissions.validator');
+-router.get   ('/permissions',                        authGuard, requireCabinet, permCtrl.getPermissions);
++// Catalogue lisible par tout utilisateur connecté, FILTRÉ par le contrôleur
++// (hors cabinet : seulement ses propres permissions) — sert à composer un profil.
++router.get   ('/permissions',                        authGuard, permCtrl.getPermissions);
+ router.put   ('/permissions/:code',                  authGuard, requireRole('super_admin'),                    updatePermissionRules, validate, permCtrl.updatePermission);
+ router.get   ('/tenants/:tenantId/permissions',      authGuard, requireCabinet, permCtrl.getTenantPermissions);
+ router.post  ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setTenantPermissions);
+@@ -173,14 +175,17 @@
+ router.delete('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    permCtrl.resetUserPermissions);
+ 
+ // ── Rôles personnalisés ───────────────────────────────────────────────────
++// Profils métier : gérés par le directeur du client (roles.edit, décision du
++// 02/10/2026) ou le super_admin. Les rôles système (tenant_id NULL) ne sont
++// atteignables que hors client, donc par le super_admin seul.
+ const rolesCtrl = require('../controllers/roles.controller');
+ const { createRoleRules, updateRoleRules, roleIdParamRule, setRolePermissionsRules } = require('../validators/roles.validator');
+ router.get   ('/roles',                    authGuard, tenantGuard, requirePermission('users.view'), rolesCtrl.getRoles);
+-router.post  ('/roles',                    authGuard, tenantGuard, requireRole('super_admin'),             createRoleRules, validate, rolesCtrl.createRole);
+-router.put   ('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             updateRoleRules, validate, rolesCtrl.updateRole);
+-router.delete('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             roleIdParamRule, validate, rolesCtrl.deleteRole);
++router.post  ('/roles',                    authGuard, tenantGuard, requirePermission('roles.edit'),        createRoleRules, validate, rolesCtrl.createRole);
++router.put   ('/roles/:id',                authGuard, tenantGuard, requirePermission('roles.edit'),        updateRoleRules, validate, rolesCtrl.updateRole);
++router.delete('/roles/:id',                authGuard, tenantGuard, requirePermission('roles.edit'),        roleIdParamRule, validate, rolesCtrl.deleteRole);
+ router.get   ('/roles/:id/permissions',    authGuard, tenantGuard, requirePermission('users.view'), rolesCtrl.getRolePermissions);
+-router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin'),             setRolePermissionsRules, validate, rolesCtrl.setRolePermissions);
++router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requirePermission('roles.edit'),        setRolePermissionsRules, validate, rolesCtrl.setRolePermissions);
+ 
+ // ── Tenants ───────────────────────────────────────────────────────────────
+ const tenantsCtrl = require('../controllers/tenants.controller');
+@@ -188,6 +193,9 @@
+ router.get  ('/tenants',           authGuard, requireCabinet, tenantsCtrl.getTenants);
+ router.post ('/tenants',           authGuard, requireRole('super_admin'),                     createTenantRules, validate, tenantsCtrl.createTenant);
+ router.patch('/tenants/:id/actif', authGuard, requireRole('super_admin'),                     toggleActifRules, validate, tenantsCtrl.toggleActif);
++// Affectations des comptables cabinet aux clients (migration 015).
++router.get  ('/users/:userId/affectations', authGuard, requireRole('super_admin'), tenantsCtrl.getAffectations);
++router.put  ('/users/:userId/affectations', authGuard, requireRole('super_admin'), tenantsCtrl.setAffectations);
+ 
+ // ── Pièces justificatives (module de permission "pieces") ─────────────────
+ // "pieces.edit" gouverne la définition des justificatifs attendus par
+diff -ruN p2/backend/src/services/affectation.service.js p3/backend/src/services/affectation.service.js
+--- p2/backend/src/services/affectation.service.js	1970-01-01 00:00:00.000000000 +0000
++++ p3/backend/src/services/affectation.service.js	2026-10-02 12:36:32.004636200 +0000
+@@ -0,0 +1,21 @@
++// src/services/affectation.service.js
++// Périmètre d'un membre du cabinet (migration 015) :
++//   - super_admin       → tous les clients ;
++//   - comptable_cabinet → uniquement les clients de cabinet_affectations.
++const { query } = require('../config/database');
++
++/** Liste des tenant_id accessibles, ou null = tous (super_admin). */
++const tenantsAccessibles = async (user) => {
++  if (user.role === 'super_admin') return null;
++  if (user.role !== 'comptable_cabinet' || user.tenantId) return user.tenantId ? [user.tenantId] : [];
++  const { rows } = await query('SELECT tenant_id FROM cabinet_affectations WHERE user_id = $1', [user.id]);
++  return rows.map((r) => r.tenant_id);
++};
++
++const peutAccederTenant = async (user, tenantId) => {
++  if (!tenantId) return false;
++  const liste = await tenantsAccessibles(user);
++  return liste === null || liste.includes(tenantId);
++};
++
++module.exports = { tenantsAccessibles, peutAccederTenant };
+diff -ruN p2/frontend/src/components/AffectationsModal.jsx p3/frontend/src/components/AffectationsModal.jsx
+--- p2/frontend/src/components/AffectationsModal.jsx	1970-01-01 00:00:00.000000000 +0000
++++ p3/frontend/src/components/AffectationsModal.jsx	2026-10-02 12:37:49.004636200 +0000
+@@ -0,0 +1,70 @@
++import { useEffect, useState } from 'react';
++import { api } from '@/lib/api';
++
++// Affectation d'un comptable cabinet à ses clients (migration 015) :
++// il ne voit et n'administre QUE les clients cochés ici. Réservé au super_admin.
++export default function AffectationsModal({ user, onClose, onSaved }) {
++  const [tenants, setTenants] = useState(null);
++  const [coches, setCoches] = useState(new Set());
++  const [erreur, setErreur] = useState('');
++  const [saving, setSaving] = useState(false);
++
++  useEffect(() => {
++    let annule = false;
++    Promise.all([api.get('/tenants'), api.get(`/users/${user.id}/affectations`)]).then(([t, a]) => {
++      if (annule) return;
++      if (t.error || a.error) { setErreur(t.error || a.error); return; }
++      setTenants(t);
++      setCoches(new Set(a));
++    });
++    return () => { annule = true; };
++  }, [user.id]);
++
++  const basculer = (id) => setCoches((prev) => {
++    const s = new Set(prev);
++    if (s.has(id)) s.delete(id); else s.add(id);
++    return s;
++  });
++
++  const onSave = async () => {
++    setSaving(true);
++    setErreur('');
++    const res = await api.put(`/users/${user.id}/affectations`, { tenantIds: [...coches] });
++    setSaving(false);
++    if (res.error) { setErreur(res.error); return; }
++    onSaved(coches.size);
++  };
++
++  return (
++    <div className="modal-overlay" style={{ display: 'flex' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
++      <div className="modal-box" style={{ maxWidth: 520 }}>
++        <div className="modal-head" style={{ background: 'linear-gradient(135deg,#15803d,#22c55e)', borderRadius: '14px 14px 0 0' }}>
++          <div>
++            <h3 style={{ color: 'white', margin: 0, fontSize: 16 }}>🏢 Clients affectés — {user.username}</h3>
++            <p style={{ color: 'rgba(255,255,255,.75)', fontSize: 12, margin: '2px 0 0' }}>
++              {tenants ? `${coches.size} / ${tenants.length} client(s)` : ''}
++            </p>
++          </div>
++          <button className="modal-close" style={{ color: 'white', opacity: .8 }} onClick={onClose}>✕</button>
++        </div>
++        <div className="modal-body" style={{ padding: '18px 20px', maxHeight: '60vh', overflowY: 'auto' }}>
++          {!tenants ? <div className="loading-msg">Chargement…</div> : tenants.length === 0 ? (
++            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>Aucun client.</p>
++          ) : tenants.map((t) => (
++            <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
++              <input type="checkbox" checked={coches.has(t.id)} onChange={() => basculer(t.id)} />
++              <span style={{ fontWeight: 600, fontSize: 13 }}>{t.nom}</span>
++              <code style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t.slug}</code>
++              {!t.actif && <span className="statut-badge statut-rejete" style={{ marginLeft: 'auto' }}>Inactif</span>}
++            </label>
++          ))}
++        </div>
++        <div className="modal-foot" style={{ gap: 10 }}>
++          {erreur && <div className="alert-err" style={{ flex: 1, margin: 0, fontSize: 12 }}>{erreur}</div>}
++          <button className="btn-secondary" onClick={onClose}>Annuler</button>
++          <button className="btn-add" onClick={onSave} disabled={saving || !tenants}>💾 Enregistrer</button>
++        </div>
++      </div>
++    </div>
++  );
++}
+diff -ruN p2/frontend/src/components/PermModuleGrid.jsx p3/frontend/src/components/PermModuleGrid.jsx
+--- p2/frontend/src/components/PermModuleGrid.jsx	2026-10-02 12:37:48.989636200 +0000
++++ p3/frontend/src/components/PermModuleGrid.jsx	2026-10-02 12:37:49.026636200 +0000
+@@ -14,6 +14,7 @@
+   journaux: { label: 'Caisses & journaux', color: '#e0e7ff', text: '#4338ca' },
+   pieces: { label: 'Pièces justificatives', color: '#fef2f2', text: '#b91c1c' },
+   banque: { label: 'Banque', color: '#f0f9ff', text: '#0c4a6e' },
++  roles: { label: 'Profils métier', color: '#fff7ed', text: '#9a3412' },
+ };
+ 
+ export const moduleMeta = (mod) => MODULE_META[mod] || { label: mod, color: '#f1f5f9', text: '#64748b' };
+diff -ruN p2/frontend/src/components/config/UsersTab.jsx p3/frontend/src/components/config/UsersTab.jsx
+--- p2/frontend/src/components/config/UsersTab.jsx	2026-10-02 11:58:45.497636200 +0000
++++ p3/frontend/src/components/config/UsersTab.jsx	2026-10-02 12:37:49.027636200 +0000
+@@ -3,6 +3,7 @@
+ import { useToast } from '@/context/ToastContext';
+ import { api } from '@/lib/api';
+ import PermissionsAssignModal from '@/components/PermissionsAssignModal';
++import AffectationsModal from '@/components/AffectationsModal';
+ 
+ // Reprend loadTabUsers()/openModalUser()/saveUser()/openModalResetPwd()/toggleUser()/deleteUser()
+ // de legacy/js/app.js (l. 4774-5170).
+@@ -209,7 +210,7 @@
+ }
+ 
+ export default function UsersTab() {
+-  const { user: me, can } = useApp();
++  const { user: me, can, activeTenantId } = useApp();
+   const toast = useToast();
+   const [users, setUsers] = useState(null);
+   const [erreur, setErreur] = useState('');
+@@ -302,6 +303,9 @@
+                         {canEdit && <button className="btn-icon" onClick={() => setModal({ edit: u })}>✏️</button>}
+                         {canEdit && <button className="btn-icon" onClick={() => setModal({ reset: u })}>🔑</button>}
+                         {isSuperAdmin && <button className="btn-icon" title="Permissions" onClick={() => setModal({ perms: u })}>🔐</button>}
++                        {isSuperAdmin && !activeTenantId && u.role === 'comptable_cabinet' && (
++                          <button className="btn-icon" title="Clients affectés" onClick={() => setModal({ affect: u })}>🏢</button>
++                        )}
+                         {canEdit && <button className={'btn-icon' + (u.actif ? ' danger' : '')} onClick={() => onToggle(u.id)} disabled={isMe}>{u.actif ? '⏸' : '▶️'}</button>}
+                         {canDelete && !isMe && <button className="btn-icon danger" onClick={() => onDelete(u.id, u.username)}>✕</button>}
+                       </div>
+@@ -329,6 +333,13 @@
+           onDone={() => { setModal(null); toast('Mot de passe réinitialisé ✓', 'success'); }}
+         />
+       )}
++      {modal?.affect && (
++        <AffectationsModal
++          user={modal.affect}
++          onClose={() => setModal(null)}
++          onSaved={(n) => { setModal(null); toast(`${n} client${n > 1 ? 's' : ''} affecté${n > 1 ? 's' : ''}.`, 'success'); }}
++        />
++      )}
+       {modal?.perms && (
+         <PermissionsAssignModal
+           title={`Permissions — ${modal.perms.username}`}
+diff -ruN p2/frontend/src/pages/ConfigPage.jsx p3/frontend/src/pages/ConfigPage.jsx
+--- p2/frontend/src/pages/ConfigPage.jsx	2026-10-02 12:35:58.946636200 +0000
++++ p3/frontend/src/pages/ConfigPage.jsx	2026-10-02 12:37:49.026636200 +0000
+@@ -9,7 +9,8 @@
+ import RolesTab from '@/components/config/RolesTab';
+ 
+ // Reprend loadConfig()/switchTab() de legacy/js/app.js (l. 3913-3948).
+-// Les 6 onglets (+ Rôles pour super_admin) sont maintenant tous portés.
++// Les 6 onglets (+ Rôles : super_admin, ou directeur via roles.edit — décision
++// du 02/10/2026) sont maintenant tous portés.
+ const TABS = [
+   { id: 'entite', label: '🏢 Entité', Comp: EntiteTab },
+   { id: 'users', label: '👥 Utilisateurs', Comp: UsersTab },
+@@ -20,11 +21,11 @@
+ ];
+ 
+ export default function ConfigPage() {
+-  const { user } = useApp();
+-  const isSuperAdmin = user?.role === 'super_admin';
++  const { user, can } = useApp();
++  const voitRoles = user?.role === 'super_admin' || can('roles.edit');
+   const [active, setActive] = useState('entite');
+ 
+-  const tabs = isSuperAdmin ? [...TABS, { id: 'roles', label: '🎭 Rôles', Comp: RolesTab }] : TABS;
++  const tabs = voitRoles ? [...TABS, { id: 'roles', label: '🎭 Rôles', Comp: RolesTab }] : TABS;
+   const ActiveComp = tabs.find((t) => t.id === active)?.Comp || EntiteTab;
+ 
+   return (

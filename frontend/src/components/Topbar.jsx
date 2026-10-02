@@ -1,11 +1,14 @@
 import { useApp } from '@/context/AppContext';
 import { MOIS, anneeCourante } from '@/lib/format';
+import NotifBell from './NotifBell';
+import SyncBadge from './SyncBadge';
+import InstallPwaButton from './InstallPwaButton';
 
-// Barre supérieure : titre de page, sélecteur de période, badges tenant/devise.
-// Le sélecteur d'années couvre l'année en cours et les 5 précédentes,
-// comme initPeriod() dans l'app vanilla.
+// Barre supérieure : titre de page, sélecteur de période, cloche de
+// notifications, badges tenant/devise. Le sélecteur d'années couvre l'année
+// en cours et les 5 précédentes, comme initPeriod() dans l'app vanilla.
 export default function Topbar({ title }) {
-  const { mois, setMois, annee, setAnnee, tenantLabel, devise, isAdmin } = useApp();
+  const { mois, setMois, annee, setAnnee, tenantLabel, devise, isAdmin, openTenantSelector } = useApp();
 
   const yr = anneeCourante();
   const annees = Array.from({ length: 6 }, (_, i) => yr - i);
@@ -25,15 +28,19 @@ export default function Topbar({ title }) {
       </div>
 
       <div className="topbar-right">
+        <NotifBell />
         <span
           className="tenant-badge"
           id="tenant-badge"
           style={isAdmin ? { cursor: 'pointer' } : undefined}
-          title={isAdmin ? 'Sélection du client — à migrer' : undefined}
+          title={isAdmin ? 'Cliquez pour changer de client' : undefined}
+          onClick={isAdmin ? openTenantSelector : undefined}
         >
           {tenantLabel}
         </span>
         <span className="devise-badge" id="devise-badge">{devise}</span>
+        <SyncBadge />
+        <InstallPwaButton />
       </div>
     </header>
   );

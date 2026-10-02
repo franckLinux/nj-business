@@ -1,0 +1,34 @@
+{
+  "name": "NJ Caisse Pro — Gestion de Caisse",
+  "short_name": "NJ Caisse Pro",
+  "description": "Application de gestion de caisse commerciale — Cabinet Expert-Comptable CEMAC",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1a2b4a",
+  "theme_color": "#1a2b4a",
+  "lang": "fr",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "categories": ["finance", "business"],
+  "shortcuts": [
+    {
+      "name": "Journaux de caisse",
+      "url": "/journaux-recap",
+      "description": "Ouvrir la vue d'ensemble des journaux de caisse"
+    },
+    {
+      "name": "Demande de fonds",
+      "url": "/appel-fonds",
+      "description": "Ouvrir la demande de fonds"
+    }
+  ]
+}

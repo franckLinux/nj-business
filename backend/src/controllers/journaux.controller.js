@@ -1,7 +1,8 @@
 // src/controllers/journaux.controller.js
 // Gestion dynamique des journaux (Caisse, OM, MOMO, Banque, Carte prépayée, Autre)
 // + Génération automatique du code par type (CS1, BQ1, OM1, MM1, CP1, AU1)
-const { query } = require('../config/database');
+const { Op } = require('sequelize');
+const { Journal, Mouvement, User } = require('../models');
 
 const TYPES_JOURNAUX = {
   caisse:         { label: 'Journal de Caisse',     icon: '💵' },
@@ -26,10 +27,11 @@ const PREFIX_BY_TYPE = {
 // Cherche tous les codes existants du tenant qui matchent ^PREFIX\d+$,
 // extrait le max et retourne max+1.
 const nextNumberForPrefix = async (tenantId, prefix) => {
-  const { rows } = await query(
-    `SELECT code FROM journaux WHERE tenant_id = $1 AND code ~ $2`,
-    [tenantId, `^${prefix}[0-9]+$`]
-  );
+  const rows = await Journal.findAll({
+    where: { tenant_id: tenantId, code: { [Op.regexp]: `^${prefix}[0-9]+$` } },
+    attributes: ['code'],
+    raw: true,
+  });
   if (rows.length === 0) return 1;
   const nums = rows
     .map(r => parseInt(r.code.substring(prefix.length), 10))
@@ -58,17 +60,22 @@ const getNextCode = async (req, res) => {
 // ── GET /api/journaux ─────────────────────────────────────────────────────
 const getJournaux = async (req, res) => {
   try {
-    const { rows } = await query(
-      `SELECT j.*,
-              us.username AS responsable_saisie_nom,
-              ua.username AS responsable_arret_nom
-       FROM journaux j
-       LEFT JOIN users us ON us.id = j.responsable_saisie
-       LEFT JOIN users ua ON ua.id = j.responsable_arret
-       WHERE j.tenant_id = $1
-       ORDER BY j.ordre, j.type, j.nom`,
-      [req.tenantId]
-    );
+    const journaux = await Journal.findAll({
+      where: { tenant_id: req.tenantId },
+      include: [
+        { model: User, as: 'responsableSaisie', attributes: ['username'], required: false },
+        { model: User, as: 'responsableArret', attributes: ['username'], required: false },
+      ],
+      order: [['ordre', 'ASC'], ['type', 'ASC'], ['nom', 'ASC']],
+    });
+    const rows = journaux.map((j) => {
+      const { responsableSaisie, responsableArret, ...rest } = j.toJSON();
+      return {
+        ...rest,
+        responsable_saisie_nom: responsableSaisie ? responsableSaisie.username : null,
+        responsable_arret_nom: responsableArret ? responsableArret.username : null,
+      };
+    });
     const grouped = {};
     rows.forEach(j => {
       if (!grouped[j.type]) grouped[j.type] = [];
@@ -84,9 +91,6 @@ const getJournaux = async (req, res) => {
 // ── POST /api/journaux ────────────────────────────────────────────────────
 // Si le client ne fournit pas de code, on le génère automatiquement.
 const createJournal = async (req, res) => {
-  if (!['directeur','super_admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Réservé au directeur.' });
-  }
   let { code, nom, type, devise, responsable_saisie, responsable_arret, ordre } = req.body;
   if (!nom || !type) {
     return res.status(400).json({ error: 'Nom et type obligatoires.' });
@@ -97,7 +101,6 @@ const createJournal = async (req, res) => {
     });
   }
 
-  // Auto-génération du code si absent
   try {
     if (!code || !code.trim()) {
       const prefix = PREFIX_BY_TYPE[type];
@@ -107,27 +110,27 @@ const createJournal = async (req, res) => {
       code = code.trim().toUpperCase();
     }
 
-    const { rows } = await query(
-      `INSERT INTO journaux(tenant_id,code,nom,type,devise,responsable_saisie,responsable_arret,ordre)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [req.tenantId, code, nom, type, devise||'FCFA',
-       responsable_saisie||null, responsable_arret||null, ordre||0]
-    );
-    res.status(201).json(rows[0]);
+    const journal = await Journal.create({
+      tenant_id: req.tenantId, code, nom, type, devise: devise || 'FCFA',
+      responsable_saisie: responsable_saisie || null,
+      responsable_arret: responsable_arret || null,
+      ordre: ordre || 0,
+    });
+    res.status(201).json(journal);
   } catch (err) {
-    if (err.code === '23505') {
+    if (err.name === 'SequelizeUniqueConstraintError') {
       // Course concurrente : retry une fois avec un nouveau numéro
       try {
         const prefix = PREFIX_BY_TYPE[type];
         const n      = await nextNumberForPrefix(req.tenantId, prefix);
         const retryCode = `${prefix}${n}`;
-        const { rows } = await query(
-          `INSERT INTO journaux(tenant_id,code,nom,type,devise,responsable_saisie,responsable_arret,ordre)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-          [req.tenantId, retryCode, nom, type, devise||'FCFA',
-           responsable_saisie||null, responsable_arret||null, ordre||0]
-        );
-        return res.status(201).json(rows[0]);
+        const journal = await Journal.create({
+          tenant_id: req.tenantId, code: retryCode, nom, type, devise: devise || 'FCFA',
+          responsable_saisie: responsable_saisie || null,
+          responsable_arret: responsable_arret || null,
+          ordre: ordre || 0,
+        });
+        return res.status(201).json(journal);
       } catch (e2) {
         return res.status(409).json({ error: 'Ce code de journal existe déjà.' });
       }
@@ -139,19 +142,20 @@ const createJournal = async (req, res) => {
 
 // ── PUT /api/journaux/:id ─────────────────────────────────────────────────
 const updateJournal = async (req, res) => {
-  if (!['directeur','super_admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Réservé au directeur.' });
-  }
   const { nom, devise, responsable_saisie, responsable_arret, ordre, actif } = req.body;
   try {
-    const { rows } = await query(
-      `UPDATE journaux SET nom=$1, devise=$2, responsable_saisie=$3,
-         responsable_arret=$4, ordre=$5, actif=$6
-       WHERE id=$7 AND tenant_id=$8 RETURNING *`,
-      [nom, devise||'FCFA', responsable_saisie||null, responsable_arret||null,
-       ordre||0, actif!==false, req.params.id, req.tenantId]
+    const [count, rows] = await Journal.update(
+      {
+        nom,
+        devise: devise || 'FCFA',
+        responsable_saisie: responsable_saisie || null,
+        responsable_arret: responsable_arret || null,
+        ordre: ordre || 0,
+        actif: actif !== false,
+      },
+      { where: { id: req.params.id, tenant_id: req.tenantId }, returning: true }
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'Journal introuvable.' });
+    if (count === 0) return res.status(404).json({ error: 'Journal introuvable.' });
     res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
@@ -160,19 +164,18 @@ const updateJournal = async (req, res) => {
 
 // ── DELETE /api/journaux/:id ──────────────────────────────────────────────
 const deleteJournal = async (req, res) => {
-  if (!['directeur','super_admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Réservé au directeur.' });
+  try {
+    const count = await Mouvement.count({ where: { journal_id: req.params.id } });
+    if (count > 0) {
+      return res.status(400).json({
+        error: `Ce journal contient ${count} mouvement(s). Désactivez-le plutôt que de le supprimer.`,
+      });
+    }
+    await Journal.destroy({ where: { id: req.params.id, tenant_id: req.tenantId } });
+    res.json({ message: 'Journal supprimé.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur.' });
   }
-  const { rows } = await query(
-    'SELECT COUNT(*) AS cnt FROM journal WHERE journal_id=$1', [req.params.id]
-  );
-  if (parseInt(rows[0].cnt) > 0) {
-    return res.status(400).json({
-      error: `Ce journal contient ${rows[0].cnt} mouvement(s). Désactivez-le plutôt que de le supprimer.`
-    });
-  }
-  await query('DELETE FROM journaux WHERE id=$1 AND tenant_id=$2', [req.params.id, req.tenantId]);
-  res.json({ message: 'Journal supprimé.' });
 };
 
 // ── Seed journaux par défaut pour un nouveau tenant ──────────────────────
@@ -186,11 +189,10 @@ const seedJournauxDefaut = async (tenantId) => {
     { code:'CP1', nom:'Carte Prépayée',      type:'carte_prepayee', ordre:5 },
   ];
   for (const j of defauts) {
-    await query(
-      `INSERT INTO journaux(tenant_id,code,nom,type,ordre)
-       VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,code) DO NOTHING`,
-      [tenantId, j.code, j.nom, j.type, j.ordre]
-    );
+    await Journal.findOrCreate({
+      where: { tenant_id: tenantId, code: j.code },
+      defaults: { nom: j.nom, type: j.type, ordre: j.ordre },
+    });
   }
 };
 

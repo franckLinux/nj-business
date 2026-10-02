@@ -1,27 +1,24 @@
 // src/controllers/notifications.controller.js
 // Cloche in-app : chaque utilisateur voit SES notifications (destinataire_id = lui).
-const { query } = require('../config/database');
+const { Notification } = require('../models');
 
 // GET /api/notifications?limit=&only_unread=
 const list = async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 30, 100);
   const onlyUnread = req.query.only_unread === 'true';
   try {
-    const { rows } = await query(
-      `SELECT id, type, titre, message, ref_type, ref_id, lu, created_at
-         FROM notifications
-        WHERE tenant_id=$1 AND destinataire_id=$2
-          ${onlyUnread ? 'AND lu=false' : ''}
-        ORDER BY created_at DESC
-        LIMIT ${limit}`,
-      [req.tenantId, req.user.id]
-    );
-    const { rows: cnt } = await query(
-      `SELECT COUNT(*)::int AS nb FROM notifications
-        WHERE tenant_id=$1 AND destinataire_id=$2 AND lu=false`,
-      [req.tenantId, req.user.id]
-    );
-    res.json({ notifications: rows, non_lus: cnt[0].nb });
+    const where = { tenant_id: req.tenantId, destinataire_id: req.user.id };
+    if (onlyUnread) where.lu = false;
+    const notifications = await Notification.findAll({
+      where,
+      attributes: ['id', 'type', 'titre', 'message', 'ref_type', 'ref_id', 'lu', 'created_at'],
+      order: [['created_at', 'DESC']],
+      limit,
+    });
+    const non_lus = await Notification.count({
+      where: { tenant_id: req.tenantId, destinataire_id: req.user.id, lu: false },
+    });
+    res.json({ notifications, non_lus });
   } catch (err) {
     console.error('[Notifications] list :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
@@ -31,12 +28,10 @@ const list = async (req, res) => {
 // GET /api/notifications/count
 const count = async (req, res) => {
   try {
-    const { rows } = await query(
-      `SELECT COUNT(*)::int AS nb FROM notifications
-        WHERE tenant_id=$1 AND destinataire_id=$2 AND lu=false`,
-      [req.tenantId, req.user.id]
-    );
-    res.json({ nb: rows[0].nb });
+    const nb = await Notification.count({
+      where: { tenant_id: req.tenantId, destinataire_id: req.user.id, lu: false },
+    });
+    res.json({ nb });
   } catch (err) {
     console.error('[Notifications] count :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
@@ -46,10 +41,9 @@ const count = async (req, res) => {
 // PATCH /api/notifications/:id/lu
 const markRead = async (req, res) => {
   try {
-    await query(
-      `UPDATE notifications SET lu=true
-        WHERE id=$1 AND tenant_id=$2 AND destinataire_id=$3`,
-      [parseInt(req.params.id), req.tenantId, req.user.id]
+    await Notification.update(
+      { lu: true },
+      { where: { id: parseInt(req.params.id, 10), tenant_id: req.tenantId, destinataire_id: req.user.id } }
     );
     res.json({ ok: true });
   } catch (err) {
@@ -60,10 +54,9 @@ const markRead = async (req, res) => {
 // PATCH /api/notifications/lu-tout
 const markAllRead = async (req, res) => {
   try {
-    await query(
-      `UPDATE notifications SET lu=true
-        WHERE tenant_id=$1 AND destinataire_id=$2 AND lu=false`,
-      [req.tenantId, req.user.id]
+    await Notification.update(
+      { lu: true },
+      { where: { tenant_id: req.tenantId, destinataire_id: req.user.id, lu: false } }
     );
     res.json({ ok: true });
   } catch (err) {

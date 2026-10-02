@@ -9,7 +9,7 @@
 // La logique et ses garanties (idempotence, transaction, respect des comptes
 // 'custom') vivent dans db/lib/seed-plan.lib.js.
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { close, describeTarget } = require('../src/config/database');
 const {

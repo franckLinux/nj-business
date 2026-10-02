@@ -1,5 +1,5 @@
 // src/controllers/rubriques.controller.js
-const { query } = require('../config/database');
+const { Rubrique } = require('../models');
 
 const RUBRIQUES_DEFAUT = [
   { code:'ABQ',  intitule:'APPROV BANQUE',              type:'entree',  est_virement_interne:false, code_comptable:'',     ordre:1 },
@@ -29,18 +29,13 @@ const RUBRIQUES_DEFAUT = [
 // GET /api/rubriques
 const getRubriques = async (req, res) => {
   try {
-    // Patch auto : ajouter code_comptable si absent
-    await query('ALTER TABLE rubriques ADD COLUMN IF NOT EXISTS code_comptable TEXT DEFAULT \'\'').catch(()=>{});
-
-    const { rows } = await query(
-      `SELECT * FROM rubriques
-       WHERE tenant_id=$1 AND actif=true
-       ORDER BY type, ordre, code`,
-      [req.tenantId]
-    );
+    const rows = await Rubrique.findAll({
+      where: { tenant_id: req.tenantId, actif: true },
+      order: [['type', 'ASC'], ['ordre', 'ASC'], ['code', 'ASC']],
+    });
     res.json({
-      entrees:  rows.filter(r => r.type === 'entree'),
-      depenses: rows.filter(r => r.type === 'depense'),
+      entrees: rows.filter((r) => r.type === 'entree'),
+      depenses: rows.filter((r) => r.type === 'depense'),
     });
   } catch (err) {
     console.error('[Rubriques] getRubriques :', err.message);
@@ -50,61 +45,70 @@ const getRubriques = async (req, res) => {
 
 // POST /api/rubriques
 const createRubrique = async (req, res) => {
-  if (!['directeur','super_admin','comptable_cabinet'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Action non autorisée.' });
-  }
   const { code, intitule, type, est_virement_interne, code_comptable, ordre } = req.body;
   if (!code || !intitule || !type) {
     return res.status(400).json({ error: 'Code, intitulé et type requis.' });
   }
   try {
-    const { rows } = await query(
-      `INSERT INTO rubriques(tenant_id, code, intitule, type, est_virement_interne, code_comptable, ordre)
-       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.tenantId, code.toUpperCase(), intitule, type,
-       est_virement_interne || false, code_comptable || '', ordre || 0]
-    );
-    res.status(201).json(rows[0]);
+    const rubrique = await Rubrique.create({
+      tenant_id: req.tenantId,
+      code: code.toUpperCase(),
+      intitule,
+      type,
+      est_virement_interne: est_virement_interne || false,
+      code_comptable: code_comptable || '',
+      ordre: ordre || 0,
+    });
+    res.status(201).json(rubrique);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Ce code existe déjà.' });
+    if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: 'Ce code existe déjà.' });
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
 
 // PUT /api/rubriques/:id
 const updateRubrique = async (req, res) => {
-  if (!['directeur','super_admin','comptable_cabinet'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Action non autorisée.' });
-  }
   const { intitule, est_virement_interne, code_comptable, ordre, actif } = req.body;
   try {
-    const { rows } = await query(
-      `UPDATE rubriques
-       SET intitule=$1, est_virement_interne=$2, code_comptable=$3, ordre=$4, actif=$5
-       WHERE id=$6 AND tenant_id=$7 RETURNING *`,
-      [intitule, est_virement_interne !== undefined ? est_virement_interne : false,
-       code_comptable || '', ordre || 0, actif !== false,
-       req.params.id, req.tenantId]
+    const [count, rows] = await Rubrique.update(
+      {
+        intitule,
+        est_virement_interne: est_virement_interne !== undefined ? est_virement_interne : false,
+        code_comptable: code_comptable || '',
+        ordre: ordre || 0,
+        actif: actif !== false,
+      },
+      { where: { id: req.params.id, tenant_id: req.tenantId }, returning: true }
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'Rubrique introuvable.' });
+    if (count === 0) return res.status(404).json({ error: 'Rubrique introuvable.' });
     res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
 
+// ── DELETE /api/rubriques/:id ─────────────────────────────────────────────
+// Désactivation logique (actif=false) : on ne supprime jamais une rubrique
+// déjà référencée par des mouvements existants.
+const deleteRubrique = async (req, res) => {
+  await Rubrique.update({ actif: false }, { where: { id: req.params.id, tenant_id: req.tenantId } });
+  res.json({ message: 'Rubrique désactivée.' });
+};
+
 // Seed rubriques par défaut pour un nouveau tenant
 const seedRubriquesDefaut = async (tenantId) => {
-  // Patch auto colonne
-  await query('ALTER TABLE rubriques ADD COLUMN IF NOT EXISTS code_comptable TEXT DEFAULT \'\'').catch(()=>{});
   for (const r of RUBRIQUES_DEFAUT) {
-    await query(
-      `INSERT INTO rubriques(tenant_id, code, intitule, type, est_virement_interne, code_comptable, ordre)
-       VALUES($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT(tenant_id, code) DO NOTHING`,
-      [tenantId, r.code, r.intitule, r.type, r.est_virement_interne, r.code_comptable, r.ordre]
-    );
+    await Rubrique.findOrCreate({
+      where: { tenant_id: tenantId, code: r.code },
+      defaults: {
+        intitule: r.intitule,
+        type: r.type,
+        est_virement_interne: r.est_virement_interne,
+        code_comptable: r.code_comptable,
+        ordre: r.ordre,
+      },
+    });
   }
 };
 
-module.exports = { getRubriques, createRubrique, updateRubrique, seedRubriquesDefaut, RUBRIQUES_DEFAUT };
+module.exports = { getRubriques, createRubrique, updateRubrique, deleteRubrique, seedRubriquesDefaut, RUBRIQUES_DEFAUT };

@@ -23,7 +23,8 @@
       "Bash(node --check public/sw.js)",
       "Bash(node --check public/js/sw.js)",
       "Bash(node --check \"src/controllers/journal.controller.js\")",
-      "Bash(node --check \"db/run_migration_mouvements_attente.js\")"
+      "Bash(node --check \"db/run_migration_mouvements_attente.js\")",
+      "Bash(node tools/export-config.js)"
     ]
   }
 }

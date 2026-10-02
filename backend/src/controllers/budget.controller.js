@@ -1,5 +1,5 @@
-// src/controllers/budget.controller.js
-const { query, getClient } = require('../config/database');
+const { Op } = require('sequelize');
+const { sequelize, Budget, BudgetValidation, DepenseAttente, RessourceAttente } = require('../models');
 
 // ── GET /api/budget?mois=&annee= ──────────────────────────────────────────
 // Renvoie le budget APPLICABLE au mois demandé :
@@ -11,15 +11,13 @@ const getBudget = async (req, res) => {
   if (!mois || !annee) {
     return res.status(400).json({ error: 'Paramètres mois et annee requis.' });
   }
-  const an = parseInt(annee);
+  const an = parseInt(annee, 10);
   try {
     // 1. Budget applicable (saisi un autre mois pour s'appliquer ici)
-    let budgetRows = (await query(
-      `SELECT * FROM budget
-       WHERE tenant_id=$1 AND mois_applic=$2 AND annee_applic=$3
-       ORDER BY rubrique_code`,
-      [req.tenantId, mois, an]
-    )).rows;
+    let budgetRows = await Budget.findAll({
+      where: { tenant_id: req.tenantId, mois_applic: mois, annee_applic: an },
+      order: [['rubrique_code', 'ASC']],
+    });
 
     // Mois de saisie (pour retrouver la bonne validation)
     let moisSaisie = mois, anneeSaisie = an;
@@ -28,30 +26,28 @@ const getBudget = async (req, res) => {
       anneeSaisie = budgetRows[0].annee;
     } else {
       // 2. Fallback : budget saisi directement ce mois
-      budgetRows = (await query(
-        `SELECT * FROM budget
-         WHERE tenant_id=$1 AND mois=$2 AND annee=$3
-         ORDER BY rubrique_code`,
-        [req.tenantId, mois, an]
-      )).rows;
+      budgetRows = await Budget.findAll({
+        where: { tenant_id: req.tenantId, mois, annee: an },
+        order: [['rubrique_code', 'ASC']],
+      });
     }
 
-    const [validRes, depAttRes, resAttRes] = await Promise.all([
-      query('SELECT statut, commentaire, validated_at FROM budget_validation WHERE tenant_id=$1 AND mois=$2 AND annee=$3',
-            [req.tenantId, moisSaisie, anneeSaisie]),
-      query('SELECT * FROM depenses_attente WHERE tenant_id=$1 AND mois=$2 AND annee=$3 ORDER BY id',
-            [req.tenantId, mois, an]),
-      query('SELECT * FROM ressources_attente WHERE tenant_id=$1 AND mois=$2 AND annee=$3 ORDER BY id',
-            [req.tenantId, mois, an]),
+    const [validation, depAtt, resAtt] = await Promise.all([
+      BudgetValidation.findOne({
+        where: { tenant_id: req.tenantId, mois: moisSaisie, annee: anneeSaisie },
+        attributes: ['statut', 'commentaire', 'validated_at'],
+      }),
+      DepenseAttente.findAll({ where: { tenant_id: req.tenantId, mois, annee: an }, order: [['id', 'ASC']] }),
+      RessourceAttente.findAll({ where: { tenant_id: req.tenantId, mois, annee: an }, order: [['id', 'ASC']] }),
     ]);
 
     res.json({
       dotations:          budgetRows,
-      validation:         validRes.rows[0] || { statut: 'en_attente' },
+      validation:         validation || { statut: 'en_attente' },
       mois_saisie:        moisSaisie,
       annee_saisie:       anneeSaisie,
-      depenses_attente:   depAttRes.rows,
-      ressources_attente: resAttRes.rows,
+      depenses_attente:   depAtt,
+      ressources_attente: resAtt,
     });
   } catch (err) {
     console.error('[Budget] getBudget :', err.message);
@@ -66,15 +62,18 @@ const setBudgetLine = async (req, res) => {
     return res.status(400).json({ error: 'Champs obligatoires manquants.' });
   }
   try {
-    await query(
-      `INSERT INTO budget(tenant_id,mois,annee,rubrique_code,intitule,montant,mois_applic,annee_applic)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT(tenant_id,mois,annee,rubrique_code) DO UPDATE SET
-         intitule=EXCLUDED.intitule, montant=EXCLUDED.montant,
-         mois_applic=EXCLUDED.mois_applic, annee_applic=EXCLUDED.annee_applic`,
-      [req.tenantId, mois, parseInt(annee), rubrique_code, intitule,
-       parseFloat(montant)||0, mois_applic||'', parseInt(annee_applic)||0]
-    );
+    await sequelize.transaction(async (t) => {
+      const [row] = await Budget.findOrCreate({
+        where: { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), rubrique_code },
+        defaults: { intitule },
+        transaction: t, lock: t.LOCK.UPDATE,
+      });
+      row.intitule = intitule;
+      row.montant = parseFloat(montant) || 0;
+      row.mois_applic = mois_applic || '';
+      row.annee_applic = parseInt(annee_applic, 10) || 0;
+      await row.save({ transaction: t });
+    });
     res.json({ message: 'Dotation mise à jour.' });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
@@ -84,18 +83,19 @@ const setBudgetLine = async (req, res) => {
 // ── POST /api/budget/validation ───────────────────────────────────────────
 const setValidation = async (req, res) => {
   const { mois, annee, statut, commentaire } = req.body;
-  if (!['directeur','super_admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Validation réservée au directeur.' });
-  }
   try {
-    await query(
-      `INSERT INTO budget_validation(tenant_id,mois,annee,statut,commentaire,validated_by,validated_at)
-       VALUES($1,$2,$3,$4,$5,$6,NOW())
-       ON CONFLICT(tenant_id,mois,annee) DO UPDATE SET
-         statut=EXCLUDED.statut, commentaire=EXCLUDED.commentaire,
-         validated_by=EXCLUDED.validated_by, validated_at=EXCLUDED.validated_at`,
-      [req.tenantId, mois, parseInt(annee), statut, commentaire||'', req.user.id]
-    );
+    await sequelize.transaction(async (t) => {
+      const [row] = await BudgetValidation.findOrCreate({
+        where: { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10) },
+        defaults: {},
+        transaction: t, lock: t.LOCK.UPDATE,
+      });
+      row.statut = statut;
+      row.commentaire = commentaire || '';
+      row.validated_by = req.user.id;
+      row.validated_at = new Date();
+      await row.save({ transaction: t });
+    });
     res.json({ message: `Budget ${statut}.` });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
@@ -106,12 +106,20 @@ const setValidation = async (req, res) => {
 const addDepenseAttente = async (req, res) => {
   const { mois, annee, rubrique_code, intitule, montant } = req.body;
   try {
-    const { rows } = await query(
-      `INSERT INTO depenses_attente(tenant_id,mois,annee,rubrique_code,intitule,montant)
-       VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [req.tenantId, mois, parseInt(annee), rubrique_code, intitule, parseFloat(montant)||0]
-    );
-    res.status(201).json(rows[0]);
+    const row = await DepenseAttente.create({
+      tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), rubrique_code, intitule, montant: parseFloat(montant) || 0,
+    });
+    res.status(201).json(row);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+
+// ── DELETE /api/budget/:id ────────────────────────────────────────────────
+const deleteBudgetLine = async (req, res) => {
+  try {
+    await Budget.destroy({ where: { id: req.params.id, tenant_id: req.tenantId } });
+    res.json({ message: 'Ligne budget supprimée.' });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
@@ -119,21 +127,22 @@ const addDepenseAttente = async (req, res) => {
 
 // ── DELETE /api/budget/depenses-attente/:id ───────────────────────────────
 const deleteDepenseAttente = async (req, res) => {
-  await query('DELETE FROM depenses_attente WHERE id=$1 AND tenant_id=$2',
-              [parseInt(req.params.id), req.tenantId]);
-  res.json({ message: 'Dépense supprimée.' });
+  try {
+    await DepenseAttente.destroy({ where: { id: parseInt(req.params.id, 10), tenant_id: req.tenantId } });
+    res.json({ message: 'Dépense supprimée.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
 };
 
 // ── POST /api/budget/ressources-attente ───────────────────────────────────
 const addRessourceAttente = async (req, res) => {
   const { mois, annee, rubrique_code, intitule, montant } = req.body;
   try {
-    const { rows } = await query(
-      `INSERT INTO ressources_attente(tenant_id,mois,annee,rubrique_code,intitule,montant)
-       VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [req.tenantId, mois, parseInt(annee), rubrique_code, intitule, parseFloat(montant)||0]
-    );
-    res.status(201).json(rows[0]);
+    const row = await RessourceAttente.create({
+      tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), rubrique_code, intitule, montant: parseFloat(montant) || 0,
+    });
+    res.status(201).json(row);
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
@@ -141,9 +150,12 @@ const addRessourceAttente = async (req, res) => {
 
 // ── DELETE /api/budget/ressources-attente/:id ─────────────────────────────
 const deleteRessourceAttente = async (req, res) => {
-  await query('DELETE FROM ressources_attente WHERE id=$1 AND tenant_id=$2',
-              [parseInt(req.params.id), req.tenantId]);
-  res.json({ message: 'Ressource supprimée.' });
+  try {
+    await RessourceAttente.destroy({ where: { id: parseInt(req.params.id, 10), tenant_id: req.tenantId } });
+    res.json({ message: 'Ressource supprimée.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
 };
 
 // ── PUT /api/budget/depenses-attente/batch ────────────────────────────────
@@ -155,35 +167,29 @@ const batchDepenseAttente = async (req, res) => {
   if (!mois || !annee || !Array.isArray(lignes)) {
     return res.status(400).json({ error: 'Données invalides.' });
   }
-  const an = parseInt(annee);
+  const an = parseInt(annee, 10);
   const toInsert = lignes.filter(l => parseFloat(l.montant) > 0);
   const allCodes = lignes.map(l => l.rubrique_code);
-  const client = await getClient();
   try {
-    await client.query('BEGIN');
-    await client.query(
-      `DELETE FROM depenses_attente
-       WHERE tenant_id=$1 AND mois=$2 AND annee=$3 AND rubrique_code=ANY($4::text[])`,
-      [req.tenantId, mois, an, allCodes]
-    );
-    if (toInsert.length) {
-      await client.query(
-        `INSERT INTO depenses_attente(tenant_id,mois,annee,rubrique_code,intitule,montant)
-         SELECT $1,$2,$3,unnest($4::text[]),unnest($5::text[]),unnest($6::numeric[])`,
-        [req.tenantId, mois, an,
-         toInsert.map(l => l.rubrique_code),
-         toInsert.map(l => l.intitule || l.rubrique_code),
-         toInsert.map(l => parseFloat(l.montant))]
-      );
-    }
-    await client.query('COMMIT');
+    await sequelize.transaction(async (t) => {
+      await DepenseAttente.destroy({
+        where: { tenant_id: req.tenantId, mois, annee: an, rubrique_code: { [Op.in]: allCodes } },
+        transaction: t,
+      });
+      if (toInsert.length) {
+        await DepenseAttente.bulkCreate(
+          toInsert.map(l => ({
+            tenant_id: req.tenantId, mois, annee: an,
+            rubrique_code: l.rubrique_code, intitule: l.intitule || l.rubrique_code, montant: parseFloat(l.montant),
+          })),
+          { transaction: t },
+        );
+      }
+    });
     res.json({ message: 'Dépenses en attente enregistrées.' });
   } catch (err) {
-    await client.query('ROLLBACK');
     console.error('[Budget] batchDepenseAttente :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
-  } finally {
-    client.release();
   }
 };
 
@@ -193,40 +199,34 @@ const batchRessourceAttente = async (req, res) => {
   if (!mois || !annee || !Array.isArray(lignes)) {
     return res.status(400).json({ error: 'Données invalides.' });
   }
-  const an = parseInt(annee);
+  const an = parseInt(annee, 10);
   const toInsert = lignes.filter(l => parseFloat(l.montant) > 0);
   const allCodes = lignes.map(l => l.rubrique_code);
-  const client = await getClient();
   try {
-    await client.query('BEGIN');
-    await client.query(
-      `DELETE FROM ressources_attente
-       WHERE tenant_id=$1 AND mois=$2 AND annee=$3 AND rubrique_code=ANY($4::text[])`,
-      [req.tenantId, mois, an, allCodes]
-    );
-    if (toInsert.length) {
-      await client.query(
-        `INSERT INTO ressources_attente(tenant_id,mois,annee,rubrique_code,intitule,montant)
-         SELECT $1,$2,$3,unnest($4::text[]),unnest($5::text[]),unnest($6::numeric[])`,
-        [req.tenantId, mois, an,
-         toInsert.map(l => l.rubrique_code),
-         toInsert.map(l => l.intitule || l.rubrique_code),
-         toInsert.map(l => parseFloat(l.montant))]
-      );
-    }
-    await client.query('COMMIT');
+    await sequelize.transaction(async (t) => {
+      await RessourceAttente.destroy({
+        where: { tenant_id: req.tenantId, mois, annee: an, rubrique_code: { [Op.in]: allCodes } },
+        transaction: t,
+      });
+      if (toInsert.length) {
+        await RessourceAttente.bulkCreate(
+          toInsert.map(l => ({
+            tenant_id: req.tenantId, mois, annee: an,
+            rubrique_code: l.rubrique_code, intitule: l.intitule || l.rubrique_code, montant: parseFloat(l.montant),
+          })),
+          { transaction: t },
+        );
+      }
+    });
     res.json({ message: 'Ressources attendues enregistrées.' });
   } catch (err) {
-    await client.query('ROLLBACK');
     console.error('[Budget] batchRessourceAttente :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
-  } finally {
-    client.release();
   }
 };
 
 module.exports = {
-  getBudget, setBudgetLine, setValidation,
+  getBudget, setBudgetLine, deleteBudgetLine, setValidation,
   addDepenseAttente, deleteDepenseAttente,
   addRessourceAttente, deleteRessourceAttente,
   batchDepenseAttente, batchRessourceAttente,

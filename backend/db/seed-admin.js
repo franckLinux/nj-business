@@ -9,7 +9,7 @@
 //
 // La logique vit dans db/lib/seed-admin.lib.js.
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { close, describeTarget } = require('../src/config/database');
 const { seedAdmin } = require('./lib/seed-admin.lib');

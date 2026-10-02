@@ -1,35 +1,45 @@
 // src/controllers/mouvements_attente.controller.js
 // File des dépenses (sorties) bloquées en attente d'autorisation (RG-03 / RG-04).
 // L'approbation bascule la ligne en écriture réelle dans `journal` (transaction atomique).
-const { query, getClient } = require('../config/database');
+const { sequelize, MouvementAttente, Mouvement, Rubrique, Journal, User } = require('../models');
 const notif = require('../services/notification.service');
-
-const PEUT_DECIDER = ['directeur', 'super_admin'];
 
 // ── GET /api/mouvements-attente?mois=&annee=&statut= ────────────────────────
 const list = async (req, res) => {
   const { mois, annee, statut } = req.query;
   try {
-    const conditions = ['ma.tenant_id=$1'];
-    const params     = [req.tenantId];
-    if (mois)  { params.push(mois);            conditions.push(`ma.mois=$${params.length}`); }
-    if (annee) { params.push(parseInt(annee)); conditions.push(`ma.annee=$${params.length}`); }
-    if (statut && statut !== 'all') {
-      params.push(statut);                     conditions.push(`ma.statut=$${params.length}`);
-    }
-    const { rows } = await query(
-      `SELECT ma.*, r.intitule AS rubrique_intitule,
-              jx.nom AS journal_nom, jx.code AS journal_code,
-              u.username AS created_by_nom, ud.username AS decided_by_nom
-         FROM mouvements_attente ma
-         LEFT JOIN rubriques r  ON r.tenant_id=ma.tenant_id AND r.code=ma.rubrique_code
-         LEFT JOIN journaux  jx ON jx.id=ma.journal_id
-         LEFT JOIN users     u  ON u.id=ma.created_by
-         LEFT JOIN users     ud ON ud.id=ma.decided_by
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY ma.created_at DESC`,
-      params
-    );
+    const where = { tenant_id: req.tenantId };
+    if (mois)  where.mois = mois;
+    if (annee) where.annee = parseInt(annee, 10);
+    if (statut && statut !== 'all') where.statut = statut;
+
+    const [mouvements, rubriques, journaux] = await Promise.all([
+      MouvementAttente.findAll({
+        where,
+        include: [
+          { model: User, as: 'auteur', attributes: ['username'], required: false },
+          { model: User, as: 'decideur', attributes: ['username'], required: false },
+        ],
+        order: [['created_at', 'DESC']],
+      }),
+      Rubrique.findAll({ where: { tenant_id: req.tenantId }, attributes: ['code', 'intitule'], raw: true }),
+      Journal.findAll({ where: { tenant_id: req.tenantId }, attributes: ['id', 'nom', 'code'], raw: true }),
+    ]);
+    const rubriqueByCode = new Map(rubriques.map(r => [r.code, r.intitule]));
+    const journalById = new Map(journaux.map(j => [j.id, j]));
+
+    const rows = mouvements.map(m => {
+      const { auteur, decideur, ...rest } = m.toJSON();
+      return {
+        ...rest,
+        rubrique_intitule: rubriqueByCode.get(rest.rubrique_code) || null,
+        journal_nom: journalById.get(rest.journal_id)?.nom || null,
+        journal_code: journalById.get(rest.journal_id)?.code || null,
+        created_by_nom: auteur ? auteur.username : null,
+        decided_by_nom: decideur ? decideur.username : null,
+      };
+    });
+
     const total_en_attente = rows
       .filter(r => r.statut === 'en_attente')
       .reduce((s, r) => s + (parseFloat(r.sortie) || 0), 0);
@@ -44,15 +54,11 @@ const list = async (req, res) => {
 const count = async (req, res) => {
   const { mois, annee } = req.query;
   try {
-    const conditions = ['tenant_id=$1', "statut='en_attente'"];
-    const params     = [req.tenantId];
-    if (mois)  { params.push(mois);            conditions.push(`mois=$${params.length}`); }
-    if (annee) { params.push(parseInt(annee)); conditions.push(`annee=$${params.length}`); }
-    const { rows } = await query(
-      `SELECT COUNT(*)::int AS nb FROM mouvements_attente WHERE ${conditions.join(' AND ')}`,
-      params
-    );
-    res.json({ nb: rows[0].nb });
+    const where = { tenant_id: req.tenantId, statut: 'en_attente' };
+    if (mois)  where.mois = mois;
+    if (annee) where.annee = parseInt(annee, 10);
+    const nb = await MouvementAttente.count({ where });
+    res.json({ nb });
   } catch (err) {
     console.error('[MvtAttente] count :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
@@ -60,78 +66,62 @@ const count = async (req, res) => {
 };
 
 // ── PATCH /api/mouvements-attente/:id/approuver ──────────────────────────────
-// Transaction : lit la ligne (FOR UPDATE), INSERT dans journal, marque 'approuve'.
+// Transaction : verrouille la ligne, crée l'écriture dans journal, marque 'approuve'.
 const approuver = async (req, res) => {
-  if (!PEUT_DECIDER.includes(req.user.role)) {
-    return res.status(403).json({ error: 'Approbation réservée au directeur.' });
-  }
-  const id = parseInt(req.params.id);
-  const client = await getClient();
+  const id = parseInt(req.params.id, 10);
   try {
-    await client.query('BEGIN');
+    const { journal, mouvement } = await sequelize.transaction(async (t) => {
+      const m = await MouvementAttente.findOne({
+        where: { id, tenant_id: req.tenantId, statut: 'en_attente' },
+        transaction: t, lock: t.LOCK.UPDATE,
+      });
+      if (!m) {
+        const notFound = new Error('NOT_FOUND');
+        notFound.code = 'NOT_FOUND';
+        throw notFound;
+      }
 
-    const { rows: [m] } = await client.query(
-      `SELECT * FROM mouvements_attente
-        WHERE id=$1 AND tenant_id=$2 AND statut='en_attente'
-        FOR UPDATE`,
-      [id, req.tenantId]
-    );
-    if (!m) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Dépense en attente introuvable ou déjà traitée.' });
-    }
+      const j = await Mouvement.create({
+        tenant_id: m.tenant_id, date: m.date, mois: m.mois, annee: m.annee,
+        journal_id: m.journal_id, type_caisse: m.type_caisse, rubrique_code: m.rubrique_code,
+        intitule: m.intitule, objet: m.objet, beneficiaire: m.beneficiaire,
+        piece_identite: m.piece_identite, telephone: m.telephone,
+        entree: 0, sortie: m.sortie, created_by: req.user.id,
+      }, { transaction: t });
 
-    const { rows: [j] } = await client.query(
-      `INSERT INTO journal (tenant_id, date, mois, annee, journal_id, type_caisse,
-         rubrique_code, intitule, objet, beneficiaire, piece_identite, telephone,
-         entree, sortie, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,0,$13,$14)
-       RETURNING *`,
-      [m.tenant_id, m.date, m.mois, m.annee, m.journal_id, m.type_caisse,
-       m.rubrique_code, m.intitule, m.objet, m.beneficiaire, m.piece_identite,
-       m.telephone, m.sortie, req.user.id]
-    );
+      m.statut = 'approuve';
+      m.decided_by = req.user.id;
+      m.decided_at = new Date();
+      m.commentaire_dir = req.body.commentaire || '';
+      await m.save({ transaction: t });
 
-    await client.query(
-      `UPDATE mouvements_attente
-          SET statut='approuve', decided_by=$1, decided_at=NOW(),
-              commentaire_dir=$2
-        WHERE id=$3`,
-      [req.user.id, req.body.commentaire || '', id]
-    );
-
-    await client.query('COMMIT');
+      return { journal: j, mouvement: m };
+    });
 
     // Notifier le créateur de la dépense (cloche) — best-effort, hors transaction
     notif.notifyDecisionMouvement({
-      tenantId: req.tenantId, mouvement: m, decision: 'approuvee',
+      tenantId: req.tenantId, mouvement, decision: 'approuvee',
       directeurNom: req.user.username,
     }).catch(e => console.warn('[MvtAttente] notif approbation :', e.message));
 
-    res.json({ ok: true, journal: j });
+    res.json({ ok: true, journal });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    if (err.code === 'NOT_FOUND') {
+      return res.status(404).json({ error: 'Dépense en attente introuvable ou déjà traitée.' });
+    }
     console.error('[MvtAttente] approuver :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
-  } finally {
-    client.release();
   }
 };
 
 // ── PATCH /api/mouvements-attente/:id/rejeter ────────────────────────────────
 const rejeter = async (req, res) => {
-  if (!PEUT_DECIDER.includes(req.user.role)) {
-    return res.status(403).json({ error: 'Rejet réservé au directeur.' });
-  }
   try {
-    const { rows } = await query(
-      `UPDATE mouvements_attente
-          SET statut='rejete', decided_by=$1, decided_at=NOW(), commentaire_dir=$2
-        WHERE id=$3 AND tenant_id=$4 AND statut='en_attente'
-        RETURNING *`,
-      [req.user.id, req.body.commentaire || '', parseInt(req.params.id), req.tenantId]
+    const [count, rows] = await MouvementAttente.update(
+      { statut: 'rejete', decided_by: req.user.id, decided_at: new Date(), commentaire_dir: req.body.commentaire || '' },
+      { where: { id: parseInt(req.params.id, 10), tenant_id: req.tenantId, statut: 'en_attente' }, returning: true },
     );
-    if (rows.length === 0) {
+    if (count === 0) {
       return res.status(404).json({ error: 'Dépense en attente introuvable ou déjà traitée.' });
     }
 

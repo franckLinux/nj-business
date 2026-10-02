@@ -1,0 +1,979 @@
+diff -ruN p1/backend/db/migrations/014_refonte_roles_permissions.sql p2/backend/db/migrations/014_refonte_roles_permissions.sql
+--- p1/backend/db/migrations/014_refonte_roles_permissions.sql	1970-01-01 00:00:00.000000000 +0000
++++ p2/backend/db/migrations/014_refonte_roles_permissions.sql	2026-10-02 11:58:58.586636200 +0000
+@@ -0,0 +1,172 @@
++-- ── 014 — Refonte rôles & permissions ──────────────────────────────────────
++-- Objectif : une seule source de vérité EN BASE pour les droits.
++--
++--  1. Les rôles fixes (directeur, caissier, auditeur, comptable_cabinet)
++--     deviennent des « rôles système » dans la table roles (tenant_id NULL,
++--     is_system = true). Leur jeu de permissions, jusqu'ici codé en dur dans
++--     permission.service.js (ROLE_DEFAULTS), est recopié dans role_permissions.
++--  2. role_permissions reçoit enfin sa clé étrangère vers permissions(code) :
++--     plus de codes orphelins après suppression d'une permission.
++--  3. user_permissions devient un jeu d'EXCEPTIONS (effet = grant | deny)
++--     appliquées PAR-DESSUS le rôle, au lieu d'un instantané complet qui
++--     remplaçait le rôle et figeait la personne (nouvelles permissions jamais
++--     reçues, changement de rôle sans effet).
++--     Conversion exacte : droits effectifs identiques avant/après.
++--
++-- Idempotente : chaque étape est protégée (IF NOT EXISTS / ON CONFLICT / garde
++-- sur l'existence de la colonne effet).
++
++-- ── 1. Rôles système ───────────────────────────────────────────────────────
++ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT false;
++
++-- Un rôle global (tenant_id NULL) créé à la main portant un code système
++-- entrerait en collision : on le renomme plutôt que de l'écraser.
++UPDATE roles SET code = code || '_perso_' || id
++ WHERE tenant_id IS NULL AND is_system = false
++   AND code IN ('directeur','caissier','auditeur','comptable_cabinet');
++
++-- Doublons de rôles globaux (UNIQUE(code, tenant_id) ne joue pas avec NULL).
++UPDATE roles r SET code = r.code || '_' || r.id
++ WHERE r.tenant_id IS NULL
++   AND EXISTS (SELECT 1 FROM roles o WHERE o.tenant_id IS NULL AND o.code = r.code AND o.id < r.id);
++
++CREATE UNIQUE INDEX IF NOT EXISTS uq_roles_code_global ON roles(code) WHERE tenant_id IS NULL;
++
++INSERT INTO roles(nom, code, description, couleur, tenant_id, is_system) VALUES
++  ('Directeur',         'directeur',         'Rôle système — encadrement du client',          '#1d4ed8', NULL, true),
++  ('Comptable cabinet', 'comptable_cabinet', 'Rôle système — comptable du cabinet',            '#15803d', NULL, true),
++  ('Caissier(ère)',     'caissier',          'Rôle système — saisie quotidienne de caisse',    '#be185d', NULL, true),
++  ('Auditeur',          'auditeur',          'Rôle système — lecture seule',                    '#b45309', NULL, true)
++ON CONFLICT (code) WHERE tenant_id IS NULL DO UPDATE SET is_system = true;
++
++-- ── 2. Intégrité de role_permissions ───────────────────────────────────────
++DELETE FROM role_permissions rp
++ WHERE NOT EXISTS (SELECT 1 FROM permissions p WHERE p.code = rp.permission_code);
++
++ALTER TABLE role_permissions ALTER COLUMN permission_code TYPE VARCHAR(100);
++
++DO $$
++BEGIN
++  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_role_permissions_permission') THEN
++    ALTER TABLE role_permissions
++      ADD CONSTRAINT fk_role_permissions_permission
++      FOREIGN KEY (permission_code) REFERENCES permissions(code)
++      ON DELETE CASCADE ON UPDATE CASCADE;
++  END IF;
++END $$;
++
++-- Jeu par défaut des rôles système = ancien ROLE_DEFAULTS, à l'identique.
++INSERT INTO role_permissions(role_id, permission_code)
++SELECT r.id, d.code
++  FROM (VALUES
++    -- directeur
++    ('directeur','journal.view'),('directeur','journal.create'),('directeur','journal.edit'),('directeur','journal.delete'),
++    ('directeur','journal.validate'),('directeur','journal.ran'),
++    ('directeur','budget.view'),('directeur','budget.edit'),('directeur','budget.validate'),
++    ('directeur','budget.demande_create'),('directeur','budget.demande_validate'),('directeur','budget.demande_delete'),
++    ('directeur','previsions.view'),('directeur','previsions.edit'),
++    ('directeur','appel_fonds.view'),('directeur','appel_fonds.create'),('directeur','appel_fonds.validate'),('directeur','appel_fonds.delete'),
++    ('directeur','rubriques.view'),('directeur','rubriques.edit'),
++    ('directeur','users.view'),('directeur','users.create'),('directeur','users.edit'),('directeur','users.delete'),
++    ('directeur','config.view'),('directeur','config.edit'),
++    ('directeur','rapport.view'),('directeur','rapport.export'),
++    ('directeur','plan_comptable.view'),('directeur','plan_comptable.edit'),('directeur','plan_comptable.delete'),
++    ('directeur','journaux.view'),('directeur','journaux.edit'),('directeur','journaux.reouvrir'),
++    ('directeur','pieces.view'),('directeur','pieces.edit'),('directeur','pieces.upload'),
++    ('directeur','banque.view'),('directeur','banque.edit'),
++    -- comptable_cabinet
++    ('comptable_cabinet','journal.view'),('comptable_cabinet','journal.create'),('comptable_cabinet','journal.edit'),
++    ('comptable_cabinet','journal.delete'),('comptable_cabinet','journal.ran'),
++    ('comptable_cabinet','budget.view'),('comptable_cabinet','budget.edit'),
++    ('comptable_cabinet','previsions.view'),('comptable_cabinet','previsions.edit'),
++    ('comptable_cabinet','appel_fonds.view'),('comptable_cabinet','appel_fonds.create'),
++    ('comptable_cabinet','rubriques.view'),('comptable_cabinet','rubriques.edit'),
++    ('comptable_cabinet','users.view'),('comptable_cabinet','config.view'),
++    ('comptable_cabinet','rapport.view'),('comptable_cabinet','rapport.export'),
++    ('comptable_cabinet','plan_comptable.view'),('comptable_cabinet','plan_comptable.edit'),('comptable_cabinet','plan_comptable.delete'),
++    ('comptable_cabinet','journaux.view'),
++    ('comptable_cabinet','pieces.view'),('comptable_cabinet','pieces.edit'),('comptable_cabinet','pieces.upload'),
++    ('comptable_cabinet','banque.view'),('comptable_cabinet','banque.edit'),
++    -- caissier
++    ('caissier','journal.view'),('caissier','journal.create'),('caissier','journal.edit'),('caissier','journal.ran'),
++    ('caissier','budget.view'),('caissier','budget.demande_create'),('caissier','budget.demande_delete'),
++    ('caissier','previsions.view'),('caissier','previsions.edit'),
++    ('caissier','appel_fonds.view'),('caissier','appel_fonds.create'),
++    ('caissier','rubriques.view'),('caissier','users.view'),('caissier','config.view'),('caissier','rapport.view'),
++    ('caissier','plan_comptable.view'),('caissier','plan_comptable.edit'),
++    ('caissier','journaux.view'),('caissier','pieces.view'),('caissier','pieces.upload'),('caissier','banque.view'),
++    -- auditeur
++    ('auditeur','journal.view'),('auditeur','budget.view'),('auditeur','previsions.view'),('auditeur','appel_fonds.view'),
++    ('auditeur','rubriques.view'),('auditeur','users.view'),('auditeur','config.view'),
++    ('auditeur','rapport.view'),('auditeur','rapport.export'),('auditeur','plan_comptable.view'),
++    ('auditeur','journaux.view'),('auditeur','pieces.view'),('auditeur','banque.view')
++  ) AS d(role_code, code)
++  JOIN roles r ON r.code = d.role_code AND r.tenant_id IS NULL AND r.is_system
++  JOIN permissions p ON p.code = d.code
++ON CONFLICT DO NOTHING;
++
++-- Ancienne règle implicite du service (journal.view ⇒ journaux.view),
++-- désormais écrite en base pour les profils créés avant la 012.
++INSERT INTO role_permissions(role_id, permission_code)
++SELECT rp.role_id, 'journaux.view' FROM role_permissions rp
++ WHERE rp.permission_code = 'journal.view'
++   AND EXISTS (SELECT 1 FROM permissions WHERE code = 'journaux.view')
++ON CONFLICT DO NOTHING;
++
++-- Même règle pour les plafonds clients enregistrés avant la 012.
++INSERT INTO tenant_permissions(tenant_id, permission_code)
++SELECT tp.tenant_id, 'journaux.view' FROM tenant_permissions tp
++ WHERE tp.permission_code = 'journal.view'
++   AND EXISTS (SELECT 1 FROM permissions WHERE code = 'journaux.view')
++ON CONFLICT DO NOTHING;
++
++-- ── 3. user_permissions : instantané → exceptions grant/deny ───────────────
++DO $$
++BEGIN
++  IF NOT EXISTS (
++    SELECT 1 FROM information_schema.columns
++     WHERE table_name = 'user_permissions' AND column_name = 'effet'
++  ) THEN
++    ALTER TABLE user_permissions
++      ADD COLUMN effet VARCHAR(5) NOT NULL DEFAULT 'grant'
++      CHECK (effet IN ('grant','deny'));
++
++    -- L'ancien service ajoutait journaux.view à quiconque avait journal.view,
++    -- APRÈS le plafond : on l'écrit dans l'instantané pour ne rien retirer.
++    INSERT INTO user_permissions(user_id, permission_code, effet)
++    SELECT up.user_id, 'journaux.view', 'grant' FROM user_permissions up
++     WHERE up.permission_code = 'journal.view'
++       AND EXISTS (SELECT 1 FROM permissions WHERE code = 'journaux.view')
++    ON CONFLICT DO NOTHING;
++
++    -- Base de chaque personne ayant un instantané : son profil métier s'il a
++    -- au moins une permission, sinon son rôle système (règle inchangée).
++    CREATE TEMP TABLE _base ON COMMIT DROP AS
++    SELECT u.id AS user_id, rp.permission_code
++      FROM users u
++      JOIN role_permissions rp ON rp.role_id = u.custom_role_id
++     WHERE EXISTS (SELECT 1 FROM user_permissions up WHERE up.user_id = u.id)
++    UNION
++    SELECT u.id, rp.permission_code
++      FROM users u
++      JOIN roles r ON r.code = u.role AND r.tenant_id IS NULL AND r.is_system
++      JOIN role_permissions rp ON rp.role_id = r.id
++     WHERE EXISTS (SELECT 1 FROM user_permissions up WHERE up.user_id = u.id)
++       AND NOT EXISTS (SELECT 1 FROM role_permissions x WHERE x.role_id = u.custom_role_id);
++
++    -- deny = dans la base mais absent de l'instantané
++    INSERT INTO user_permissions(user_id, permission_code, effet)
++    SELECT b.user_id, b.permission_code, 'deny'
++      FROM _base b
++     WHERE NOT EXISTS (SELECT 1 FROM user_permissions up
++                        WHERE up.user_id = b.user_id AND up.permission_code = b.permission_code);
++
++    -- grant redondant (déjà dans la base) → supprimé
++    DELETE FROM user_permissions up
++     USING _base b
++     WHERE up.user_id = b.user_id AND up.permission_code = b.permission_code
++       AND up.effet = 'grant';
++  END IF;
++END $$;
++
++CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id);
+diff -ruN p1/backend/src/controllers/budget_caisse.controller.js p2/backend/src/controllers/budget_caisse.controller.js
+--- p1/backend/src/controllers/budget_caisse.controller.js	2026-10-02 11:56:39.169636200 +0000
++++ p2/backend/src/controllers/budget_caisse.controller.js	2026-10-02 12:01:01.034636200 +0000
+@@ -3,6 +3,7 @@
+ const { Op } = require('sequelize');
+ const { sequelize, BudgetCaisse, DemandeDepassement, Mouvement, Journal, User, Tenant } = require('../models');
+ const { sendDepassementAlert } = require('../services/email.service');
++const { usersAvecPermission } = require('../services/permission.service');
+ 
+ // ── GET /api/budget-caisse?journal_id=&mois=&annee= ──────────────────────
+ const getBudgetCaisse = async (req, res) => {
+@@ -174,13 +175,14 @@
+       demande_par: req.user.id, demandeur_nom: caissierNom, statut: 'en_attente', type_depassement: typeD,
+     });
+ 
+-    // Récupérer email du directeur
+-    const directeur = await User.findOne({
+-      where: { tenant_id: req.tenantId, role: 'directeur', actif: true, email: { [Op.ne]: '' } },
+-    });
++    // Destinataires : toute personne active qui peut VALIDER la demande
++    // (permission budget.demande_validate), et non le premier « directeur »
++    // trouvé — la règle d'autorisation et la règle de notification coïncident.
++    const valideurs = (await usersAvecPermission(req.tenantId, 'budget.demande_validate'))
++      .filter((u) => u.email);
+ 
+     let emailSent = false;
+-    if (directeur) {
++    for (const directeur of valideurs) {
+       const { sent } = await sendDepassementAlert({
+         dirEmail:         directeur.email,
+         dirNom:           directeur.username,
+@@ -193,7 +195,7 @@
+         intitule, beneficiaire,
+         demandeId: demande.id,
+       });
+-      emailSent = sent;
++      emailSent = emailSent || sent;
+     }
+ 
+     res.status(201).json({ ...demande.toJSON(), email_sent: emailSent });
+diff -ruN p1/backend/src/controllers/permissions.controller.js p2/backend/src/controllers/permissions.controller.js
+--- p1/backend/src/controllers/permissions.controller.js	2026-10-02 11:56:39.123636200 +0000
++++ p2/backend/src/controllers/permissions.controller.js	2026-10-02 11:59:48.530636200 +0000
+@@ -1,6 +1,6 @@
+ // src/controllers/permissions.controller.js
+ const { sequelize, Permission, TenantPermission, UserPermission, User } = require('../models');
+-const { getEffectivePermissions, verifierCodesAccordables } = require('../services/permission.service');
++const { getEffectivePermissions, getBasePermissions, verifierCodesAccordables } = require('../services/permission.service');
+ 
+ // ── Catalogue des permissions ──────────────────────────────────────────────
+ 
+@@ -9,48 +9,31 @@
+     const permissions = await Permission.findAll({ order: [['module', 'ASC'], ['code', 'ASC']] });
+     res.json(permissions);
+   } catch (err) {
++    console.error('[Permissions]', err.message);
+     res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+-const createPermission = async (req, res) => {
+-  const { code, nom, module, description } = req.body;
+-  if (!code || !nom || !module) return res.status(400).json({ error: 'code, nom et module sont obligatoires.' });
+-  if (!/^[a-z_]+\.[a-z_]+$/.test(code)) return res.status(400).json({ error: 'Format code invalide (ex: journal.create).' });
+-  try {
+-    const permission = await Permission.create({ code, nom, module, description: description || '' });
+-    res.status(201).json(permission);
+-  } catch (err) {
+-    if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: 'Ce code de permission existe déjà.' });
+-    res.status(500).json({ error: 'Erreur serveur.' });
+-  }
+-};
+-
++// Le catalogue est défini par les migrations SQL (002, 012, 014…) et lu par le
++// code (requirePermission('xxx.yyy')). Créer ou supprimer un code depuis
++// l'interface ne servait à rien (aucune route ne le vérifiait) ou cassait des
++// droits (suppression en cascade). Seuls le libellé et la description restent
++// modifiables.
+ const updatePermission = async (req, res) => {
+   const { code } = req.params;
+-  const { nom, module, description } = req.body;
++  const patch = {};
++  if (req.body.nom !== undefined) {
++    if (!String(req.body.nom).trim()) return res.status(400).json({ error: 'Nom obligatoire.' });
++    patch.nom = String(req.body.nom).trim();
++  }
++  if (req.body.module !== undefined && String(req.body.module).trim()) patch.module = String(req.body.module).trim();
++  if (req.body.description !== undefined) patch.description = req.body.description || '';
+   try {
+-    const [count, rows] = await Permission.update(
+-      {
+-        nom: nom === undefined ? null : nom,
+-        module: module === undefined ? null : module,
+-        description: description || '',
+-      },
+-      { where: { code }, returning: true }
+-    );
++    const [count, rows] = await Permission.update(patch, { where: { code }, returning: true });
+     if (count === 0) return res.status(404).json({ error: 'Permission introuvable.' });
+     res.json(rows[0]);
+   } catch (err) {
+-    res.status(500).json({ error: 'Erreur serveur.' });
+-  }
+-};
+-
+-const deletePermission = async (req, res) => {
+-  const { code } = req.params;
+-  try {
+-    await Permission.destroy({ where: { code } });
+-    res.json({ ok: true });
+-  } catch (err) {
++    console.error('[Permissions] updatePermission :', err.message);
+     res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+@@ -70,6 +53,7 @@
+     }
+     res.json(perms.map((r) => r.permission_code));
+   } catch (err) {
++    console.error('[Permissions]', err.message);
+     res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+@@ -99,6 +83,7 @@
+     });
+     res.json({ ok: true, count: codes.length });
+   } catch (err) {
++    console.error('[Permissions]', err.message);
+     res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+@@ -129,37 +114,68 @@
+     }
+     res.json(effectives);
+   } catch (err) {
++    console.error('[Permissions]', err.message);
+     res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
++// Enregistre la liste COCHÉE (droits effectifs voulus) sous forme
++// d'EXCEPTIONS par rapport au rôle de la personne :
++//   grant = coché mais absent du rôle ; deny = dans le rôle mais décoché.
++// La modale n'a pas changé (elle envoie toujours la liste complète), mais un
++// changement ultérieur du rôle ou du catalogue profite désormais à la personne.
+ const setUserPermissions = async (req, res) => {
+   const { userId } = req.params;
+   let { codes } = req.body;
+   if (!Array.isArray(codes)) return res.status(400).json({ error: 'codes doit être un tableau.' });
+   try {
+-    const u = await User.findByPk(userId, { attributes: ['id', 'tenant_id'], raw: true });
++    const u = await User.findByPk(userId, { attributes: ['id', 'tenant_id', 'role'], raw: true });
+     if (!u) return res.status(404).json({ error: 'Utilisateur introuvable.' });
++    if (u.role === 'super_admin') return res.status(400).json({ error: 'Un super_admin a déjà tous les droits.' });
+     const verif = await verifierCodesAccordables(codes, u.tenant_id);
+     if (verif.erreur) return res.status(400).json({ error: verif.erreur });
+-    codes = verif.codes;
++    codes = new Set(verif.codes);
++
++    const base = new Set(await getBasePermissions(userId));
++    // Un code bloqué par le plafond n'apparaît jamais coché : ne pas le
++    // transformer en « deny » qui survivrait à un élargissement du plafond.
++    const plafondRows = u.tenant_id
++      ? await TenantPermission.findAll({ where: { tenant_id: u.tenant_id }, attributes: ['permission_code'], raw: true })
++      : [];
++    const plafond = plafondRows.length ? new Set(plafondRows.map((r) => r.permission_code)) : null;
++
++    const grants = [...codes].filter((c) => !base.has(c));
++    const denies = [...base].filter((c) => !codes.has(c) && (!plafond || plafond.has(c)));
++
+     await sequelize.transaction(async (t) => {
+       await UserPermission.destroy({ where: { user_id: userId }, transaction: t });
+-      if (codes.length > 0) {
+-        await UserPermission.bulkCreate(
+-          codes.map((permission_code) => ({ user_id: userId, permission_code })),
+-          { transaction: t, ignoreDuplicates: true }
+-        );
+-      }
++      const lignes = [
++        ...grants.map((permission_code) => ({ user_id: userId, permission_code, effet: 'grant' })),
++        ...denies.map((permission_code) => ({ user_id: userId, permission_code, effet: 'deny' })),
++      ];
++      if (lignes.length) await UserPermission.bulkCreate(lignes, { transaction: t });
+     });
+-    res.json({ ok: true, count: codes.length });
++    res.json({ ok: true, ajoutees: grants, retirees: denies });
++  } catch (err) {
++    console.error('[Permissions] setUserPermissions :', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
++  }
++};
++
++// DELETE /users/:userId/permissions — supprime toutes les exceptions : la
++// personne revient exactement aux droits de son rôle / profil métier.
++const resetUserPermissions = async (req, res) => {
++  try {
++    const n = await UserPermission.destroy({ where: { user_id: req.params.userId } });
++    res.json({ ok: true, supprimees: n });
+   } catch (err) {
++    console.error('[Permissions] resetUserPermissions :', err.message);
+     res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+ module.exports = {
+-  getPermissions, createPermission, updatePermission, deletePermission,
++  getPermissions, updatePermission,
+   getTenantPermissions, setTenantPermissions,
+-  getUserPermissions, setUserPermissions,
++  getUserPermissions, setUserPermissions, resetUserPermissions,
+ };
+diff -ruN p1/backend/src/controllers/roles.controller.js p2/backend/src/controllers/roles.controller.js
+--- p1/backend/src/controllers/roles.controller.js	2026-10-02 11:56:39.139636200 +0000
++++ p2/backend/src/controllers/roles.controller.js	2026-10-02 12:00:21.752636200 +0000
+@@ -17,7 +17,8 @@
+     });
+     res.json(roles.map((r) => ({ ...r.toJSON(), nb_permissions: parseInt(r.get('nb_permissions'), 10) })));
+   } catch (err) {
+-    res.status(500).json({ error: err.message });
++    console.error('[Roles]', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+@@ -26,6 +27,11 @@
+   const { nom, code, description, couleur } = req.body;
+   if (!nom || !code) return res.status(400).json({ error: 'Nom et code obligatoires.' });
+   const safeCode = code.toLowerCase().replace(/[^a-z0-9_]/g, '_');
++  // Les profils métier appartiennent à un client. Créés hors client, ils
++  // devenaient des rôles « globaux » orphelins (UNIQUE(code, tenant_id) ne
++  // s'applique pas à NULL → doublons possibles). Les rôles globaux sont
++  // désormais réservés aux rôles système (migration 014).
++  if (!req.tenantId) return res.status(400).json({ error: 'Sélectionnez d\'abord un client.' });
+   try {
+     const role = await Role.create({
+       nom: nom.trim(),
+@@ -37,7 +43,8 @@
+     res.status(201).json(role);
+   } catch (err) {
+     if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: `Le code "${code}" existe déjà.` });
+-    res.status(500).json({ error: err.message });
++    console.error('[Roles]', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+@@ -54,7 +61,8 @@
+     if (count === 0) return res.status(404).json({ error: 'Rôle introuvable.' });
+     res.json(rows[0]);
+   } catch (err) {
+-    res.status(500).json({ error: err.message });
++    console.error('[Roles]', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+@@ -62,10 +70,12 @@
+ const deleteRole = async (req, res) => {
+   const { id } = req.params;
+   try {
+-    await Role.destroy({ where: { id, tenant_id: req.tenantId } });
++    const n = await Role.destroy({ where: { id, tenant_id: req.tenantId, is_system: false } });
++    if (n === 0) return res.status(404).json({ error: 'Rôle introuvable ou rôle système (non supprimable).' });
+     res.json({ ok: true });
+   } catch (err) {
+-    res.status(500).json({ error: err.message });
++    console.error('[Roles]', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+@@ -78,7 +88,8 @@
+     const perms = await RolePermission.findAll({ where: { role_id: id }, attributes: ['permission_code'], raw: true });
+     res.json(perms.map((r) => r.permission_code));
+   } catch (err) {
+-    res.status(500).json({ error: err.message });
++    console.error('[Roles]', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+@@ -103,7 +114,8 @@
+     });
+     res.json({ ok: true, count: codes.length });
+   } catch (err) {
+-    res.status(500).json({ error: err.message });
++    console.error('[Roles]', err.message);
++    res.status(500).json({ error: 'Erreur serveur.' });
+   }
+ };
+ 
+diff -ruN p1/backend/src/models/Role.js p2/backend/src/models/Role.js
+--- p1/backend/src/models/Role.js	2026-10-02 11:59:48.570636200 +0000
++++ p2/backend/src/models/Role.js	2026-10-02 11:59:48.591636200 +0000
+@@ -8,6 +8,8 @@
+     description: DataTypes.TEXT,
+     couleur: { type: DataTypes.TEXT, defaultValue: '#6366f1' },
+     tenant_id: DataTypes.UUID,
++    // Rôle système (directeur, caissier…) : global, non supprimable (migration 014).
++    is_system: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+   }, {
+     tableName: 'roles',
+diff -ruN p1/backend/src/models/UserPermission.js p2/backend/src/models/UserPermission.js
+--- p1/backend/src/models/UserPermission.js	2026-10-02 11:59:48.570636200 +0000
++++ p2/backend/src/models/UserPermission.js	2026-10-02 11:59:48.590636200 +0000
+@@ -4,6 +4,8 @@
+   const UserPermission = sequelize.define('UserPermission', {
+     user_id: { type: DataTypes.UUID, primaryKey: true },
+     permission_code: { type: DataTypes.STRING(100), primaryKey: true },
++    // 'grant' = ajoutée au rôle, 'deny' = retirée du rôle (migration 014).
++    effet: { type: DataTypes.STRING(5), allowNull: false, defaultValue: 'grant', validate: { isIn: [['grant', 'deny']] } },
+     granted_at: DataTypes.DATE,
+   }, {
+     tableName: 'user_permissions',
+diff -ruN p1/backend/src/routes/index.js p2/backend/src/routes/index.js
+--- p1/backend/src/routes/index.js	2026-10-02 11:57:38.952636200 +0000
++++ p2/backend/src/routes/index.js	2026-10-02 12:00:21.752636200 +0000
+@@ -159,25 +159,27 @@
+ router.get('/dashboard/stats', authGuard, tenantGuard, dashCtrl.getStats);
+ 
+ // ── Permissions ───────────────────────────────────────────────────────────
++// Catalogue en lecture (+ libellés) : les codes sont créés par migration SQL,
++// jamais depuis l'interface. Exceptions individuelles : POST = enregistrer,
++// DELETE = revenir aux droits du rôle.
+ const permCtrl = require('../controllers/permissions.controller');
+-const { createPermissionRules, updatePermissionRules, codesArrayRules } = require('../validators/permissions.validator');
++const { updatePermissionRules, codesArrayRules } = require('../validators/permissions.validator');
+ router.get   ('/permissions',                        authGuard, requireCabinet, permCtrl.getPermissions);
+-router.post  ('/permissions',                        authGuard, requireRole('super_admin'),                    createPermissionRules, validate, permCtrl.createPermission);
+ router.put   ('/permissions/:code',                  authGuard, requireRole('super_admin'),                    updatePermissionRules, validate, permCtrl.updatePermission);
+-router.delete('/permissions/:code',                  authGuard, requireRole('super_admin'),                    permCtrl.deletePermission);
+ router.get   ('/tenants/:tenantId/permissions',      authGuard, requireCabinet, permCtrl.getTenantPermissions);
+ router.post  ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setTenantPermissions);
+ router.get   ('/users/:userId/permissions',          authGuard, requireCabinet, permCtrl.getUserPermissions);
+ router.post  ('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setUserPermissions);
++router.delete('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    permCtrl.resetUserPermissions);
+ 
+ // ── Rôles personnalisés ───────────────────────────────────────────────────
+ const rolesCtrl = require('../controllers/roles.controller');
+ const { createRoleRules, updateRoleRules, roleIdParamRule, setRolePermissionsRules } = require('../validators/roles.validator');
+-router.get   ('/roles',                    authGuard, tenantGuard, requireRole('super_admin','directeur'), rolesCtrl.getRoles);
++router.get   ('/roles',                    authGuard, tenantGuard, requirePermission('users.view'), rolesCtrl.getRoles);
+ router.post  ('/roles',                    authGuard, tenantGuard, requireRole('super_admin'),             createRoleRules, validate, rolesCtrl.createRole);
+ router.put   ('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             updateRoleRules, validate, rolesCtrl.updateRole);
+ router.delete('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             roleIdParamRule, validate, rolesCtrl.deleteRole);
+-router.get   ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin','directeur'), rolesCtrl.getRolePermissions);
++router.get   ('/roles/:id/permissions',    authGuard, tenantGuard, requirePermission('users.view'), rolesCtrl.getRolePermissions);
+ router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin'),             setRolePermissionsRules, validate, rolesCtrl.setRolePermissions);
+ 
+ // ── Tenants ───────────────────────────────────────────────────────────────
+diff -ruN p1/backend/src/services/notification.service.js p2/backend/src/services/notification.service.js
+--- p1/backend/src/services/notification.service.js	2026-10-02 11:56:39.155636200 +0000
++++ p2/backend/src/services/notification.service.js	2026-10-02 12:01:01.034636200 +0000
+@@ -12,6 +12,10 @@
+ 
+ const { query } = require('../config/database');
+ const { sendMouvementAttenteAlert } = require('./email.service');
++const { usersAvecPermission } = require('./permission.service');
++
++// Qui valide une dépense en attente : la PERMISSION, pas le rôle « directeur ».
++const PERM_VALIDATION = 'journal.validate';
+ 
+ /**
+  * Crée une notification in-app pour UN destinataire (best-effort).
+@@ -33,22 +37,22 @@
+ };
+ 
+ /**
+- * Notifie tous les destinataires d'un rôle donné (in-app), une ligne par utilisateur.
++ * Notifie (in-app) tous les utilisateurs actifs du client qui détiennent une
++ * permission. Remplace l'ancienne notification par rôle : un profil métier
++ * ayant journal.validate sans être « directeur » n'était jamais prévenu, et un
++ * directeur à qui l'on avait retiré la validation l'était quand même.
+  * @returns {Promise<number>} nombre de notifications créées.
+  */
+-const notifierRole = async (o) => {
++const notifierPermission = async (o) => {
+   let n = 0;
+   try {
+-    const { rows: users } = await query(
+-      `SELECT id FROM users WHERE tenant_id=$1 AND role=$2 AND actif=true`,
+-      [o.tenantId, o.role]
+-    );
++    const users = await usersAvecPermission(o.tenantId, o.permission);
+     for (const u of users) {
+       const r = await creerNotification({ ...o, destinataireId: u.id });
+       if (r) n += 1;
+     }
+   } catch (e) {
+-    console.warn('[Notif] notifierRole :', e.message);
++    console.warn('[Notif] notifierPermission :', e.message);
+   }
+   return n;
+ };
+@@ -72,21 +76,17 @@
+     const tenantNom = tRows[0]?.nom || 'Entité';
+ 
+     // ── Notification in-app (cloche) à chaque directeur actif ────────────────
+-    await notifierRole({
+-      tenantId: p.tenantId, role: 'directeur',
++    await notifierPermission({
++      tenantId: p.tenantId, permission: PERM_VALIDATION,
+       type: 'attente_creee',
+       titre: `Dépense à valider — ${m.rubrique_code}`,
+       message: `${p.caissierNom || 'La caisse'} a soumis « ${m.intitule} » (${(parseFloat(m.sortie)||0).toLocaleString('fr-FR')} FCFA) en attente de votre autorisation.`,
+       refType: 'mouvement_attente', refId: m.id,
+     });
+ 
+-    // Destinataires e-mail : directeurs actifs du tenant
+-    const { rows: dirs } = await query(
+-      `SELECT username, email, COALESCE(canal_notif,'email') AS canal_notif
+-         FROM users
+-        WHERE tenant_id=$1 AND role='directeur' AND actif=true`,
+-      [p.tenantId]
+-    );
++    // Destinataires e-mail : personnes actives habilitées à valider
++    const dirs = (await usersAvecPermission(p.tenantId, PERM_VALIDATION))
++      .map((u) => ({ ...u, canal_notif: u.canal_notif || 'email' }));
+ 
+     for (const d of dirs) {
+       const canal = d.canal_notif;
+@@ -150,4 +150,4 @@
+   });
+ };
+ 
+-module.exports = { creerNotification, notifierRole, notifyMouvementEnAttente, notifyDecisionMouvement };
++module.exports = { creerNotification, notifierPermission, notifyMouvementEnAttente, notifyDecisionMouvement };
+diff -ruN p1/backend/src/services/permission.service.js p2/backend/src/services/permission.service.js
+--- p1/backend/src/services/permission.service.js	2026-10-02 11:56:39.107636200 +0000
++++ p2/backend/src/services/permission.service.js	2026-10-02 11:59:17.957636200 +0000
+@@ -1,169 +1,90 @@
+ // src/services/permission.service.js
+ // Résolution des permissions — source d'autorisation unique de l'application.
+ //
+-// Modèle retenu : LA PERMISSION PRIME. Le rôle fixe (users.role) ne décide
+-// plus rien par lui-même ; il désigne seulement le jeu de permissions par
+-// DÉFAUT de la personne (ROLE_DEFAULTS ci-dessous). Toute attribution plus
+-// fine remplace ce défaut. C'est ce qui permet enfin d'accorder une action
+-// précise à une personne précise sans changer son rôle.
++// Modèle (depuis la migration 014) — tout est EN BASE, plus rien en dur :
+ //
+-// Ordre de résolution (le premier niveau qui existe l'emporte, il REMPLACE
+-// les suivants — il ne s'y ajoute pas) :
+-//   1. super_admin              → tout autorisé (administrateur du cabinet).
+-//   2. user_permissions         → permissions individuelles de la personne.
+-//   3. role_permissions         → « profil métier » (users.custom_role_id).
+-//   4. ROLE_DEFAULTS[role]      → défaut du rôle fixe.
+-// Puis, quel que soit le niveau retenu :
+-//   5. tenant_permissions       → plafond du client, s'il en a un de configuré
+-//                                 (intersection : le tenant ne peut que
+-//                                 retirer, jamais accorder).
+-const { TenantPermission, UserPermission, RolePermission, User, Permission } = require('../models');
+-
+-// Permissions par défaut de chaque rôle fixe.
++//   base        = permissions du profil métier (users.custom_role_id) s'il en
++//                 porte au moins une, sinon celles du rôle système
++//                 (roles.is_system, code = users.role) ;
++//   effectives  = (base ∪ exceptions 'grant') − exceptions 'deny'
++//                 ∩ plafond du client (tenant_permissions), s'il en a un.
++//   super_admin = aucune restriction (null).
+ //
+-// Construite pour ne rien ÉLARGIR par rapport au comportement d'avant son
+-// introduction : jusqu'ici `requirePermission` laissait tout passer quand rien
+-// n'était configuré (et rien ne l'était), si bien qu'un auditeur pouvait
+-// techniquement saisir un mouvement et un caissier supprimer une rubrique via
+-// l'API — seul le frontend le masquait. Cette matrice referme ces accès non
+-// voulus ; elle n'en ouvre aucun. Une personne ayant besoin de plus reçoit
+-// une permission individuelle, ce qui est désormais le geste prévu.
+-const ROLE_DEFAULTS = {
+-  directeur: [
+-    'journal.view', 'journal.create', 'journal.edit', 'journal.delete', 'journal.validate', 'journal.ran',
+-    'budget.view', 'budget.edit', 'budget.validate',
+-    'budget.demande_create', 'budget.demande_validate', 'budget.demande_delete',
+-    'previsions.view', 'previsions.edit',
+-    'appel_fonds.view', 'appel_fonds.create', 'appel_fonds.validate', 'appel_fonds.delete',
+-    'rubriques.view', 'rubriques.edit',
+-    'users.view', 'users.create', 'users.edit', 'users.delete',
+-    'config.view', 'config.edit',
+-    'rapport.view', 'rapport.export',
+-    'plan_comptable.view', 'plan_comptable.edit', 'plan_comptable.delete',
+-    'journaux.view', 'journaux.edit', 'journaux.reouvrir',
+-    'pieces.view', 'pieces.edit', 'pieces.upload',
+-    'banque.view', 'banque.edit',
+-  ],
+-
+-  // Intervient sur les données comptables de ses clients, pas sur leurs
+-  // utilisateurs ni leur configuration, et ne valide pas à leur place.
+-  comptable_cabinet: [
+-    'journal.view', 'journal.create', 'journal.edit', 'journal.delete', 'journal.ran',
+-    'budget.view', 'budget.edit',
+-    'previsions.view', 'previsions.edit',
+-    'appel_fonds.view', 'appel_fonds.create',
+-    'rubriques.view', 'rubriques.edit',
+-    'users.view',
+-    'config.view',
+-    'rapport.view', 'rapport.export',
+-    'plan_comptable.view', 'plan_comptable.edit', 'plan_comptable.delete',
+-    'journaux.view',
+-    'pieces.view', 'pieces.edit', 'pieces.upload',
+-    'banque.view', 'banque.edit',
+-  ],
+-
+-  // Saisie quotidienne. `journal.edit` est conservé : le contrôleur
+-  // updateMouvement ne cadre pas la propriété du mouvement, cette action fait
+-  // partie de son travail courant (corriger une écriture) depuis toujours.
+-  caissier: [
+-    'journal.view', 'journal.create', 'journal.edit',
+-    // Report à nouveau : la caissière saisit le solde d'ouverture de sa caisse
+-    // (bloqué côté serveur une fois le mois arrêté — voir setRan).
+-    'journal.ran',
+-    'budget.view', 'budget.demande_create', 'budget.demande_delete',
+-    // Saisit les lignes prévisionnelles (page Prévisions, synthèse Appel de
+-    // fonds) sans pouvoir modifier les dotations budgétaires elles-mêmes.
+-    'previsions.view', 'previsions.edit',
+-    'appel_fonds.view', 'appel_fonds.create',
+-    'rubriques.view',
+-    'users.view', // alimente les listes de responsables dans l'interface
+-    'config.view',
+-    'rapport.view',
+-    // Peut AJOUTER des comptes additifs au plan comptable, pas en désactiver :
+-    // le plan est commun à tous les clients (plan_comptable.delete).
+-    'plan_comptable.view', 'plan_comptable.edit',
+-    'journaux.view',
+-    'pieces.view', 'pieces.upload',
+-    'banque.view',
+-  ],
+-
+-  // Lecture seule.
+-  auditeur: [
+-    'journal.view',
+-    'budget.view',
+-    'previsions.view',
+-    'appel_fonds.view',
+-    'rubriques.view',
+-    'users.view',
+-    'config.view',
+-    'rapport.view', 'rapport.export',
+-    'plan_comptable.view',
+-    'journaux.view',
+-    'pieces.view',
+-    'banque.view',
+-  ],
+-};
+-
+-// Renvoie la liste des codes autorisés, ou `null` pour « aucune restriction »
+-// (super_admin uniquement). Utilisée par le guard requirePermission et
+-// exposée au frontend via /auth/login et /auth/me, afin que l'interface et le
+-// backend appliquent exactement la même règle.
++// Les exceptions individuelles (user_permissions.effet) S'AJOUTENT au rôle au
++// lieu de le remplacer : modifier un rôle ou ajouter une permission au
++// catalogue profite donc aussi aux personnes qui ont des exceptions.
++const { sequelize, Permission, TenantPermission } = require('../models');
++
++const SQL_BASE = `
++  WITH u AS (
++    SELECT id, role, custom_role_id FROM users WHERE id = :userId
++  ),
++  profil AS (
++    SELECT rp.permission_code FROM role_permissions rp JOIN u ON rp.role_id = u.custom_role_id
++  ),
++  systeme AS (
++    SELECT rp.permission_code
++      FROM role_permissions rp
++      JOIN roles r ON r.id = rp.role_id AND r.tenant_id IS NULL AND r.is_system
++      JOIN u ON r.code = u.role
++  )
++  SELECT permission_code FROM profil
++  UNION
++  SELECT permission_code FROM systeme WHERE NOT EXISTS (SELECT 1 FROM profil)
++`;
++
++const SQL_EFFECTIVES = `
++  WITH base AS (${SQL_BASE}),
++  ex AS (
++    SELECT permission_code, effet FROM user_permissions WHERE user_id = :userId
++  ),
++  eff AS (
++    (SELECT permission_code FROM base
++     UNION
++     SELECT permission_code FROM ex WHERE effet = 'grant')
++    EXCEPT
++    SELECT permission_code FROM ex WHERE effet = 'deny'
++  ),
++  plafond AS (
++    SELECT permission_code FROM tenant_permissions WHERE tenant_id = CAST(:tenantId AS uuid)
++  )
++  SELECT permission_code FROM eff
++   WHERE NOT EXISTS (SELECT 1 FROM plafond)
++      OR permission_code IN (SELECT permission_code FROM plafond)
++   ORDER BY permission_code
++`;
++
++/** Permissions de BASE (rôle système ou profil métier), sans exceptions ni plafond. */
++const getBasePermissions = async (userId) => {
++  const rows = await sequelize.query(SQL_BASE, {
++    replacements: { userId }, type: sequelize.QueryTypes.SELECT,
++  });
++  return rows.map((r) => r.permission_code);
++};
++
++/**
++ * Liste des codes autorisés, ou `null` pour « aucune restriction »
++ * (super_admin uniquement). Utilisée par requirePermission et renvoyée au
++ * frontend par /auth/login et /auth/me : interface et API appliquent la même règle.
++ * `tenantId` = client du CONTEXTE (req.tenantId), qui fixe le plafond.
++ */
+ const getEffectivePermissions = async ({ tenantId, userId, role }) => {
+   if (role === 'super_admin') return null;
+-
+-  let accordees = null;
+-
+-  // 2. Permissions individuelles — priment sur tout le reste.
+-  const perUser = await UserPermission.findAll({
+-    where: { user_id: userId }, attributes: ['permission_code'], raw: true,
++  const rows = await sequelize.query(SQL_EFFECTIVES, {
++    replacements: { userId, tenantId: tenantId || null },
++    type: sequelize.QueryTypes.SELECT,
+   });
+-  if (perUser.length > 0) accordees = perUser.map((r) => r.permission_code);
+-
+-  // 3. Profil métier (rôle personnalisé du tenant).
+-  if (!accordees) {
+-    const u = await User.findByPk(userId, { attributes: ['custom_role_id'], raw: true });
+-    if (u && u.custom_role_id) {
+-      const perProfil = await RolePermission.findAll({
+-        where: { role_id: u.custom_role_id }, attributes: ['permission_code'], raw: true,
+-      });
+-      if (perProfil.length > 0) accordees = perProfil.map((r) => r.permission_code);
+-    }
+-  }
+-
+-  // 4. Défaut du rôle fixe.
+-  if (!accordees) accordees = [...(ROLE_DEFAULTS[role] || [])];
+-
+-  // 5. Plafond du tenant : ne peut que retirer.
+-  if (tenantId) {
+-    const perTenant = await TenantPermission.findAll({
+-      where: { tenant_id: tenantId }, attributes: ['permission_code'], raw: true,
+-    });
+-    if (perTenant.length > 0) {
+-      const plafond = new Set(perTenant.map((r) => r.permission_code));
+-      accordees = accordees.filter((code) => plafond.has(code));
+-    }
+-  }
+-
+-  // Implication : qui travaille dans un journal doit pouvoir en voir la liste
+-  // (menu latéral). journaux.view n'existe que depuis la 012 : les profils,
+-  // surcharges et plafonds enregistrés avant l'ignorent, et la personne
+-  // perdait alors tous ses journaux à l'écran alors qu'elle a journal.view.
+-  if (accordees.includes('journal.view') && !accordees.includes('journaux.view')) {
+-    accordees.push('journaux.view');
+-  }
++  return rows.map((r) => r.permission_code);
++};
+ 
+-  return accordees;
++const userHasPermission = async (ctx, code) => {
++  const accordees = await getEffectivePermissions(ctx);
++  return accordees === null || accordees.includes(code);
+ };
+ 
+-// Contrôle d'une liste de codes avant enregistrement (utilisateur ou profil).
+-// Renvoie { codes, erreur } : `codes` nettoyé, `erreur` null si tout est accordable.
+-//  - code inconnu du catalogue → ignoré. La modale renvoie la liste EFFECTIVE,
+-//    qui peut contenir un code du défaut de rôle pas encore migré en base
+-//    (ex. plan_comptable.delete avant la 013) : le refuser bloquait tout
+-//    enregistrement, et l'insérer violerait la clé étrangère ;
+-//  - code hors plafond du client → refus explicite. Sans ce contrôle, la case
+-//    cochée était enregistrée puis silencieusement retirée par le plafond
+-//    (étape 5) : la personne n'obtenait rien et la case réapparaissait vide.
++// Contrôle d'une liste de codes avant enregistrement (exceptions ou profil).
++// Renvoie { codes, erreur } : `codes` nettoyé (inconnus ignorés), `erreur`
++// non nulle si un code est hors plafond du client.
+ const verifierCodesAccordables = async (codes, tenantId) => {
+   const catalogue = new Set((await Permission.findAll({ attributes: ['code'], raw: true })).map((p) => p.code));
+   codes = [...new Set(codes)].filter((c) => catalogue.has(c));
+@@ -186,10 +107,25 @@
+   return { codes, erreur: null };
+ };
+ 
+-const userHasPermission = async ({ tenantId, userId, role }, code) => {
+-  if (role === 'super_admin') return true;
+-  const accordees = await getEffectivePermissions({ tenantId, userId, role });
+-  return accordees === null || accordees.includes(code);
++/**
++ * Utilisateurs ACTIFS d'un client qui détiennent une permission — remplace
++ * les requêtes « WHERE role = 'directeur' » des notifications : la personne
++ * notifiée est celle qui peut réellement agir.
++ */
++const usersAvecPermission = async (tenantId, code) => {
++  const { User } = require('../models');
++  const users = await User.findAll({
++    where: { tenant_id: tenantId, actif: true },
++    attributes: ['id', 'username', 'email', 'role', 'canal_notif'], raw: true,
++  });
++  const res = [];
++  for (const u of users) {
++    if (await userHasPermission({ tenantId, userId: u.id, role: u.role }, code)) res.push(u);
++  }
++  return res;
+ };
+ 
+-module.exports = { userHasPermission, getEffectivePermissions, verifierCodesAccordables, ROLE_DEFAULTS };
++module.exports = {
++  getEffectivePermissions, getBasePermissions, userHasPermission,
++  verifierCodesAccordables, usersAvecPermission,
++};
+diff -ruN p1/backend/tools/diag-permissions.js p2/backend/tools/diag-permissions.js
+--- p1/backend/tools/diag-permissions.js	2026-10-02 11:56:39.182636200 +0000
++++ p2/backend/tools/diag-permissions.js	2026-10-02 12:01:15.284636200 +0000
+@@ -4,14 +4,14 @@
+ //     npm run perm:diag                 → tous les utilisateurs (hors super_admin)
+ //     npm run perm:diag -- caissiere1   → un seul utilisateur (username)
+ //
+-// Pour chaque personne : le NIVEAU qui décide de ses droits (individuel,
+-// profil métier ou défaut du rôle), puis si elle a réellement journal.ran et
+-// plan_comptable.edit, et sinon POURQUOI (plafond du client, surcharge…).
++// Pour chaque personne : sa BASE (profil métier ou rôle système), ses
++// exceptions individuelles (grant/deny), puis si elle a réellement les
++// permissions ciblées, et sinon POURQUOI (plafond du client, exception…).
+ // Ne modifie rien.
+ const path = require('path');
+ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+ const { sequelize, User, UserPermission, RolePermission, TenantPermission } = require('../src/models');
+-const { getEffectivePermissions, ROLE_DEFAULTS } = require('../src/services/permission.service');
++const { getEffectivePermissions, getBasePermissions } = require('../src/services/permission.service');
+ 
+ const CIBLES = ['journal.ran', 'plan_comptable.edit', 'plan_comptable.delete'];
+ 
+@@ -29,14 +29,15 @@
+ 
+   for (const u of users) {
+     if (u.role === 'super_admin') continue;
+-    const perUser = await UserPermission.count({ where: { user_id: u.id } });
++    const ex = await UserPermission.findAll({ where: { user_id: u.id }, attributes: ['permission_code', 'effet'], raw: true });
++    const denies = new Set(ex.filter((e) => e.effet === 'deny').map((e) => e.permission_code));
++    const base = await getBasePermissions(u.id);
+     const perProfil = u.custom_role_id ? await RolePermission.count({ where: { role_id: u.custom_role_id } }) : 0;
+     const plafond = u.tenant_id
+       ? (await TenantPermission.findAll({ where: { tenant_id: u.tenant_id }, attributes: ['permission_code'], raw: true })).map((r) => r.permission_code)
+       : [];
+-    const niveau = perUser ? `permissions individuelles (${perUser})`
+-      : perProfil ? `profil métier #${u.custom_role_id} (${perProfil})`
+-      : `défaut du rôle « ${u.role} »`;
++    const niveau = (perProfil ? `profil métier #${u.custom_role_id} (${perProfil})` : `rôle système « ${u.role} »`)
++      + (ex.length ? ` + ${ex.length} exception(s) individuelle(s)` : '');
+     const eff = await getEffectivePermissions({ tenantId: u.tenant_id, userId: u.id, role: u.role }) || [];
+ 
+     console.log(`\n■ ${u.username} [${u.role}] — droits décidés par : ${niveau}`);
+@@ -45,9 +46,9 @@
+       if (eff.includes(code)) { console.log(`  ✓ ${code}`); continue; }
+       let raison;
+       if (plafond.length && !plafond.includes(code)) raison = 'bloquée par le plafond du client (Clients → 🔐 Permissions)';
+-      else if (perUser) raison = 'absente des permissions individuelles (Utilisateurs → 🔐)';
++      else if (denies.has(code)) raison = 'retirée par une exception individuelle (Utilisateurs → 🔐)';
+       else if (perProfil) raison = 'absente du profil métier (Configuration → Rôles)';
+-      else raison = `absente du défaut du rôle ${u.role}` + ((ROLE_DEFAULTS[u.role] || []).includes(code) ? ' (?!)' : '');
++      else raison = `absente du rôle système ${u.role}` + (base.includes(code) ? ' (?!)' : '');
+       console.log(`  ✗ ${code} — ${raison}`);
+     }
+   }
+diff -ruN p1/frontend/src/pages/PermissionsPage.jsx p2/frontend/src/pages/PermissionsPage.jsx
+--- p1/frontend/src/pages/PermissionsPage.jsx	2026-10-02 11:56:39.196636200 +0000
++++ p2/frontend/src/pages/PermissionsPage.jsx	2026-10-02 12:01:15.285636200 +0000
+@@ -93,14 +93,6 @@
+ 
+   useEffect(() => { charger(); }, [charger]);
+ 
+-  const onDelete = async (code) => {
+-    if (!window.confirm(`Supprimer la permission "${code}" ? Cette action est irréversible.`)) return;
+-    const res = await api.delete(`/permissions/${encodeURIComponent(code)}`);
+-    if (res.error) { toast(res.error, 'error'); return; }
+-    toast('Permission supprimée.', 'success');
+-    charger();
+-  };
+-
+   if (erreur) return <div className="alert-err">{erreur}</div>;
+   if (!perms) return <div className="loading-msg">Chargement…</div>;
+ 
+@@ -114,11 +106,9 @@
+           <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Permissions</h2>
+           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{perms.length} permission{perms.length > 1 ? 's' : ''} · {Object.keys(byModule).length} modules</span>
+         </div>
+-        {isSuperAdmin && (
+-          <button className="btn-add" onClick={() => setModal('new')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', fontSize: 13 }}>
+-            <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Nouvelle permission
+-          </button>
+-        )}
++        {/* Catalogue défini par les migrations SQL : pas de création ni de
++            suppression depuis l'interface, seuls libellés et descriptions
++            sont modifiables. */}
+       </div>
+ 
+       {Object.entries(byModule).map(([mod, list]) => {
+@@ -145,7 +135,6 @@
+                         <td>
+                           <div className="row-actions">
+                             <button className="btn-icon" onClick={() => setModal({ edit: p })}>✏️</button>
+-                            <button className="btn-icon danger" onClick={() => onDelete(p.code)}>✕</button>
+                           </div>
+                         </td>
+                       )}

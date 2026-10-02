@@ -5,11 +5,13 @@
 //   node db/setup.js --status         → état de la base, sans rien écrire
 //   node db/setup.js --reset-admin    → réinitialise en plus le mot de passe admin
 //   node db/setup.js --prune          → désactive les comptes SYSCOHADA obsolètes
+//   node db/setup.js --config         → charge en plus db/data/config-*.js
+//   node db/setup.js --config --force → laisse cette config écraser l'existant
 //
 // Exactement les mêmes étapes que GET /api/admin/setup, via db/lib/setup.js :
 // un seul chemin de code, donc pas de dérive entre local et production.
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { close } = require('../src/config/database');
 const { runSetup, getStatus } = require('./lib/setup');
@@ -23,9 +25,11 @@ const main = async () => {
   }
 
   const rapport = await runSetup({
-    prune:      args.includes('--prune'),
-    resetAdmin: args.includes('--reset-admin'),
-    onProgress: (etape, texte) => console.log(`[Setup] ${etape} : ${texte}`),
+    prune:       args.includes('--prune'),
+    resetAdmin:  args.includes('--reset-admin'),
+    withConfig:  args.includes('--config'),
+    configForce: args.includes('--force'),
+    onProgress:  (etape, texte) => console.log(`[Setup] ${etape} : ${texte}`),
   });
 
   console.log('');

@@ -2,10 +2,10 @@
   "name": "caisse-pro",
   "version": "2.0.0",
   "description": "Plateforme SaaS de gestion de caisse commerciale — Cabinet Expert-Comptable CEMAC",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "db:schema": "node db/migrate.js --schema",
     "db:migrate": "node db/migrate.js",
     "db:status": "node db/migrate.js --status",
@@ -13,8 +13,14 @@
     "db:plan": "node db/seed-plan-comptable.js",
     "db:plan:status": "node db/seed-plan-comptable.js --status",
     "db:setup": "node db/setup.js",
-    "db:setup:status": "node db/setup.js --status"
+    "db:setup:status": "node db/setup.js --status",
+    "db:config": "node db/setup.js --config",
+    "db:check-drift": "node tools/check-drift.js",
+    "config:export": "node tools/export-config.js",
+    "deploy:check": "node tools/check-deploy.js",
+    "perm:diag": "node tools/diag-permissions.js"
   },
+  "//": "Les scripts sequelize:migrate* ont été retirés : sequelize-cli est gelé sur son baseline et n'est joué nulle part dans la chaîne de déploiement. Toute migration de schéma s'écrit en SQL dans db/migrations/ — voir migrations/README.md.",
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
@@ -28,11 +34,12 @@
     "morgan": "^1.10.0",
     "nodemailer": "^9.0.3",
     "pg": "^8.11.3",
-    "uuid": "^9.0.0",
-    "winston": "^3.11.0"
+    "sequelize": "^6.37.8",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "sequelize-cli": "^6.6.5"
   },
   "engines": {
     "node": ">=18.0.0"

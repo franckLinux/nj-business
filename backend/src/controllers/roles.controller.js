@@ -1,18 +1,21 @@
-const { query, pool } = require('../config/database');
+// src/controllers/roles.controller.js
+const { sequelize, Role, RolePermission } = require('../models');
+const { verifierCodesAccordables } = require('../services/permission.service');
 
 // ── Liste des rôles du tenant ────────────────────────────────────────────────
 const getRoles = async (req, res) => {
   try {
-    const result = await query(
-      `SELECT r.*, COUNT(rp.permission_code)::int AS nb_permissions
-       FROM roles r
-       LEFT JOIN role_permissions rp ON rp.role_id = r.id
-       WHERE r.tenant_id = $1
-       GROUP BY r.id
-       ORDER BY r.created_at ASC`,
-      [req.tenantId]
-    );
-    res.json(result.rows);
+    const roles = await Role.findAll({
+      where: { tenant_id: req.tenantId },
+      attributes: {
+        include: [[sequelize.fn('COUNT', sequelize.col('RolePermissions.permission_code')), 'nb_permissions']],
+      },
+      include: [{ model: RolePermission, attributes: [] }],
+      group: ['Role.id'],
+      order: [['created_at', 'ASC']],
+      subQuery: false,
+    });
+    res.json(roles.map((r) => ({ ...r.toJSON(), nb_permissions: parseInt(r.get('nb_permissions'), 10) })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -24,15 +27,16 @@ const createRole = async (req, res) => {
   if (!nom || !code) return res.status(400).json({ error: 'Nom et code obligatoires.' });
   const safeCode = code.toLowerCase().replace(/[^a-z0-9_]/g, '_');
   try {
-    const result = await query(
-      `INSERT INTO roles (nom, code, description, couleur, tenant_id)
-       VALUES ($1,$2,$3,$4,$5)
-       RETURNING *`,
-      [nom.trim(), safeCode, description||'', couleur||'#6366f1', req.tenantId]
-    );
-    res.status(201).json(result.rows[0]);
+    const role = await Role.create({
+      nom: nom.trim(),
+      code: safeCode,
+      description: description || '',
+      couleur: couleur || '#6366f1',
+      tenant_id: req.tenantId,
+    });
+    res.status(201).json(role);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: `Le code "${code}" existe déjà.` });
+    if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: `Le code "${code}" existe déjà.` });
     res.status(500).json({ error: err.message });
   }
 };
@@ -43,13 +47,12 @@ const updateRole = async (req, res) => {
   const { nom, description, couleur } = req.body;
   if (!nom) return res.status(400).json({ error: 'Nom obligatoire.' });
   try {
-    const result = await query(
-      `UPDATE roles SET nom=$1, description=$2, couleur=$3
-       WHERE id=$4 AND tenant_id=$5 RETURNING *`,
-      [nom.trim(), description||'', couleur||'#6366f1', id, req.tenantId]
+    const [count, rows] = await Role.update(
+      { nom: nom.trim(), description: description || '', couleur: couleur || '#6366f1' },
+      { where: { id, tenant_id: req.tenantId }, returning: true }
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Rôle introuvable.' });
-    res.json(result.rows[0]);
+    if (count === 0) return res.status(404).json({ error: 'Rôle introuvable.' });
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -59,7 +62,7 @@ const updateRole = async (req, res) => {
 const deleteRole = async (req, res) => {
   const { id } = req.params;
   try {
-    await query('DELETE FROM roles WHERE id=$1 AND tenant_id=$2', [id, req.tenantId]);
+    await Role.destroy({ where: { id, tenant_id: req.tenantId } });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -70,11 +73,10 @@ const deleteRole = async (req, res) => {
 const getRolePermissions = async (req, res) => {
   const { id } = req.params;
   try {
-    const result = await query(
-      `SELECT permission_code FROM role_permissions WHERE role_id=$1`,
-      [id]
-    );
-    res.json(result.rows.map(r => r.permission_code));
+    const role = await Role.findOne({ where: { id, tenant_id: req.tenantId }, attributes: ['id'], raw: true });
+    if (!role) return res.status(404).json({ error: 'Rôle introuvable pour ce client.' });
+    const perms = await RolePermission.findAll({ where: { role_id: id }, attributes: ['permission_code'], raw: true });
+    res.json(perms.map((r) => r.permission_code));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -83,22 +85,25 @@ const getRolePermissions = async (req, res) => {
 // ── Définir les permissions d'un rôle (remplace tout) ───────────────────────
 const setRolePermissions = async (req, res) => {
   const { id } = req.params;
-  const codes = Array.isArray(req.body.codes) ? req.body.codes : [];
-  const client = await pool.connect();
+  let codes = Array.isArray(req.body.codes) ? req.body.codes : [];
   try {
-    await client.query('BEGIN');
-    await client.query('DELETE FROM role_permissions WHERE role_id=$1', [id]);
-    if (codes.length > 0) {
-      const vals = codes.map((c, i) => `($1, $${i+2})`).join(',');
-      await client.query(`INSERT INTO role_permissions (role_id, permission_code) VALUES ${vals}`, [id, ...codes]);
-    }
-    await client.query('COMMIT');
+    const role = await Role.findOne({ where: { id, tenant_id: req.tenantId }, attributes: ['id', 'tenant_id'], raw: true });
+    if (!role) return res.status(404).json({ error: 'Rôle introuvable pour ce client.' });
+    const verif = await verifierCodesAccordables(codes, role.tenant_id);
+    if (verif.erreur) return res.status(400).json({ error: verif.erreur });
+    codes = verif.codes;
+    await sequelize.transaction(async (t) => {
+      await RolePermission.destroy({ where: { role_id: id }, transaction: t });
+      if (codes.length > 0) {
+        await RolePermission.bulkCreate(
+          codes.map((permission_code) => ({ role_id: id, permission_code })),
+          { transaction: t }
+        );
+      }
+    });
     res.json({ ok: true, count: codes.length });
   } catch (err) {
-    await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
   }
 };
 

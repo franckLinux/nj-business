@@ -2,15 +2,13 @@
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const { query } = require('../config/database');
+const { getEffectivePermissions } = require('../services/permission.service');
 
 /**
  * POST /api/auth/login
  */
 const login = async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) {
-    return res.status(400).json({ error: 'Identifiant et mot de passe requis.' });
-  }
 
   try {
     const { rows } = await query(
@@ -51,6 +49,8 @@ const login = async (req, res) => {
     // Mise à jour dernière connexion
     await query('UPDATE users SET derniere_connexion = NOW() WHERE id = $1', [user.id]);
 
+    const permissions = await getEffectivePermissions({ tenantId: user.tenant_id, userId: user.id, role: user.role });
+
     res.json({
       accessToken,
       user: {
@@ -61,6 +61,7 @@ const login = async (req, res) => {
         tenantNom:   user.tenant_nom,
         tenantSlug:  user.tenant_slug,
         devise:      user.devise || process.env.DEVISE || 'FCFA',
+        permissions, // null = pas de restriction configurée (rôle fixe seul) ; tableau = liste exclusive
       },
     });
   } catch (err) {
@@ -83,7 +84,9 @@ const me = async (req, res) => {
       [req.user.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Utilisateur introuvable.' });
-    res.json(rows[0]);
+    const u = rows[0];
+    const permissions = await getEffectivePermissions({ tenantId: u.tenant_id, userId: u.id, role: u.role });
+    res.json({ ...u, permissions });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
@@ -94,9 +97,6 @@ const me = async (req, res) => {
  */
 const changePassword = async (req, res) => {
   const { ancienPassword, nouveauPassword } = req.body;
-  if (!ancienPassword || !nouveauPassword || nouveauPassword.length < 6) {
-    return res.status(400).json({ error: 'Mot de passe invalide (minimum 6 caractères).' });
-  }
 
   try {
     const { rows } = await query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);

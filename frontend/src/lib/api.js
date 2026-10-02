@@ -1,8 +1,18 @@
 // Couche API — reprend le contrat de legacy/js/app.js :
 // les réponses sont renvoyées telles quelles, une erreur métier arrive
 // sous la forme { error: '...' }. Les pages migrées gardent donc le même code.
+//
+// Le backend enveloppe désormais toutes ses réponses JSON dans
+// { success, message, data, errors } (voir backend/src/middleware/responseEnvelope.js).
+// On déballe ici `data` — qui contient toujours le corps exact que le controller
+// aurait renvoyé avant l'enveloppe — pour que le reste du frontend n'ait rien à changer.
 
-const API = '/api';
+// VITE_API_URL est vide par défaut (même domaine que le frontend, cas
+// PlanetHoster standard où le backend sert aussi le build React). À
+// renseigner uniquement si backend et frontend sont déployés sur deux
+// domaines/sous-domaines distincts — voir frontend/.env.example.
+export const API_BASE = import.meta.env.VITE_API_URL || '';
+const API = API_BASE + '/api';
 
 // Le token et le tenant actif sont injectés par AppContext au démarrage
 // et à chaque changement, pour éviter de passer le state à chaque appel.
@@ -41,7 +51,11 @@ const request = async (method, url, body) => {
   const text = await res.text();
   if (!text) return res.ok ? {} : { error: `Erreur ${res.status}` };
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.success === 'boolean') {
+      return parsed.data ?? (parsed.success ? {} : { error: parsed.message });
+    }
+    return parsed;
   } catch {
     return { error: `Réponse inattendue du serveur (${res.status}).` };
   }

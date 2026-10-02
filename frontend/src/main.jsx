@@ -5,14 +5,12 @@ import App from './App';
 import { AppProvider } from '@/context/AppContext';
 import { ToastProvider } from '@/context/ToastContext';
 
-// Source unique du style : la feuille de l'app vanilla est importée telle
-// quelle, ce qui garantit un rendu identique entre / et /v2.
-import '../legacy/css/app.css';
+import '@/styles/app.css';
 import '@/styles/sidebar.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter basename="/v2">
+    <BrowserRouter>
       <AppProvider>
         <ToastProvider>
           <App />

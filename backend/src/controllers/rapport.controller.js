@@ -1,5 +1,5 @@
-// src/controllers/rapport.controller.js
-const { query } = require('../config/database');
+const { Op, fn, col } = require('sequelize');
+const { Journal, Ran, Banque, Mouvement, Tenant } = require('../models');
 
 const MOIS = ['Janvier','Fevrier','Mars','Avril','Mai','Juin',
               'Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
@@ -21,25 +21,41 @@ const getCompteEmploi = async (req, res) => {
   const tenantId = req.tenantId;
   if (!tenantId) return res.status(400).json({ error: "Sélectionnez un client pour voir son compte d'emploi." });
 
-  const yr   = parseInt(annee);
+  const yr   = parseInt(annee, 10);
   const prev = moisPrecedent(mois, yr);
 
   try {
     // ── 1. Journaux actifs (toutes caisses — hors type banque) ───────────────
-    const { rows: journaux } = await query(
-      `SELECT id, nom, code, type FROM journaux
-       WHERE tenant_id=$1 AND actif=true AND type != 'banque'
-       ORDER BY ordre, nom`,
-      [tenantId]
-    );
-
     // ── 2. RAN du mois (par journal_id ou par type_caisse) ───────────────────
-    const { rows: ranRows } = await query(
-      `SELECT journal_id, type_caisse, COALESCE(SUM(montant),0) AS montant
-       FROM ran WHERE tenant_id=$1 AND mois=$2 AND annee=$3
-       GROUP BY journal_id, type_caisse`,
-      [tenantId, mois, yr]
-    );
+    // ── 3. Banque + 4. Mouvements du mois groupés par journal + rubrique ─────
+    const [journaux, ranRows, bqPrev, bqCourant, mvtRows, tenant] = await Promise.all([
+      Journal.findAll({
+        where: { tenant_id: tenantId, actif: true, type: { [Op.ne]: 'banque' } },
+        attributes: ['id', 'nom', 'code', 'type'],
+        order: [['ordre', 'ASC'], ['nom', 'ASC']],
+        raw: true,
+      }),
+      Ran.findAll({
+        where: { tenant_id: tenantId, mois, annee: yr },
+        attributes: ['journal_id', 'type_caisse', [fn('COALESCE', fn('SUM', col('montant')), 0), 'montant']],
+        group: ['journal_id', 'type_caisse'], raw: true,
+      }),
+      Banque.findOne({ where: { tenant_id: tenantId, mois: prev.mois, annee: prev.annee } }),
+      Banque.findOne({ where: { tenant_id: tenantId, mois, annee: yr } }),
+      Mouvement.findAll({
+        where: { tenant_id: tenantId, mois, annee: yr },
+        attributes: [
+          'journal_id', 'type_caisse', 'rubrique_code', 'intitule',
+          [fn('COALESCE', fn('SUM', col('entree')), 0), 'total_entree'],
+          [fn('COALESCE', fn('SUM', col('sortie')), 0), 'total_sortie'],
+        ],
+        group: ['journal_id', 'type_caisse', 'rubrique_code', 'intitule'],
+        order: [['rubrique_code', 'ASC']],
+        raw: true,
+      }),
+      Tenant.findOne({ where: { id: tenantId }, attributes: ['nom', 'devise', 'directeur_nom', 'caissier_nom'] }),
+    ]);
+
     const ranByJournalId = {};
     const ranLegacy = {};   // type_caisse → montant (quand journal_id IS NULL)
     ranRows.forEach(r => {
@@ -50,28 +66,9 @@ const getCompteEmploi = async (req, res) => {
       }
     });
 
-    // ── 3. Banque ─────────────────────────────────────────────────────────────
-    const [bqPrevRes, bqCourantRes] = await Promise.all([
-      query(`SELECT COALESCE(solde_final,0) AS val FROM banque WHERE tenant_id=$1 AND mois=$2 AND annee=$3`,
-            [tenantId, prev.mois, prev.annee]),
-      query(`SELECT COALESCE(fonds_recus,0) AS fonds, COALESCE(solde_final,0) AS solde FROM banque WHERE tenant_id=$1 AND mois=$2 AND annee=$3`,
-            [tenantId, mois, yr]),
-    ]);
-    const soldeBanqueInitial = parseFloat(bqPrevRes.rows[0]?.val    || 0);
-    const fondsRecusBanque   = parseFloat(bqCourantRes.rows[0]?.fonds || 0);
-    const soldeBanqueFinal   = parseFloat(bqCourantRes.rows[0]?.solde || 0);
-
-    // ── 4. Mouvements du mois groupés par journal + rubrique ─────────────────
-    const { rows: mvtRows } = await query(
-      `SELECT journal_id, type_caisse, rubrique_code, intitule,
-              COALESCE(SUM(entree),0) AS total_entree,
-              COALESCE(SUM(sortie),0) AS total_sortie
-       FROM journal
-       WHERE tenant_id=$1 AND mois=$2 AND annee=$3
-       GROUP BY journal_id, type_caisse, rubrique_code, intitule
-       ORDER BY rubrique_code`,
-      [tenantId, mois, yr]
-    );
+    const soldeBanqueInitial = parseFloat(bqPrev?.solde_final) || 0;
+    const fondsRecusBanque   = parseFloat(bqCourant?.fonds_recus) || 0;
+    const soldeBanqueFinal   = parseFloat(bqCourant?.solde_final) || 0;
 
     // ── 5. Agréger par journal + pivot rubriques pour Section II ─────────────
     const mvtByJournal  = {};
@@ -99,7 +96,6 @@ const getCompteEmploi = async (req, res) => {
     });
 
     // ── 6. Section I — Ressources par journal ─────────────────────────────────
-    // Journaux réels
     const ressources_journaux = journaux.map(j => ({
       journal_id:   j.id,
       journal_nom:  j.nom,
@@ -156,19 +152,13 @@ const getCompteEmploi = async (req, res) => {
     const disponibleFinal     = totalSoldesJournaux + soldeBanqueFinal;
     const ecart               = totalRessources - totalEmplois - disponibleFinal;
 
-    // ── 9. Info tenant ─────────────────────────────────────────────────────────
-    const { rows: tenantRows } = await query(
-      'SELECT nom, devise, directeur_nom, caissier_nom FROM tenants WHERE id=$1', [tenantId]
-    );
-    const tenant = tenantRows[0] || {};
-
     res.json({
       meta: {
         mois, annee: yr,
-        tenant_nom:    tenant.nom           || '',
-        directeur_nom: tenant.directeur_nom || '',
-        caissier_nom:  tenant.caissier_nom  || '',
-        devise:        tenant.devise        || 'FCFA',
+        tenant_nom:    tenant?.nom           || '',
+        directeur_nom: tenant?.directeur_nom || '',
+        caissier_nom:  tenant?.caissier_nom  || '',
+        devise:        tenant?.devise        || 'FCFA',
       },
       ressources: {
         journaux:             allJournauxRessources,
@@ -199,28 +189,28 @@ const getCompteEmploi = async (req, res) => {
 // Synthèse mois par mois pour le super_admin (tous les clients)
 const getSyntheseAnnuelle = async (req, res) => {
   const { annee } = req.query;
-  const yr = parseInt(annee) || new Date().getFullYear();
+  const yr = parseInt(annee, 10) || new Date().getFullYear();
   const tenantId = req.tenantId;
   if (!tenantId) return res.status(400).json({ error: 'Sélectionnez un client.' });
 
   try {
-    const { rows } = await query(
-      `SELECT mois,
-              COALESCE(SUM(entree),0) AS total_entrees,
-              COALESCE(SUM(sortie),0) AS total_sorties,
-              COUNT(*) AS nb_mouvements
-       FROM journal
-       WHERE tenant_id=$1 AND annee=$2
-       GROUP BY mois ORDER BY MIN(date)`,
-      [tenantId, yr]
-    );
+    const rows = await Mouvement.findAll({
+      where: { tenant_id: tenantId, annee: yr },
+      attributes: [
+        'mois',
+        [fn('COALESCE', fn('SUM', col('entree')), 0), 'total_entrees'],
+        [fn('COALESCE', fn('SUM', col('sortie')), 0), 'total_sorties'],
+        [fn('COUNT', col('id')), 'nb_mouvements'],
+      ],
+      group: ['mois'],
+      order: [[fn('MIN', col('date')), 'ASC']],
+      raw: true,
+    });
 
-    const { rows: tenantRows } = await query(
-      'SELECT nom FROM tenants WHERE id=$1', [tenantId]
-    );
+    const tenant = await Tenant.findOne({ where: { id: tenantId }, attributes: ['nom'] });
 
     res.json({
-      tenant_nom: tenantRows[0]?.nom || '',
+      tenant_nom: tenant?.nom || '',
       annee: yr,
       mois: rows,
     });

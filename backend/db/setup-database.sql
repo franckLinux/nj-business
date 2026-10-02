@@ -2,6 +2,12 @@
 -- Création du rôle et de la base CaissePro.
 -- À exécuter en tant que superutilisateur PostgreSQL (postgres).
 -- Idempotent : peut être relancé sans risque.
+--
+-- ATTENTION : 'Pass1234' est un mot de passe de DÉVELOPPEMENT LOCAL uniquement
+-- (poste mono-utilisateur, PostgreSQL non exposé). Ne jamais le réutiliser sur
+-- un serveur partagé ou en production — remplacez-le ci-dessous avant tout
+-- usage hors poste local. La configuration de production est indépendante :
+-- elle vit dans le DATABASE_URL du .env du serveur, jamais dans ce fichier.
 
 DO $$
 BEGIN

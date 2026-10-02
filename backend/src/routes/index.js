@@ -2,98 +2,70 @@
 const router = require('express').Router();
 const { authGuard, requireRole } = require('../middleware/auth');
 const { tenantGuard }             = require('../middleware/tenant');
-const { query }                   = require('../config/database');
+const { validate }                = require('../middleware/validate');
+const { requirePermission }       = require('../middleware/permission');
 
 // ── Initialisation de la base (déploiement) ───────────────────────────────
 // Monté en premier, sans authGuard : ces routes servent précisément quand
 // aucun compte n'existe encore. Elles sont protégées par SETUP_TOKEN et
 // restent invisibles (404) tant que cette variable n'est pas renseignée.
+//
+// IMPÉRATIF : router.use() et non router.get(). Avec .get('/admin', sousRouteur),
+// Express exige une correspondance EXACTE sur /api/admin et ne retire pas le
+// préfixe : /api/admin/setup retombait alors en 404, rendant tout le mécanisme
+// d'initialisation à distance inatteignable. Seul .use() monte le sous-routeur
+// en préfixe et lui transmet /setup et /setup/status.
 router.use('/admin', require('./admin-setup.route'));
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 const authCtrl = require('../controllers/auth.controller');
-router.post('/auth/login',           authCtrl.login);
+const { loginRules, changePasswordRules } = require('../validators/auth.validator');
+router.post('/auth/login',           loginRules, validate, authCtrl.login);
 router.get ('/auth/me',              authGuard, authCtrl.me);
-router.post('/auth/change-password', authGuard, authCtrl.changePassword);
+router.post('/auth/change-password', authGuard, changePasswordRules, validate, authCtrl.changePassword);
 
-// ── Journaux (dynamique) ──────────────────────────────────────────────────
+// ── Journaux (dynamique — module de permission "journaux") ────────────────
+// Définition des caisses/journaux, à distinguer du module "journal" qui porte
+// les mouvements (cf. plus bas).
 const jxCtrl = require('../controllers/journaux.controller');
-router.get   ('/journaux/next-code', authGuard, tenantGuard, jxCtrl.getNextCode);
-router.get   ('/journaux',      authGuard, tenantGuard, jxCtrl.getJournaux);
-router.post  ('/journaux',      authGuard, tenantGuard, jxCtrl.createJournal);
-router.put   ('/journaux/:id',  authGuard, tenantGuard, jxCtrl.updateJournal);
-router.delete('/journaux/:id',  authGuard, tenantGuard, jxCtrl.deleteJournal);
+const { createJournalRules, updateJournalRules, journalIdParamRule } = require('../validators/journaux.validator');
+router.get   ('/journaux/next-code', authGuard, tenantGuard, requirePermission('journaux.view'), jxCtrl.getNextCode);
+router.get   ('/journaux',      authGuard, tenantGuard, requirePermission('journaux.view'), jxCtrl.getJournaux);
+router.post  ('/journaux',      authGuard, tenantGuard, requirePermission('journaux.edit'), createJournalRules, validate, jxCtrl.createJournal);
+router.put   ('/journaux/:id',  authGuard, tenantGuard, requirePermission('journaux.edit'), updateJournalRules, validate, jxCtrl.updateJournal);
+router.delete('/journaux/:id',  authGuard, tenantGuard, requirePermission('journaux.edit'), journalIdParamRule, validate, jxCtrl.deleteJournal);
 
 // Arrêt de caisse
-router.post('/journaux/:id/arreter', authGuard, tenantGuard, async (req, res) => {
-  const { mois, annee, commentaire, solde_final } = req.body;
-  if (!mois || !annee) return res.status(400).json({ error: 'mois et annee requis.' });
-  const journalId = parseInt(req.params.id);
-  // Vérifier que l'utilisateur est responsable_arret du journal OU directeur/super_admin
-  try {
-    const { rows: jRows } = await query(
-      'SELECT responsable_arret FROM journaux WHERE id=$1 AND tenant_id=$2',
-      [journalId, req.tenantId]
-    );
-    if (!jRows.length) return res.status(404).json({ error: 'Journal introuvable.' });
-    const isResponsable = jRows[0].responsable_arret === req.user.id;
-    const isAdmin = ['directeur','super_admin','comptable_cabinet'].includes(req.user.role);
-    if (!isResponsable && !isAdmin) {
-      return res.status(403).json({ error: "Vous n'êtes pas le responsable d'arrêt de ce journal." });
-    }
-    const { rows } = await query(
-      `INSERT INTO arrets_caisse(tenant_id,journal_id,mois,annee,solde_final,arrete_par,commentaire)
-       VALUES($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT(tenant_id,journal_id,mois,annee) DO UPDATE
-         SET arrete_le=NOW(), arrete_par=EXCLUDED.arrete_par,
-             solde_final=EXCLUDED.solde_final, commentaire=EXCLUDED.commentaire
-       RETURNING *`,
-      [req.tenantId, journalId, mois, parseInt(annee),
-       parseFloat(solde_final)||0, req.user.id, commentaire||'']
-    );
-    res.status(201).json(rows[0]);
-  } catch (err) {
-    console.error('[Arrêt caisse]', err.message);
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
+// L'arrêt lui-même reste gouverné par la règle d'appartenance du contrôleur
+// (responsable_arret du journal, ou encadrement) : y poser une permission
+// créerait une seconde source de vérité contradictoire. Seule la réouverture,
+// qui est une décision d'encadrement, porte un code.
+const acCtrl = require('../controllers/arret_caisse.controller');
+const { arreterRules } = require('../validators/arret_caisse.validator');
+router.post  ('/journaux/:id/arreter', authGuard, tenantGuard, arreterRules, validate, acCtrl.arreter);
+router.delete('/journaux/:id/arreter', authGuard, tenantGuard, requirePermission('journaux.reouvrir'), journalIdParamRule, validate, acCtrl.reouvrir);
 
-router.delete('/journaux/:id/arreter', authGuard, tenantGuard, async (req, res) => {
-  if (!['directeur','super_admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Réouverture réservée au directeur.' });
-  }
-  const mois  = req.query.mois  || req.body.mois;
-  const annee = req.query.annee || req.body.annee;
-  try {
-    await query(
-      'DELETE FROM arrets_caisse WHERE tenant_id=$1 AND journal_id=$2 AND mois=$3 AND annee=$4',
-      [req.tenantId, parseInt(req.params.id), mois, parseInt(annee)]
-    );
-    res.json({ message: 'Caisse réouverte.' });
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
-
-// ── Journal des mouvements ────────────────────────────────────────────────
+// ── Journal des mouvements (module de permission "journal") ──────────────
 const jCtrl = require('../controllers/journal.controller');
-router.get   ('/journal',         authGuard, tenantGuard, jCtrl.getJournal);
-router.post  ('/journal',         authGuard, tenantGuard, jCtrl.createMouvement);
-router.put   ('/journal/:id',     authGuard, tenantGuard, jCtrl.updateMouvement);
-router.delete('/journal/:id',     authGuard, tenantGuard, jCtrl.deleteMouvement);
-router.get   ('/journal/soldes',  authGuard, tenantGuard, jCtrl.getSoldes);
-router.get   ('/journal/cumuls',  authGuard, tenantGuard, jCtrl.getCumuls);
-router.get   ('/journal/ran',     authGuard, tenantGuard, jCtrl.getRan);
-router.get   ('/journal/recap',   authGuard, tenantGuard, jCtrl.getJournauxRecap);
-router.get   ('/journal/controle-context', authGuard, tenantGuard, jCtrl.getControleContext);
-router.post  ('/journal/ran',     authGuard, tenantGuard, jCtrl.setRan);
+const { createMouvementRules, setRanRules } = require('../validators/journal.validator');
+router.get   ('/journal',         authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getJournal);
+router.post  ('/journal',         authGuard, tenantGuard, requirePermission('journal.create'), createMouvementRules, validate, jCtrl.createMouvement);
+router.put   ('/journal/:id',     authGuard, tenantGuard, requirePermission('journal.edit'), jCtrl.updateMouvement);
+router.delete('/journal/:id',     authGuard, tenantGuard, requirePermission('journal.delete'), jCtrl.deleteMouvement);
+router.get   ('/journal/soldes',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getSoldes);
+router.get   ('/journal/cumuls',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getCumuls);
+router.get   ('/journal/ran',     authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getRan);
+router.get   ('/journal/recap',   authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getJournauxRecap);
+router.get   ('/journal/controle-context', authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getControleContext);
+router.post  ('/journal/ran',     authGuard, tenantGuard, requirePermission('journal.ran'), setRanRules, validate, jCtrl.setRan);
 
-// ── Mouvements en attente (RG-03 / RG-04 — autorisation directeur) ─────────
+// ── Mouvements en attente (RG-03 / RG-04 — module de permission "journal") ─
 const maCtrl = require('../controllers/mouvements_attente.controller');
-router.get   ('/mouvements-attente',               authGuard, tenantGuard, maCtrl.list);
-router.get   ('/mouvements-attente/count',         authGuard, tenantGuard, maCtrl.count);
-router.patch ('/mouvements-attente/:id/approuver', authGuard, tenantGuard, maCtrl.approuver);
-router.patch ('/mouvements-attente/:id/rejeter',   authGuard, tenantGuard, maCtrl.rejeter);
+const { decisionRules } = require('../validators/mouvements_attente.validator');
+router.get   ('/mouvements-attente',               authGuard, tenantGuard, requirePermission('journal.view'), maCtrl.list);
+router.get   ('/mouvements-attente/count',         authGuard, tenantGuard, requirePermission('journal.view'), maCtrl.count);
+router.patch ('/mouvements-attente/:id/approuver', authGuard, tenantGuard, requirePermission('journal.validate'), decisionRules, validate, maCtrl.approuver);
+router.patch ('/mouvements-attente/:id/rejeter',   authGuard, tenantGuard, requirePermission('journal.validate'), decisionRules, validate, maCtrl.rejeter);
 
 // ── Notifications (cloche in-app) ──────────────────────────────────────────
 const notifCtrl = require('../controllers/notifications.controller');
@@ -102,229 +74,141 @@ router.get   ('/notifications/count',  authGuard, tenantGuard, notifCtrl.count);
 router.patch ('/notifications/lu-tout',authGuard, tenantGuard, notifCtrl.markAllRead);
 router.patch ('/notifications/:id/lu', authGuard, tenantGuard, notifCtrl.markRead);
 
-// ── Budget Caisse (budget de dépense par journal + dépassements) ──────────
+// ── Budget Caisse (module de permission "budget") ─────────────────────────
 const bcCtrl = require('../controllers/budget_caisse.controller');
-router.get   ('/budget-caisse',                          authGuard, tenantGuard, bcCtrl.getBudgetCaisse);
-router.put   ('/budget-caisse',                          authGuard, tenantGuard, bcCtrl.setBudgetCaisse);
-router.delete('/budget-caisse',                          authGuard, tenantGuard, bcCtrl.deleteBudgetCaisse);
-router.get   ('/budget-caisse/depassements/count',       authGuard, tenantGuard, bcCtrl.countDepassements);
-router.get   ('/budget-caisse/depassements',             authGuard, tenantGuard, bcCtrl.getDepassements);
-router.post  ('/budget-caisse/demande',                  authGuard, tenantGuard, bcCtrl.createDemande);
-router.patch ('/budget-caisse/demande/:id/statut',       authGuard, tenantGuard, bcCtrl.validerDemande);
-router.delete('/budget-caisse/demande/:id',              authGuard, tenantGuard, bcCtrl.deleteDemande);
+const { setBudgetCaisseRules, createDemandeRules, validerDemandeRules } = require('../validators/budget_caisse.validator');
+router.get   ('/budget-caisse',                          authGuard, tenantGuard, requirePermission('budget.view'), bcCtrl.getBudgetCaisse);
+router.put   ('/budget-caisse',                          authGuard, tenantGuard, requirePermission('budget.edit'), setBudgetCaisseRules, validate, bcCtrl.setBudgetCaisse);
+router.delete('/budget-caisse',                          authGuard, tenantGuard, requirePermission('budget.edit'), bcCtrl.deleteBudgetCaisse);
+router.get   ('/budget-caisse/depassements/count',       authGuard, tenantGuard, requirePermission('budget.view'), bcCtrl.countDepassements);
+router.get   ('/budget-caisse/depassements',             authGuard, tenantGuard, requirePermission('budget.view'), bcCtrl.getDepassements);
+router.post  ('/budget-caisse/demande',                  authGuard, tenantGuard, requirePermission('budget.demande_create'), createDemandeRules, validate, bcCtrl.createDemande);
+router.patch ('/budget-caisse/demande/:id/statut',       authGuard, tenantGuard, requirePermission('budget.demande_validate'), validerDemandeRules, validate, bcCtrl.validerDemande);
+router.delete('/budget-caisse/demande/:id',              authGuard, tenantGuard, requirePermission('budget.demande_delete'), bcCtrl.deleteDemande);
 
-// ── Budget & Réalisations ─────────────────────────────────────────────────
+// ── Budget & Réalisations (module de permission "budget") ────────────────
+// Les endpoints depenses/ressources-attente portent "previsions.edit" et non
+// "budget.edit" : ce sont les lignes prévisionnelles, saisies aussi bien
+// depuis la page Prévisions que depuis la synthèse Appel de fonds, et une
+// caissière doit pouvoir les saisir sans pour autant modifier les dotations
+// budgétaires. C'est la frontière que le module "previsions" du catalogue
+// décrivait sans être branché nulle part.
 const bCtrl = require('../controllers/budget.controller');
-router.get   ('/budget',                          authGuard, tenantGuard, bCtrl.getBudget);
-router.put   ('/budget',                          authGuard, tenantGuard, bCtrl.setBudgetLine);
-router.delete('/budget/:id',                      authGuard, tenantGuard, async (req,res) => {
-  await query('DELETE FROM budget WHERE id=$1 AND tenant_id=$2',[req.params.id,req.tenantId]);
-  res.json({message:'Ligne budget supprimée.'});
-});
-router.post  ('/budget/validation',               authGuard, tenantGuard, bCtrl.setValidation);
-router.post  ('/budget/depenses-attente',         authGuard, tenantGuard, bCtrl.addDepenseAttente);
-router.put   ('/budget/depenses-attente/batch',   authGuard, tenantGuard, bCtrl.batchDepenseAttente);
-router.delete('/budget/depenses-attente/:id',     authGuard, tenantGuard, bCtrl.deleteDepenseAttente);
-router.post  ('/budget/ressources-attente',       authGuard, tenantGuard, bCtrl.addRessourceAttente);
-router.put   ('/budget/ressources-attente/batch', authGuard, tenantGuard, bCtrl.batchRessourceAttente);
-router.delete('/budget/ressources-attente/:id',   authGuard, tenantGuard, bCtrl.deleteRessourceAttente);
+const { setBudgetLineRules, setValidationRules, attenteLigneRules, batchAttenteRules, budgetIdParamRule } = require('../validators/budget.validator');
+router.get   ('/budget',                          authGuard, tenantGuard, requirePermission('budget.view'), bCtrl.getBudget);
+router.put   ('/budget',                          authGuard, tenantGuard, requirePermission('budget.edit'), setBudgetLineRules, validate, bCtrl.setBudgetLine);
+router.delete('/budget/:id',                      authGuard, tenantGuard, requirePermission('budget.edit'), budgetIdParamRule, validate, bCtrl.deleteBudgetLine);
+router.post  ('/budget/validation',               authGuard, tenantGuard, requirePermission('budget.validate'), setValidationRules, validate, bCtrl.setValidation);
+router.post  ('/budget/depenses-attente',         authGuard, tenantGuard, requirePermission('previsions.edit'), attenteLigneRules, validate, bCtrl.addDepenseAttente);
+router.put   ('/budget/depenses-attente/batch',   authGuard, tenantGuard, requirePermission('previsions.edit'), batchAttenteRules, validate, bCtrl.batchDepenseAttente);
+router.delete('/budget/depenses-attente/:id',     authGuard, tenantGuard, requirePermission('previsions.edit'), budgetIdParamRule, validate, bCtrl.deleteDepenseAttente);
+router.post  ('/budget/ressources-attente',       authGuard, tenantGuard, requirePermission('previsions.edit'), attenteLigneRules, validate, bCtrl.addRessourceAttente);
+router.put   ('/budget/ressources-attente/batch', authGuard, tenantGuard, requirePermission('previsions.edit'), batchAttenteRules, validate, bCtrl.batchRessourceAttente);
+router.delete('/budget/ressources-attente/:id',   authGuard, tenantGuard, requirePermission('previsions.edit'), budgetIdParamRule, validate, bCtrl.deleteRessourceAttente);
 
-// ── Appel de Fonds ────────────────────────────────────────────────────────
+// ── Appel de Fonds (module de permission "appel_fonds") ───────────────────
 const afCtrl = require('../controllers/appel_fonds.controller');
-router.get   ('/appel-fonds',            authGuard, tenantGuard, afCtrl.getAppelFonds);
-router.post  ('/appel-fonds',            authGuard, tenantGuard, afCtrl.createAppelFonds);
-router.patch ('/appel-fonds/:id/statut', authGuard, tenantGuard, afCtrl.updateStatut);
-router.delete('/appel-fonds/:id',        authGuard, tenantGuard, afCtrl.deleteAppelFonds);
+const { createAppelFondsRules, updateStatutRules } = require('../validators/appel_fonds.validator');
+router.get   ('/appel-fonds',            authGuard, tenantGuard, requirePermission('appel_fonds.view'), afCtrl.getAppelFonds);
+router.post  ('/appel-fonds',            authGuard, tenantGuard, requirePermission('appel_fonds.create'), createAppelFondsRules, validate, afCtrl.createAppelFonds);
+router.patch ('/appel-fonds/:id/statut', authGuard, tenantGuard, requirePermission('appel_fonds.validate'), updateStatutRules, validate, afCtrl.updateStatut);
+router.delete('/appel-fonds/:id',        authGuard, tenantGuard, requirePermission('appel_fonds.delete'), afCtrl.deleteAppelFonds);
 
 // ── Appel de Fonds — Synthèse Demande de Fonds ────────────────────────────
 const afSynthCtrl = require('../controllers/appel_fonds_synthese.controller');
-router.get('/appel-fonds/synthese', authGuard, tenantGuard, afSynthCtrl.getSynthese);
+router.get('/appel-fonds/synthese', authGuard, tenantGuard, requirePermission('appel_fonds.view'), afSynthCtrl.getSynthese);
 
-// ── Rubriques ─────────────────────────────────────────────────────────────
+// ── Rubriques (module de permission "rubriques") ──────────────────────────
 const rCtrl = require('../controllers/rubriques.controller');
-router.get   ('/rubriques',      authGuard, tenantGuard, rCtrl.getRubriques);
-router.post  ('/rubriques',      authGuard, tenantGuard, rCtrl.createRubrique);
-router.put   ('/rubriques/:id',  authGuard, tenantGuard, rCtrl.updateRubrique);
-router.delete('/rubriques/:id',  authGuard, tenantGuard, async (req, res) => {
-  await query('UPDATE rubriques SET actif=false WHERE id=$1 AND tenant_id=$2',
-              [req.params.id, req.tenantId]);
-  res.json({ message: 'Rubrique désactivée.' });
-});
+const { createRubriqueRules, updateRubriqueRules, rubriqueIdParamRule } = require('../validators/rubriques.validator');
+router.get   ('/rubriques',      authGuard, tenantGuard, requirePermission('rubriques.view'), rCtrl.getRubriques);
+router.post  ('/rubriques',      authGuard, tenantGuard, requirePermission('rubriques.edit'), createRubriqueRules, validate, rCtrl.createRubrique);
+router.put   ('/rubriques/:id',  authGuard, tenantGuard, requirePermission('rubriques.edit'), updateRubriqueRules, validate, rCtrl.updateRubrique);
+router.delete('/rubriques/:id',  authGuard, tenantGuard, requirePermission('rubriques.edit'), rubriqueIdParamRule, validate, rCtrl.deleteRubrique);
 
-// ── Utilisateurs ──────────────────────────────────────────────────────────
+// ── Utilisateurs (module de permission "users") ───────────────────────────
 const uCtrl = require('../controllers/users.controller');
-router.get   ('/users',               authGuard, tenantGuard, uCtrl.getUsers);
-router.post  ('/users',               authGuard, tenantGuard, uCtrl.createUser);
-router.put   ('/users/:id',           authGuard, tenantGuard, uCtrl.updateUser);
-router.patch ('/users/:id/actif',     authGuard, tenantGuard, uCtrl.toggleActif);
-router.post  ('/users/:id/password',  authGuard, tenantGuard, uCtrl.resetPassword);
-router.delete('/users/:id',           authGuard, tenantGuard, uCtrl.deleteUser);
+const { createUserRules, updateUserRules, userIdParamRule, resetPasswordRules } = require('../validators/users.validator');
+router.get   ('/users',               authGuard, tenantGuard, requirePermission('users.view'), uCtrl.getUsers);
+router.post  ('/users',               authGuard, tenantGuard, requirePermission('users.create'), createUserRules, validate, uCtrl.createUser);
+router.put   ('/users/:id',           authGuard, tenantGuard, requirePermission('users.edit'), updateUserRules, validate, uCtrl.updateUser);
+router.patch ('/users/:id/actif',     authGuard, tenantGuard, requirePermission('users.edit'), userIdParamRule, validate, uCtrl.toggleActif);
+router.post  ('/users/:id/password',  authGuard, tenantGuard, requirePermission('users.edit'), resetPasswordRules, validate, uCtrl.resetPassword);
+router.delete('/users/:id',           authGuard, tenantGuard, requirePermission('users.delete'), userIdParamRule, validate, uCtrl.deleteUser);
 
-// ── Configuration Entité ──────────────────────────────────────────────────
+// ── Configuration Entité (module de permission "config") ─────────────────
 const cfgCtrl = require('../controllers/config.controller');
-router.get('/config',             authGuard, tenantGuard, cfgCtrl.getConfig);
-router.put('/config',             authGuard, tenantGuard, cfgCtrl.updateConfig);
+const { updateConfigRules } = require('../validators/config.validator');
+router.get('/config',             authGuard, tenantGuard, requirePermission('config.view'), cfgCtrl.getConfig);
+router.put('/config',             authGuard, tenantGuard, requirePermission('config.edit'), updateConfigRules, validate, cfgCtrl.updateConfig);
 router.get('/config/referentiel', authGuard,              cfgCtrl.getReferentiel);
 
-// ── Banque ────────────────────────────────────────────────────────────────
-router.get('/banque', authGuard, tenantGuard, async (req, res) => {
-  const { mois, annee, journal_id } = req.query;
-  const where = journal_id ? 'AND journal_id=$4' : '';
-  const params = [req.tenantId, mois, parseInt(annee), ...(journal_id ? [parseInt(journal_id)] : [])];
-  try {
-    const { rows } = await query(
-      `SELECT * FROM banque WHERE tenant_id=$1 AND mois=$2 AND annee=$3 ${where}`, params
-    );
-    res.json(rows[0] || { solde_initial:0, fonds_recus:0, solde_final:0 });
-  } catch (err) {
-    console.error('[Banque] GET :', err.message);
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
-router.put('/banque', authGuard, tenantGuard, async (req, res) => {
-  const { mois, annee, solde_initial, fonds_recus, solde_final } = req.body;
-  try {
-    await query(
-      `INSERT INTO banque(tenant_id,mois,annee,solde_initial,fonds_recus,solde_final)
-       VALUES($1,$2,$3,$4,$5,$6)
-       ON CONFLICT(tenant_id,mois,annee) DO UPDATE SET
-         solde_initial = COALESCE($4, banque.solde_initial),
-         fonds_recus   = COALESCE($5, banque.fonds_recus),
-         solde_final   = COALESCE($6, banque.solde_final)`,
-      [req.tenantId, mois, parseInt(annee),
-       solde_initial!=null?parseFloat(solde_initial):null,
-       fonds_recus  !=null?parseFloat(fonds_recus)  :null,
-       solde_final  !=null?parseFloat(solde_final)  :null]
-    );
-    res.json({ message: 'Banque mise à jour.' });
-  } catch (err) {
-    console.error('[Banque] PUT :', err.message);
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
+// ── Banque (module de permission "banque") ────────────────────────────────
+const banqueCtrl = require('../controllers/banque.controller');
+const { updateBanqueRules } = require('../validators/banque.validator');
+router.get('/banque', authGuard, tenantGuard, requirePermission('banque.view'), banqueCtrl.getBanque);
+router.put('/banque', authGuard, tenantGuard, requirePermission('banque.edit'), updateBanqueRules, validate, banqueCtrl.updateBanque);
 
-// ── Rapports ──────────────────────────────────────────────────────────────
+// ── Rapports (module de permission "rapport") ─────────────────────────────
 const rapportCtrl = require('../controllers/rapport.controller');
-router.get('/rapport/compte-emploi',     authGuard, tenantGuard, rapportCtrl.getCompteEmploi);
-router.get('/rapport/synthese-annuelle', authGuard, tenantGuard, rapportCtrl.getSyntheseAnnuelle);
+router.get('/rapport/compte-emploi',     authGuard, tenantGuard, requirePermission('rapport.view'), rapportCtrl.getCompteEmploi);
+router.get('/rapport/synthese-annuelle', authGuard, tenantGuard, requirePermission('rapport.view'), rapportCtrl.getSyntheseAnnuelle);
 
 // ── Dashboard ─────────────────────────────────────────────────────────────
-router.get('/dashboard/stats', authGuard, tenantGuard, async (req, res) => {
-  const yr = parseInt(req.query.annee) || new Date().getFullYear();
-  try {
-    const [totalEntrees, totalSorties, nbMvt] = await Promise.all([
-      query(`SELECT COALESCE(SUM(entree),0) AS val FROM journal WHERE tenant_id=$1 AND annee=$2`,[req.tenantId,yr]),
-      query(`SELECT COALESCE(SUM(sortie),0) AS val FROM journal WHERE tenant_id=$1 AND annee=$2`,[req.tenantId,yr]),
-      query(`SELECT COUNT(*) AS val FROM journal WHERE tenant_id=$1 AND annee=$2`,[req.tenantId,yr]),
-    ]);
-    // Soldes par journal
-    const { rows: soldesJournaux } = await query(
-      `SELECT jx.id, jx.nom, jx.type, jx.code,
-              COALESCE(SUM(j.entree - j.sortie),0) AS solde
-       FROM journaux jx
-       LEFT JOIN journal j ON j.journal_id=jx.id AND j.tenant_id=jx.tenant_id
-       WHERE jx.tenant_id=$1 AND jx.actif=true
-       GROUP BY jx.id, jx.nom, jx.type, jx.code ORDER BY jx.ordre`,
-      [req.tenantId]
-    );
-    const { rows: tendance } = await query(
-      `SELECT mois, COALESCE(SUM(entree),0) AS entrees, COALESCE(SUM(sortie),0) AS sorties
-       FROM journal WHERE tenant_id=$1 AND annee=$2
-       GROUP BY mois ORDER BY MIN(date)`,
-      [req.tenantId, yr]
-    );
-    res.json({
-      totalEntrees:   parseFloat(totalEntrees.rows[0].val),
-      totalSorties:   parseFloat(totalSorties.rows[0].val),
-      nbMouvements:   parseInt(nbMvt.rows[0].val),
-      soldesJournaux,
-      tendance,
-    });
-  } catch (err) {
-    console.error('[Dashboard]', err.message);
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
+const dashCtrl = require('../controllers/dashboard.controller');
+router.get('/dashboard/stats', authGuard, tenantGuard, dashCtrl.getStats);
 
 // ── Permissions ───────────────────────────────────────────────────────────
 const permCtrl = require('../controllers/permissions.controller');
+const { createPermissionRules, updatePermissionRules, codesArrayRules } = require('../validators/permissions.validator');
 router.get   ('/permissions',                        authGuard, requireRole('super_admin','comptable_cabinet'), permCtrl.getPermissions);
-router.post  ('/permissions',                        authGuard, requireRole('super_admin'),                    permCtrl.createPermission);
-router.put   ('/permissions/:code',                  authGuard, requireRole('super_admin'),                    permCtrl.updatePermission);
+router.post  ('/permissions',                        authGuard, requireRole('super_admin'),                    createPermissionRules, validate, permCtrl.createPermission);
+router.put   ('/permissions/:code',                  authGuard, requireRole('super_admin'),                    updatePermissionRules, validate, permCtrl.updatePermission);
 router.delete('/permissions/:code',                  authGuard, requireRole('super_admin'),                    permCtrl.deletePermission);
 router.get   ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin','comptable_cabinet'), permCtrl.getTenantPermissions);
-router.post  ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin'),                    permCtrl.setTenantPermissions);
+router.post  ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setTenantPermissions);
 router.get   ('/users/:userId/permissions',          authGuard, requireRole('super_admin','comptable_cabinet'), permCtrl.getUserPermissions);
-router.post  ('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    permCtrl.setUserPermissions);
+router.post  ('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setUserPermissions);
 
 // ── Rôles personnalisés ───────────────────────────────────────────────────
 const rolesCtrl = require('../controllers/roles.controller');
+const { createRoleRules, updateRoleRules, roleIdParamRule, setRolePermissionsRules } = require('../validators/roles.validator');
 router.get   ('/roles',                    authGuard, tenantGuard, requireRole('super_admin','directeur'), rolesCtrl.getRoles);
-router.post  ('/roles',                    authGuard, tenantGuard, requireRole('super_admin'),             rolesCtrl.createRole);
-router.put   ('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             rolesCtrl.updateRole);
-router.delete('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             rolesCtrl.deleteRole);
+router.post  ('/roles',                    authGuard, tenantGuard, requireRole('super_admin'),             createRoleRules, validate, rolesCtrl.createRole);
+router.put   ('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             updateRoleRules, validate, rolesCtrl.updateRole);
+router.delete('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             roleIdParamRule, validate, rolesCtrl.deleteRole);
 router.get   ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin','directeur'), rolesCtrl.getRolePermissions);
-router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin'),             rolesCtrl.setRolePermissions);
+router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin'),             setRolePermissionsRules, validate, rolesCtrl.setRolePermissions);
 
 // ── Tenants ───────────────────────────────────────────────────────────────
-const { seedRubriquesDefaut } = require('../controllers/rubriques.controller');
-const { seedJournauxDefaut }  = require('../controllers/journaux.controller');
+const tenantsCtrl = require('../controllers/tenants.controller');
+const { createTenantRules, toggleActifRules } = require('../validators/tenants.validator');
+router.get  ('/tenants',           authGuard, requireRole('super_admin','comptable_cabinet'), tenantsCtrl.getTenants);
+router.post ('/tenants',           authGuard, requireRole('super_admin'),                     createTenantRules, validate, tenantsCtrl.createTenant);
+router.patch('/tenants/:id/actif', authGuard, requireRole('super_admin'),                     toggleActifRules, validate, tenantsCtrl.toggleActif);
 
-router.get('/tenants', authGuard, requireRole('super_admin','comptable_cabinet'), async (req, res) => {
-  try {
-    const { rows } = await query('SELECT id,slug,nom,actif,created_at FROM tenants ORDER BY nom');
-    res.json(rows);
-  } catch (err) {
-    console.error('[Tenants] GET :', err.message);
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
-router.post('/tenants', authGuard, requireRole('super_admin'), async (req, res) => {
-  const { slug, nom, caissier_nom, directeur_nom, devise } = req.body;
-  if (!slug || !nom) return res.status(400).json({ error: 'Nom et slug obligatoires.' });
-  if (!/^[a-z0-9-]+$/.test(slug)) return res.status(400).json({ error: 'Slug invalide.' });
-  try {
-    const { rows } = await query(
-      `INSERT INTO tenants(slug,nom,caissier_nom,directeur_nom,devise)
-       VALUES($1,$2,$3,$4,$5) RETURNING *`,
-      [slug, nom, caissier_nom||'', directeur_nom||'', devise||'FCFA']
-    );
-    await seedRubriquesDefaut(rows[0].id);
-    await seedJournauxDefaut(rows[0].id);
-    res.status(201).json(rows[0]);
-  } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Slug déjà utilisé.' });
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
-router.patch('/tenants/:id/actif', authGuard, requireRole('super_admin'), async (req, res) => {
-  const { actif } = req.body;
-  try {
-    await query('UPDATE tenants SET actif=$1 WHERE id=$2', [!!actif, req.params.id]);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Erreur serveur.' });
-  }
-});
-
-// ── Pièces justificatives ─────────────────────────────────────────────────
+// ── Pièces justificatives (module de permission "pieces") ─────────────────
+// "pieces.edit" gouverne la définition des justificatifs attendus par
+// rubrique ; "pieces.upload" le fait de joindre ou retirer une pièce sur un
+// mouvement — deux gestes de nature différente, séparés volontairement.
 const piecesCtrl = require('../controllers/pieces.controller');
-router.get   ('/pieces/types',              authGuard, tenantGuard, piecesCtrl.getTypes);
-router.post  ('/pieces/types',              authGuard, tenantGuard, piecesCtrl.createType);
-router.put   ('/pieces/types/:id',          authGuard, tenantGuard, piecesCtrl.updateType);
-router.delete('/pieces/types/:id',          authGuard, tenantGuard, piecesCtrl.deleteType);
-router.get   ('/pieces/:mouvementId',       authGuard, tenantGuard, piecesCtrl.getByMouvement);
-router.post  ('/pieces/upload/:mouvementId',authGuard, tenantGuard, piecesCtrl.upload);
-router.delete('/pieces/item/:pieceId',      authGuard, tenantGuard, piecesCtrl.deletePiece);
+const { uploadRules, createTypeRules, updateTypeRules, typeIdParamRule } = require('../validators/pieces.validator');
+router.get   ('/pieces/types',              authGuard, tenantGuard, requirePermission('pieces.view'), piecesCtrl.getTypes);
+router.post  ('/pieces/types',              authGuard, tenantGuard, requirePermission('pieces.edit'), createTypeRules, validate, piecesCtrl.createType);
+router.put   ('/pieces/types/:id',          authGuard, tenantGuard, requirePermission('pieces.edit'), updateTypeRules, validate, piecesCtrl.updateType);
+router.delete('/pieces/types/:id',          authGuard, tenantGuard, requirePermission('pieces.edit'), typeIdParamRule, validate, piecesCtrl.deleteType);
+router.get   ('/pieces/:mouvementId',       authGuard, tenantGuard, requirePermission('pieces.view'), piecesCtrl.getByMouvement);
+router.post  ('/pieces/upload/:mouvementId',authGuard, tenantGuard, requirePermission('pieces.upload'), uploadRules, validate, piecesCtrl.upload);
+router.delete('/pieces/item/:pieceId',      authGuard, tenantGuard, requirePermission('pieces.upload'), piecesCtrl.deletePiece);
 
-// ── Plan Comptable SYSCOHADA ──────────────────────────────────────────────
+// ── Plan Comptable SYSCOHADA (module de permission "plan_comptable") ──────
 const planCtrl = require('../controllers/plan_comptable.controller');
-router.get('/plan-comptable/search',  authGuard, planCtrl.search);
+const { createCompteRules } = require('../validators/plan_comptable.validator');
+router.get('/plan-comptable/search',  authGuard, requirePermission('plan_comptable.view'), planCtrl.search);
 router.get('/plan-comptable/classes', authGuard, planCtrl.getClasses);
-router.get('/plan-comptable/list',    authGuard, planCtrl.list);
-router.get('/plan-comptable/stats',   authGuard, planCtrl.getStats);
-router.post  ('/plan-comptable',         authGuard, tenantGuard, planCtrl.createCompte);
-router.delete('/plan-comptable/:compte', authGuard, tenantGuard, planCtrl.deleteCompte);
+router.get('/plan-comptable/list',    authGuard, requirePermission('plan_comptable.view'), planCtrl.list);
+router.get('/plan-comptable/stats',   authGuard, requirePermission('plan_comptable.view'), planCtrl.getStats);
+router.post  ('/plan-comptable',         authGuard, tenantGuard, requirePermission('plan_comptable.edit'), createCompteRules, validate, planCtrl.createCompte);
+router.delete('/plan-comptable/:compte', authGuard, tenantGuard, requirePermission('plan_comptable.delete'), planCtrl.deleteCompte);
 
-// ── Health ────────────────────────────────────────────────────────────────
 module.exports = router;

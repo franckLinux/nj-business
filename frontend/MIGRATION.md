@@ -1,9 +1,10 @@
-# Migration du frontend vers React + Vite
+# Migration du frontend vers React + Vite — historique
 
-Migration **progressive**. L'application vanilla d'origine vit dans
-`frontend/legacy/`, reste servie sur `/` et pleinement fonctionnelle ; le
-frontend React est monté sur `/v2`. Aucune bascule brutale : on porte page par
-page, on ne coupe `/` qu'à la fin.
+Migration **terminée**. L'application était initialement une SPA vanilla
+(`frontend/legacy/`) servie sur `/`, portée progressivement vers React/Vite
+(d'abord montée en parallèle sur `/v2`). Ce document garde la trace du
+portage page par page ; `frontend/legacy/` a été supprimé une fois toutes les
+pages migrées et vérifiées, et React sert maintenant seul, à la racine `/`.
 
 ## Démarrer
 
@@ -20,23 +21,20 @@ Pour tester le rendu servi par Express :
 
 ```bash
 npm run build        # génère frontend/dist
-npm run dev          # http://localhost:3000/v2
+npm run dev          # http://localhost:3000
 ```
 
-## Rendu identique — comment c'est garanti
+## Rendu — comment la parité avec l'app vanilla a été garantie
 
-`frontend/src/main.jsx` importe **directement** `../legacy/css/app.css`.
-Il n'y a donc **aucune copie** de la feuille de style : les deux frontends
-partagent le même fichier. Une correction CSS profite aux deux, et il est
-impossible qu'ils divergent.
-
-Seul `src/styles/sidebar.css` est un extrait — le bloc `<style>` qui était
-inline dans `legacy/index.html`. Si vous le modifiez, répercutez-le des deux
-côtés jusqu'à la fin de la migration.
+Pendant la migration, `frontend/src/main.jsx` importait **directement**
+`../legacy/css/app.css` : aucune copie de la feuille de style, les deux
+frontends partageaient le même fichier, il était impossible qu'ils divergent.
+Une fois `legacy/` supprimé, ce fichier a été copié une seule fois vers
+`src/styles/app.css` (voir « Fin de migration » ci-dessous).
 
 Les composants reprennent la structure DOM et les classes CSS nœud par nœud.
 Le portage a été validé par comparaison des squelettes DOM (React en rendu
-statique vs `legacy/index.html`).
+statique vs `legacy/index.html`, avant sa suppression).
 
 ## État
 
@@ -46,52 +44,82 @@ statique vs `legacy/index.html`).
 | Sidebar + groupes      | ✅ migré | `components/Sidebar.jsx`, `NavGroup.jsx` |
 | Topbar + période       | ✅ migré | `components/Topbar.jsx` |
 | Tableau de bord        | ✅ migré | `pages/DashboardPage.jsx` |
-| Journal de caisse      | ⬜ à faire | `legacy/js/app.js` → `loadJournalPage` (l. 295) |
-| Journaux de caisse     | ⬜ à faire | `loadJournauxRecap` (l. 2085) |
-| Suivi budgétaire       | ⬜ à faire | `loadBudget` (l. 2342) |
-| Prévisions de dépenses | ⬜ à faire | `loadPrevisions` (l. 2886) |
-| Demande de fonds       | ⬜ à faire | `loadAppelFonds` (l. 3146) |
-| Compte d'emploi        | ⬜ à faire | `loadCompteEmploi` (l. 3371) |
-| Configuration (6 onglets) | ⬜ à faire | `loadConfig` (l. 3913) |
-| Dépenses en attente    | ⬜ à faire | `loadMouvementsAttentePage` (l. 2552) |
-| Clients (Tenants)      | ⬜ à faire | `loadTenants` |
-| Permissions            | ⬜ à faire | `loadPermissions` (l. 5337) |
-| Modale mouvement       | ⬜ à faire | `saveMouvement` (l. 1376) |
-| Impression A4 (journal + récap) | ⬜ à faire | l. 912 et l. 1094 |
+| Journal de caisse      | ✅ migré | `pages/JournalPage.jsx`, `components/MouvementModal.jsx` |
+| Journaux de caisse     | ✅ migré | `pages/JournauxRecapPage.jsx` |
+| Suivi budgétaire       | ✅ migré (partiel) | `pages/BudgetPage.jsx` |
+| Prévisions de dépenses | ✅ migré | `pages/PrevisionsPage.jsx` |
+| Demande de fonds       | ✅ migré | `pages/AppelFondsPage.jsx` |
+| Compte d'emploi        | ✅ migré | `pages/CompteEmploiPage.jsx` |
+| Configuration (6/7 onglets) | ✅ migré | `pages/ConfigPage.jsx` et `components/config/*` |
+| Dépenses en attente    | ✅ migré | `pages/AttentePage.jsx` |
+| Clients (Tenants)      | ✅ migré | `pages/TenantsPage.jsx` |
+| Permissions            | ✅ migré | `pages/PermissionsPage.jsx` |
+| Modale mouvement       | ✅ migré | `components/MouvementModal.jsx` |
+| Impression A4 (journal, récap, demande de fonds, compte d'emploi) | ✅ migré | `lib/print.js` |
+| PWA / mode hors ligne  | ✅ migré | `lib/idb.js`, `lib/syncManager.js`, `public/sw.js`, `components/PwaBootstrap.jsx` |
 
 ### Écarts connus avec l'app vanilla
 
-- **Cloche de notifications** : absente de la topbar React. Le badge et le
-  panneau (`toggleNotifications`, `loadNotifications`, l. 2630) restent à porter.
-- **Sélecteur de client (tenant)** : le badge est affiché mais n'ouvre pas
-  encore la modale de sélection. Un super_admin sans tenant doit passer par `/`.
-- **Mode hors ligne** : `idb.js`, `sync.js` et le service worker ne sont pas
-  branchés sur React (décision assumée : réintégration en fin de migration).
-  Le badge de synchro et le bouton d'installation PWA sont donc absents.
+- **PWA / mode hors ligne — service worker reconstruit, pas une reprise
+  littérale** : `public/sw.js` a la même stratégie que l'ancien
+  `legacy/sw.js` (cache-first statique, network-first API), mais sans liste
+  figée de fichiers — les bundles Vite étant hashés à chaque build, les
+  assets statiques sont mis en cache à la volée au premier fetch réussi
+  plutôt que pré-listés. Écrit initialement scopé à `/v2/` pendant la
+  migration progressive, puis re-scopé à `/` lors de la suppression de
+  `legacy/`.
+- **PWA — icônes** : seule une icône SVG existe dans le projet
+  (`legacy/icons/icon.svg`, copiée vers `public/icons/icon.svg`) ; les PNG
+  192×192/512×512 référencés par le manifest legacy n'ont jamais existé sur
+  disque. Le manifest React déclare un unique icône SVG `"sizes":"any"` —
+  fonctionnel pour l'installation sur Chromium/Edge, mais des PNG dédiés
+  (notamment `purpose:"maskable"` avec zone de sécurité correcte) amélioreraient
+  le rendu de l'icône installée.
+- **Pré-contrôle budgétaire hors-ligne — pas de rechargement forcé après
+  sauvegarde** : contrairement à `saveMouvement` (legacy, l. 1424) qui relance
+  `loadJournalPage()` même hors ligne, le port React se contente de fermer la
+  modale sans recharger : notre client API renvoie proprement
+  `{ error: 'Connexion au serveur impossible.' }` hors ligne (au lieu de
+  rejeter la promesse), et ce message aurait remplacé tout le contenu déjà
+  affiché à l'écran — déviation délibérée, documentée dans
+  `components/MouvementModal.jsx`.
+- **Prévisions de dépenses — bug legacy corrigé** : la page utilisait un
+  tableau de mois accentués (`MOIS_LISTE`, l. 2875) différent du `MOIS` global
+  sans accent. Comme la valeur choisie est envoyée telle quelle au backend
+  (`mois`/`mois_applic`), une prévision saisie pour Février, Août ou Décembre
+  était stockée sous une graphie que le reste de l'app (`WHERE mois=$2`,
+  comparaison stricte) ne retrouve jamais — invisible partout ailleurs,
+  silencieusement. Corrigé dans le port (un seul `MOIS`, comme partout
+  ailleurs) — ce bug n'existait que dans l'app vanilla, disparue avec elle.
+- **Suivi budgétaire — section non portée** : « Dépassements de budget »
+  (`refreshDepassementsBudget`, table `demandes_depassement`) n'est pas
+  reprise. Constat fait en portant cette page : le flux qui alimentait cette
+  table (`saveMouvement` → `res.require_validation` → `openModalDepassement`)
+  n'est plus émis par le backend actuel (`createMouvement`/`updateMouvement`
+  ne renvoient que `en_attente`/`refus_modification`) — la section aurait été
+  en permanence vide même si elle avait été portée. Code mort à signaler côté
+  backend (routes `budget-caisse/demande*` encore présentes, jamais atteintes).
 
-## Porter une page
+## Fin de migration (fait)
 
-1. Créer `src/pages/MaPage.jsx`.
-2. Reprendre le HTML généré par la fonction `loadXxx` de `legacy/js/app.js`
-   en JSX, **en gardant les mêmes classes CSS**.
-3. Remplacer les `api.get(...)` par le `api` de `@/lib/api` (même contrat :
-   une erreur métier arrive sous la forme `{ error }`).
-4. Remplacer `state.mois` / `state.annee` / `state.user` par `useApp()`.
-5. Brancher la route dans `src/App.jsx` à la place du `PlaceholderPage`.
-6. Comparer visuellement `/` et `/v2` côte à côte.
+Une fois toutes les pages ci-dessus portées et vérifiées au navigateur, la
+bascule finale a été effectuée :
 
-## Fin de migration
+1. `legacy/css/app.css` copié vers `frontend/src/styles/app.css` ;
+   `legacy/icons/icon.svg`, `manifest.json`, `sw.js` déjà présents dans
+   `frontend/public/` (copiés lors du portage du PWA, lot E) — leur `scope`
+   et `start_url`/chemins internes repassés de `/v2/` à `/`.
+2. `vite.config.js` : `base` passé de `/v2/` à `/`.
+3. `main.jsx` : retiré le `basename="/v2"` du `BrowserRouter`, import CSS
+   pointé vers `@/styles/app.css`.
+4. `frontend/legacy/` supprimé (`git rm -r`).
+5. `backend/index.js` : retiré le montage `LEGACY_DIR` et le préfixe `/v2` ;
+   `frontend/dist` est servi statiquement à la racine, avec un fallback SPA
+   (`app.get('*', ...)`) pour les routes React inconnues côté serveur.
+6. `backend/tools/check-deploy.js` et les `README.md` (racine, backend,
+   frontend) mis à jour pour ne plus référencer `/v2` ni `legacy/`.
 
-Quand toutes les pages sont portées :
-
-1. Déplacer `legacy/css/app.css`, `legacy/icons/`, `legacy/manifest.json`,
-   `legacy/sw.js` dans `frontend/public/` (le dossier `public/` de Vite, dont
-   le contenu est copié tel quel dans `dist/`).
-2. Passer `base: '/'` dans `vite.config.js` et retirer le `basename="/v2"` du
-   `BrowserRouter` dans `main.jsx`.
-3. Corriger l'import CSS de `main.jsx` (`../legacy/css/app.css` → le nouvel
-   emplacement), puis supprimer `frontend/legacy/`.
-4. Dans `backend/server.js` : faire pointer `LEGACY_DIR` et le fallback SPA sur
-   `frontend/dist`, et retirer le montage `/v2` devenu redondant.
-5. Réintégrer le hors-ligne (`idb.js`, `sync.js`, service worker) — voir les
-   écarts connus ci-dessus.
+Vérifié après bascule (Playwright + Edge, build de production servi par
+Express) : connexion, navigation entre pages, rechargement direct d'une route
+profonde (`/journaux-recap`) via le fallback SPA serveur, service worker actif
+avec `scope: "http://localhost:3000/"`.

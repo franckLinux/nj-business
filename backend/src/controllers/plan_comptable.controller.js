@@ -1,6 +1,7 @@
 // src/controllers/plan_comptable.controller.js
 // Recherche dans le plan SYSCOHADA révisé
-const { query } = require('../config/database');
+const { Op, where, fn, col } = require('sequelize');
+const { sequelize, PlanComptableSyscohada } = require('../models');
 
 // GET /api/plan-comptable/search?q=transport&classe=6
 const search = async (req, res) => {
@@ -9,23 +10,21 @@ const search = async (req, res) => {
     return res.status(400).json({ error: 'Minimum 2 caractères.' });
   }
   try {
-    const params = [`%${q.trim()}%`];
-    const conditions = [
-      `(compte ILIKE $1 OR intitule ILIKE $1)`,
-      `actif = true`,
+    const filtre = { actif: true };
+    filtre[Op.or] = [
+      { compte: { [Op.iLike]: `%${q.trim()}%` } },
+      { intitule: { [Op.iLike]: `%${q.trim()}%` } },
     ];
-    if (classe) { params.push(parseInt(classe)); conditions.push(`classe = $${params.length}`); }
-    if (nature) { params.push(nature);           conditions.push(`nature = $${params.length}`); }
+    if (classe) filtre.classe = parseInt(classe, 10);
+    if (nature) filtre.nature = nature;
 
-    const { rows } = await query(
-      `SELECT compte, intitule, classe, nature
-       FROM plan_comptable_syscohada
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY compte
-       LIMIT 20`,
-      params
-    );
-    res.json(rows);
+    const comptes = await PlanComptableSyscohada.findAll({
+      where: filtre,
+      attributes: ['compte', 'intitule', 'classe', 'nature'],
+      order: [['compte', 'ASC']],
+      limit: 20,
+    });
+    res.json(comptes);
   } catch (err) {
     // Table pas encore créée → retourner liste vide
     console.warn('[PlanComptable] Table absente :', err.message);
@@ -51,47 +50,30 @@ const getClasses = async (req, res) => {
 // Endpoint de consultation : pas de minimum sur q, filtre optionnel.
 const list = async (req, res) => {
   const { q, classe, nature } = req.query;
-  const limit = Math.min(parseInt(req.query.limit) || 1000, 5000);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 1000, 5000);
   try {
-    const params = [];
-    const conditions = ['actif = true'];
+    const filtre = { actif: true };
     if (q && q.trim().length > 0) {
-      params.push(`%${q.trim()}%`);
-      conditions.push(`(compte ILIKE $${params.length} OR intitule ILIKE $${params.length})`);
+      filtre[Op.or] = [
+        { compte: { [Op.iLike]: `%${q.trim()}%` } },
+        { intitule: { [Op.iLike]: `%${q.trim()}%` } },
+      ];
     }
-    if (classe) {
-      params.push(parseInt(classe));
-      conditions.push(`classe = $${params.length}`);
-    }
-    if (nature) {
-      params.push(nature);
-      conditions.push(`nature = $${params.length}`);
-    }
-    params.push(limit);
-    let rows;
-    try {
-      ({ rows } = await query(
-        `SELECT compte, intitule, classe, nature,
-                COALESCE(source, 'syscohada') AS source
-         FROM plan_comptable_syscohada
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY compte
-         LIMIT $${params.length}`,
-        params
-      ));
-    } catch (e) {
-      // Repli si la colonne `source` n'existe pas encore (migration non appliquée)
-      ({ rows } = await query(
-        `SELECT compte, intitule, classe, nature
-         FROM plan_comptable_syscohada
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY compte
-         LIMIT $${params.length}`,
-        params
-      ));
-      rows = rows.map(r => ({ ...r, source: 'syscohada' }));
-    }
-    res.json({ comptes: rows, total: rows.length, limit });
+    if (classe) filtre.classe = parseInt(classe, 10);
+    if (nature) filtre.nature = nature;
+
+    const comptes = await PlanComptableSyscohada.findAll({
+      where: filtre,
+      attributes: ['compte', 'intitule', 'classe', 'nature', 'source'],
+      order: [['compte', 'ASC']],
+      limit,
+      raw: true,
+    });
+    res.json({
+      comptes: comptes.map(c => ({ ...c, source: c.source || 'syscohada' })),
+      total: comptes.length,
+      limit,
+    });
   } catch (err) {
     console.warn('[PlanComptable] list - table absente :', err.message);
     res.json({ comptes: [], total: 0, limit, error: 'Plan comptable non chargé en base.' });
@@ -101,14 +83,16 @@ const list = async (req, res) => {
 // GET /api/plan-comptable/stats — comptage par classe (pour les badges UI)
 const getStats = async (req, res) => {
   try {
-    const { rows } = await query(
-      `SELECT classe, COUNT(*)::int AS nb
-       FROM plan_comptable_syscohada
-       WHERE actif = true
-       GROUP BY classe ORDER BY classe`
-    );
-    const total = rows.reduce((s, r) => s + r.nb, 0);
-    res.json({ par_classe: rows, total });
+    const rows = await PlanComptableSyscohada.findAll({
+      where: { actif: true },
+      attributes: ['classe', [fn('COUNT', col('classe')), 'nb']],
+      group: ['classe'],
+      order: [['classe', 'ASC']],
+      raw: true,
+    });
+    const parClasse = rows.map(r => ({ classe: r.classe, nb: parseInt(r.nb, 10) }));
+    const total = parClasse.reduce((s, r) => s + r.nb, 0);
+    res.json({ par_classe: parClasse, total });
   } catch (err) {
     res.json({ par_classe: [], total: 0 });
   }
@@ -116,13 +100,10 @@ const getStats = async (req, res) => {
 
 // POST /api/plan-comptable — ajouter un compte personnalisé
 // Numéro de compte sans limite de taille (colonne TEXT).
-const ROLES_GESTION = ['directeur', 'super_admin', 'comptable_cabinet'];
-
+// Autorisation déléguée à requirePermission('plan_comptable.edit') sur la route
+// (voir routes/index.js) — pas de contrôle de rôle en dur ici, pour que la
+// permission accordée à un utilisateur/tenant fasse foi, comme journal/budget-caisse.
 const createCompte = async (req, res) => {
-  if (!ROLES_GESTION.includes(req.user?.role)) {
-    return res.status(403).json({ error: 'Accès refusé : droits insuffisants.' });
-  }
-
   let { compte, intitule, classe, nature } = req.body;
   compte   = (compte   || '').toString().trim();
   intitule = (intitule || '').toString().trim();
@@ -132,24 +113,26 @@ const createCompte = async (req, res) => {
   }
 
   // Classe déduite du 1er chiffre si non fournie (1..9 SYSCOHADA).
-  let classeNum = parseInt(classe);
+  let classeNum = parseInt(classe, 10);
   if (!classeNum || classeNum < 1 || classeNum > 9) {
     const firstDigit = compte.match(/\d/);
-    classeNum = firstDigit ? parseInt(firstDigit[0]) : null;
+    classeNum = firstDigit ? parseInt(firstDigit[0], 10) : null;
   }
 
+  // Upsert sur l'index fonctionnel lower(btrim(compte)) : au-delà de ce que
+  // le query builder Sequelize exprime proprement, on passe par une requête
+  // SQL paramétrée exécutée via l'instance Sequelize (toujours dans l'ORM).
   try {
-    const { rows } = await query(
-      `INSERT INTO plan_comptable_syscohada
-         (compte, intitule, classe, nature, source, actif, created_by)
-       VALUES ($1, $2, $3, $4, 'custom', true, $5)
+    const [rows] = await sequelize.query(
+      `INSERT INTO plan_comptable_syscohada (compte, intitule, classe, nature, source, actif, created_by)
+       VALUES (:compte, :intitule, :classe, :nature, 'custom', true, :createdBy)
        ON CONFLICT (lower(btrim(compte))) DO UPDATE
          SET intitule = EXCLUDED.intitule,
              classe   = EXCLUDED.classe,
              nature   = EXCLUDED.nature,
              actif    = true
        RETURNING compte, intitule, classe, nature, source`,
-      [compte, intitule, classeNum, nature || null, req.user.id]
+      { replacements: { compte, intitule, classe: classeNum, nature: nature || null, createdBy: req.user.id } }
     );
     res.status(201).json(rows[0]);
   } catch (err) {
@@ -164,20 +147,21 @@ const createCompte = async (req, res) => {
 // DELETE /api/plan-comptable/:compte — désactive un compte personnalisé
 // (on ne supprime jamais un compte du référentiel SYSCOHADA)
 const deleteCompte = async (req, res) => {
-  if (!ROLES_GESTION.includes(req.user?.role)) {
-    return res.status(403).json({ error: 'Accès refusé : droits insuffisants.' });
-  }
   const compte = decodeURIComponent(req.params.compte || '').trim();
   try {
-    const { rows } = await query(
-      `UPDATE plan_comptable_syscohada
-         SET actif = false
-       WHERE lower(btrim(compte)) = lower(btrim($1))
-         AND source = 'custom'
-       RETURNING compte`,
-      [compte]
+    const [count, rows] = await PlanComptableSyscohada.update(
+      { actif: false },
+      {
+        where: {
+          [Op.and]: [
+            where(fn('lower', fn('btrim', col('compte'))), fn('lower', fn('btrim', compte))),
+            { source: 'custom' },
+          ],
+        },
+        returning: true,
+      }
     );
-    if (rows.length === 0) {
+    if (count === 0) {
       return res.status(404).json({
         error: 'Compte introuvable ou non personnalisé (référentiel SYSCOHADA protégé).',
       });

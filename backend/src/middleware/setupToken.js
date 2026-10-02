@@ -30,27 +30,51 @@ const tokensEgaux = (fourni, attendu) => {
 };
 
 /**
- * Vérifie la configuration au démarrage et journalise l'état de l'endpoint.
- * Appelée une fois au chargement de la route.
- * @returns {boolean} true si l'endpoint est armé
+ * État de l'endpoint, sans rien journaliser. Évalué à CHAQUE appel et non mis
+ * en cache : sur un hébergement où l'on modifie le .env puis où l'on redémarre,
+ * une valeur figée au chargement du module mentirait après un rechargement
+ * partiel.
+ *
+ * Ne renvoie jamais le token ni sa longueur exacte — seulement de quoi
+ * répondre « est-ce armé, et sinon pourquoi ».
+ *
+ * @returns {{arme: boolean, raison: string}}
  */
-const verifierConfiguration = () => {
+const etatSetup = () => {
   const token = process.env.SETUP_TOKEN;
 
   if (!token) {
-    console.log('[Setup] SETUP_TOKEN absent → /api/admin/setup désactivé (404).');
-    return false;
+    return { arme: false, raison: 'SETUP_TOKEN absent du .env du serveur' };
   }
   if (token.length < LONGUEUR_MIN) {
-    console.warn(
-      `[Setup] SETUP_TOKEN trop court (${token.length} caractères, ${LONGUEUR_MIN} minimum) ` +
-      '→ /api/admin/setup reste DÉSACTIVÉ.\n' +
-      '        Générez-en un solide :  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
-    );
-    return false;
+    return {
+      arme: false,
+      raison: `SETUP_TOKEN trop court (${LONGUEUR_MIN} caractères minimum requis)`,
+    };
   }
-  console.log('[Setup] /api/admin/setup armé (token requis).');
-  return true;
+  return { arme: true, raison: 'endpoint armé, token requis' };
+};
+
+/**
+ * Journalise l'état de l'endpoint au démarrage. Appelée une fois au chargement
+ * de la route — c'est cette ligne qu'on cherche dans les logs Passenger quand
+ * l'URL de setup « ne prend pas ».
+ * @returns {boolean} true si l'endpoint est armé
+ */
+const verifierConfiguration = () => {
+  const { arme, raison } = etatSetup();
+
+  if (arme) {
+    console.log('[Setup] /api/admin/setup armé (token requis).');
+    return true;
+  }
+
+  console.warn(
+    `[Setup] ${raison} → /api/admin/setup DÉSACTIVÉ.\n` +
+    '        Générez-en un solide :  node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"\n' +
+    '        Puis REDÉMARREZ l\'application : Passenger ne relit pas le .env à chaud.'
+  );
+  return false;
 };
 
 /**
@@ -84,4 +108,4 @@ const entetesSensibles = (req, res, next) => {
   next();
 };
 
-module.exports = { setupTokenGuard, entetesSensibles, verifierConfiguration, LONGUEUR_MIN };
+module.exports = { setupTokenGuard, entetesSensibles, verifierConfiguration, etatSetup, LONGUEUR_MIN };

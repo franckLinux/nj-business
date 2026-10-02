@@ -2,42 +2,7 @@
 // M05 — Configuration Entité (étendue OHADA/CEMAC)
 // Champs : nom, sigle, forme_juridique, adresse, registre_commerce,
 //          boite_postale, nui, activite, dirigeant_nom, devise, exercice_fiscal
-const { query } = require('../config/database');
-
-// ── Migration douce : ajoute les colonnes manquantes au schéma ─────────────
-// Sûr à exécuter à chaque démarrage (idempotent grâce à IF NOT EXISTS).
-const ensureColumns = async () => {
-  const patches = [
-    // Existant (conservé pour rétrocompatibilité)
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS caissier_nom    TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS directeur_nom   TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS exercice_debut  DATE`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS exercice_fin    DATE`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS updated_at      TIMESTAMPTZ DEFAULT NOW()`,
-    // Nouveaux champs OHADA/CEMAC
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sigle             TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS forme_juridique   TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS adresse           TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS registre_commerce TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS boite_postale     TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nui               TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS activite          TEXT DEFAULT ''`,
-    `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS dirigeant_nom     TEXT DEFAULT ''`,
-  ];
-  for (const sql of patches) {
-    try { await query(sql); } catch (_) { /* colonne déjà présente */ }
-  }
-  // Backfill : recopier directeur_nom vers dirigeant_nom (une seule fois)
-  // pour ne perdre aucune donnée historique.
-  try {
-    await query(
-      `UPDATE tenants
-       SET dirigeant_nom = directeur_nom
-       WHERE COALESCE(dirigeant_nom,'') = ''
-         AND COALESCE(directeur_nom,'') <> ''`
-    );
-  } catch (_) { /* ignore */ }
-};
+const { Tenant } = require('../models');
 
 // ── Formes juridiques OHADA reconnues (référentiel UI) ────────────────────
 // Exposé via GET /api/config/referentiel pour alimenter un <select>.
@@ -57,30 +22,33 @@ const FORMES_JURIDIQUES = [
   { code: 'AUTRE',       label: 'Autre' },
 ];
 
+const toConfigPayload = (t) => ({
+  id: t.id,
+  slug: t.slug,
+  nom: t.nom,
+  logo_url: t.logo_url || '',
+  devise: t.devise || 'FCFA',
+  sigle: t.sigle || '',
+  forme_juridique: t.forme_juridique || '',
+  adresse: t.adresse || '',
+  registre_commerce: t.registre_commerce || '',
+  boite_postale: t.boite_postale || '',
+  nui: t.nui || '',
+  activite: t.activite || '',
+  dirigeant_nom: t.dirigeant_nom || '',
+  exercice_debut: t.exercice_debut,
+  exercice_fin: t.exercice_fin,
+  actif: t.actif,
+});
+
 // ── GET /api/config ───────────────────────────────────────────────────────
 const getConfig = async (req, res) => {
   try {
-    await ensureColumns();
-    const { rows } = await query(
-      `SELECT id, slug, nom,
-              COALESCE(logo_url,'')          AS logo_url,
-              COALESCE(devise,'FCFA')        AS devise,
-              COALESCE(sigle,'')             AS sigle,
-              COALESCE(forme_juridique,'')   AS forme_juridique,
-              COALESCE(adresse,'')           AS adresse,
-              COALESCE(registre_commerce,'') AS registre_commerce,
-              COALESCE(boite_postale,'')     AS boite_postale,
-              COALESCE(nui,'')               AS nui,
-              COALESCE(activite,'')          AS activite,
-              COALESCE(dirigeant_nom,'')     AS dirigeant_nom,
-              exercice_debut, exercice_fin, actif
-       FROM tenants WHERE id = $1`,
-      [req.tenantId]
-    );
-    if (rows.length === 0) {
+    const tenant = await Tenant.findByPk(req.tenantId);
+    if (!tenant) {
       return res.status(404).json({ error: 'Configuration introuvable. Vérifiez que le tenant existe.' });
     }
-    res.json(rows[0]);
+    res.json(toConfigPayload(tenant));
   } catch (err) {
     console.error('[Config] getConfig :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
@@ -95,10 +63,6 @@ const getReferentiel = async (req, res) => {
 
 // ── PUT /api/config ───────────────────────────────────────────────────────
 const updateConfig = async (req, res) => {
-  if (!['directeur', 'super_admin'].includes(req.user.role)) {
-    return res.status(403).json({ error: 'Réservé au directeur.' });
-  }
-
   const {
     nom, sigle, forme_juridique, adresse, registre_commerce,
     boite_postale, nui, activite, dirigeant_nom,
@@ -122,55 +86,27 @@ const updateConfig = async (req, res) => {
   }
 
   try {
-    await ensureColumns();
-    const { rows } = await query(
-      `UPDATE tenants
-       SET nom               = $1,
-           sigle             = $2,
-           forme_juridique   = $3,
-           adresse           = $4,
-           registre_commerce = $5,
-           boite_postale     = $6,
-           nui               = $7,
-           activite          = $8,
-           dirigeant_nom     = $9,
-           -- Synchroniser directeur_nom pour rétrocompatibilité (rapport, etc.)
-           directeur_nom     = $9,
-           devise            = $10,
-           exercice_debut    = $11,
-           exercice_fin      = $12,
-           updated_at        = NOW()
-       WHERE id = $13
-       RETURNING id, slug, nom,
-                 COALESCE(logo_url,'')          AS logo_url,
-                 COALESCE(devise,'FCFA')        AS devise,
-                 COALESCE(sigle,'')             AS sigle,
-                 COALESCE(forme_juridique,'')   AS forme_juridique,
-                 COALESCE(adresse,'')           AS adresse,
-                 COALESCE(registre_commerce,'') AS registre_commerce,
-                 COALESCE(boite_postale,'')     AS boite_postale,
-                 COALESCE(nui,'')               AS nui,
-                 COALESCE(activite,'')          AS activite,
-                 COALESCE(dirigeant_nom,'')     AS dirigeant_nom,
-                 exercice_debut, exercice_fin`,
-      [
-        nom.trim(),
-        (sigle             || '').trim().toUpperCase(),
-        (forme_juridique   || '').trim().toUpperCase(),
-        (adresse           || '').trim(),
-        (registre_commerce || '').trim(),
-        (boite_postale     || '').trim(),
-        (nui               || '').trim().toUpperCase(),
-        (activite          || '').trim(),
-        (dirigeant_nom     || '').trim(),
-        devise || 'FCFA',
-        exercice_debut || null,
-        exercice_fin   || null,
-        req.tenantId,
-      ]
+    const [count, rows] = await Tenant.update(
+      {
+        nom: nom.trim(),
+        sigle: (sigle || '').trim().toUpperCase(),
+        forme_juridique: (forme_juridique || '').trim().toUpperCase(),
+        adresse: (adresse || '').trim(),
+        registre_commerce: (registre_commerce || '').trim(),
+        boite_postale: (boite_postale || '').trim(),
+        nui: (nui || '').trim().toUpperCase(),
+        activite: (activite || '').trim(),
+        // Synchroniser directeur_nom pour rétrocompatibilité (rapport, etc.)
+        dirigeant_nom: (dirigeant_nom || '').trim(),
+        directeur_nom: (dirigeant_nom || '').trim(),
+        devise: devise || 'FCFA',
+        exercice_debut: exercice_debut || null,
+        exercice_fin: exercice_fin || null,
+      },
+      { where: { id: req.tenantId }, returning: true }
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'Entité introuvable.' });
-    res.json({ message: 'Configuration mise à jour avec succès.', config: rows[0] });
+    if (count === 0) return res.status(404).json({ error: 'Entité introuvable.' });
+    res.json({ message: 'Configuration mise à jour avec succès.', config: toConfigPayload(rows[0]) });
   } catch (err) {
     console.error('[Config] updateConfig :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });

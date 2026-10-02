@@ -8,7 +8,7 @@
 // La logique vit dans db/lib/migrate.lib.js, partagée avec GET /api/admin/setup.
 // Ce fichier ne fait que : charger .env, lire argv, afficher, fermer le pool.
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '..', '..', '.env') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { close, describeTarget } = require('../src/config/database');
 const { runMigrations, migrationStatus } = require('./lib/migrate.lib');

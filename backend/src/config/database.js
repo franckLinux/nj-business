@@ -8,7 +8,7 @@ const { Pool } = require('pg');
 if (!process.env.DATABASE_URL) {
   throw new Error(
     "[DB] DATABASE_URL est absente. Renseignez-la dans .env, par ex. :\n" +
-    '     DATABASE_URL=postgresql://caissepro:motdepasse@localhost:5432/caissepro'
+    '     DATABASE_URL=postgresql://caissepro:Pass1234@localhost:5432/caissepro'
   );
 }
 

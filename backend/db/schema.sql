@@ -4,14 +4,46 @@
 --  PostgreSQL 14+ auto-hébergé — isolation multi-tenant applicative
 -- ============================================================
 
--- Extension UUID
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- ------------------------------------------------------------
+-- Génération des UUID
+-- ------------------------------------------------------------
+-- gen_random_uuid() est NATIVE depuis PostgreSQL 13 : aucune extension, donc
+-- aucun privilège superutilisateur requis. C'est la seule variante utilisable
+-- telle quelle sur un hébergement mutualisé, où `CREATE EXTENSION` échoue avec
+-- « permission denied to create extension » et faisait alors échouer la
+-- totalité du schéma (tout schema.sql tourne dans UNE transaction).
+--
+-- Sur une base antérieure à la 13, on tente pgcrypto puis uuid-ossp en
+-- rattrapage — si aucun n'est disponible, on lève une erreur explicite plutôt
+-- que de laisser Postgres se plaindre d'une fonction inconnue 200 lignes plus
+-- bas. Le bloc est idempotent : rejouable sans effet sur une base déjà saine.
+DO $$
+BEGIN
+  PERFORM gen_random_uuid();          -- présente ? on ne touche à rien
+EXCEPTION WHEN undefined_function THEN
+  BEGIN
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- fournit gen_random_uuid()
+  EXCEPTION WHEN OTHERS THEN
+    BEGIN
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+      -- Alias : le reste du schéma n'appelle plus que gen_random_uuid().
+      EXECUTE 'CREATE OR REPLACE FUNCTION gen_random_uuid() RETURNS uuid '
+              'AS $f$ SELECT uuid_generate_v4() $f$ LANGUAGE sql VOLATILE';
+    EXCEPTION WHEN OTHERS THEN
+      RAISE EXCEPTION
+        'Aucune source d''UUID disponible. PostgreSQL % est antérieur à la 13 et '
+        'ni pgcrypto ni uuid-ossp ne sont installables avec ce compte. Demandez '
+        'à l''hébergeur d''activer pgcrypto sur la base.',
+        current_setting('server_version');
+    END;
+  END;
+END $$;
 
 -- ============================================================
 -- TENANTS (entités clientes du cabinet)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS tenants (
-    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     slug          TEXT NOT NULL UNIQUE,           -- identifiant URL ex: "client-abc"
     nom           TEXT NOT NULL,
     logo_url      TEXT,
@@ -29,7 +61,7 @@ CREATE TABLE IF NOT EXISTS tenants (
 -- UTILISATEURS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
-    id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE,  -- NULL = super admin cabinet
     username      TEXT NOT NULL,
     email         TEXT,
@@ -194,7 +226,7 @@ CREATE TABLE IF NOT EXISTS sage_equivalences (
 -- EXPORTS SAGE i7 (archivage des fichiers générés)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS exports_sage (
-    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     periode_debut   DATE NOT NULL,
     periode_fin     DATE NOT NULL,
@@ -229,7 +261,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, created_at D
 -- REFRESH TOKENS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS refresh_tokens (
-    id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     token_hash  TEXT NOT NULL UNIQUE,
     expires_at  TIMESTAMPTZ NOT NULL,

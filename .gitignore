@@ -7,6 +7,9 @@ logs/
 *.sqlite
 coverage/
 
+# Config Claude Code locale à la machine (historique de permissions, etc.)
+.claude/settings.local.json
+
 # Pièces jointes téléversées : le dossier est versionné, pas son contenu.
 backend/uploads/*
 !backend/uploads/.gitkeep
@@ -14,3 +17,6 @@ backend/uploads/*
 # NOTE : frontend/dist n'est volontairement PAS ignoré.
 # PlanetHoster (Passenger) ne lance aucune étape de build au déploiement :
 # le bundle doit être construit en local (`npm run build`) puis commité.
+
+# Archives de sauvegarde manuelle / artefacts de déploiement oubliés (ex: backend.zip, dist.zip)
+*.zip
