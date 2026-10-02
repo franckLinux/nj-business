@@ -14,6 +14,7 @@ export const MODULE_META = {
   journaux: { label: 'Caisses & journaux', color: '#e0e7ff', text: '#4338ca' },
   pieces: { label: 'Pièces justificatives', color: '#fef2f2', text: '#b91c1c' },
   banque: { label: 'Banque', color: '#f0f9ff', text: '#0c4a6e' },
+  roles: { label: 'Profils métier', color: '#fff7ed', text: '#9a3412' },
 };
 
 export const moduleMeta = (mod) => MODULE_META[mod] || { label: mod, color: '#f1f5f9', text: '#64748b' };

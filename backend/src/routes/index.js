@@ -159,26 +159,33 @@ const dashCtrl = require('../controllers/dashboard.controller');
 router.get('/dashboard/stats', authGuard, tenantGuard, dashCtrl.getStats);
 
 // ── Permissions ───────────────────────────────────────────────────────────
+// Catalogue en lecture (+ libellés) : les codes sont créés par migration SQL,
+// jamais depuis l'interface. Exceptions individuelles : POST = enregistrer,
+// DELETE = revenir aux droits du rôle.
 const permCtrl = require('../controllers/permissions.controller');
-const { createPermissionRules, updatePermissionRules, codesArrayRules } = require('../validators/permissions.validator');
-router.get   ('/permissions',                        authGuard, requireCabinet, permCtrl.getPermissions);
-router.post  ('/permissions',                        authGuard, requireRole('super_admin'),                    createPermissionRules, validate, permCtrl.createPermission);
+const { updatePermissionRules, codesArrayRules } = require('../validators/permissions.validator');
+// Catalogue lisible par tout utilisateur connecté, FILTRÉ par le contrôleur
+// (hors cabinet : seulement ses propres permissions) — sert à composer un profil.
+router.get   ('/permissions',                        authGuard, permCtrl.getPermissions);
 router.put   ('/permissions/:code',                  authGuard, requireRole('super_admin'),                    updatePermissionRules, validate, permCtrl.updatePermission);
-router.delete('/permissions/:code',                  authGuard, requireRole('super_admin'),                    permCtrl.deletePermission);
 router.get   ('/tenants/:tenantId/permissions',      authGuard, requireCabinet, permCtrl.getTenantPermissions);
 router.post  ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setTenantPermissions);
 router.get   ('/users/:userId/permissions',          authGuard, requireCabinet, permCtrl.getUserPermissions);
 router.post  ('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setUserPermissions);
+router.delete('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    permCtrl.resetUserPermissions);
 
 // ── Rôles personnalisés ───────────────────────────────────────────────────
+// Profils métier : gérés par le directeur du client (roles.edit, décision du
+// 02/10/2026) ou le super_admin. Les rôles système (tenant_id NULL) ne sont
+// atteignables que hors client, donc par le super_admin seul.
 const rolesCtrl = require('../controllers/roles.controller');
 const { createRoleRules, updateRoleRules, roleIdParamRule, setRolePermissionsRules } = require('../validators/roles.validator');
-router.get   ('/roles',                    authGuard, tenantGuard, requireRole('super_admin','directeur'), rolesCtrl.getRoles);
-router.post  ('/roles',                    authGuard, tenantGuard, requireRole('super_admin'),             createRoleRules, validate, rolesCtrl.createRole);
-router.put   ('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             updateRoleRules, validate, rolesCtrl.updateRole);
-router.delete('/roles/:id',                authGuard, tenantGuard, requireRole('super_admin'),             roleIdParamRule, validate, rolesCtrl.deleteRole);
-router.get   ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin','directeur'), rolesCtrl.getRolePermissions);
-router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('super_admin'),             setRolePermissionsRules, validate, rolesCtrl.setRolePermissions);
+router.get   ('/roles',                    authGuard, tenantGuard, requirePermission('users.view'), rolesCtrl.getRoles);
+router.post  ('/roles',                    authGuard, tenantGuard, requirePermission('roles.edit'),        createRoleRules, validate, rolesCtrl.createRole);
+router.put   ('/roles/:id',                authGuard, tenantGuard, requirePermission('roles.edit'),        updateRoleRules, validate, rolesCtrl.updateRole);
+router.delete('/roles/:id',                authGuard, tenantGuard, requirePermission('roles.edit'),        roleIdParamRule, validate, rolesCtrl.deleteRole);
+router.get   ('/roles/:id/permissions',    authGuard, tenantGuard, requirePermission('users.view'), rolesCtrl.getRolePermissions);
+router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requirePermission('roles.edit'),        setRolePermissionsRules, validate, rolesCtrl.setRolePermissions);
 
 // ── Tenants ───────────────────────────────────────────────────────────────
 const tenantsCtrl = require('../controllers/tenants.controller');
@@ -186,6 +193,9 @@ const { createTenantRules, toggleActifRules } = require('../validators/tenants.v
 router.get  ('/tenants',           authGuard, requireCabinet, tenantsCtrl.getTenants);
 router.post ('/tenants',           authGuard, requireRole('super_admin'),                     createTenantRules, validate, tenantsCtrl.createTenant);
 router.patch('/tenants/:id/actif', authGuard, requireRole('super_admin'),                     toggleActifRules, validate, tenantsCtrl.toggleActif);
+// Affectations des comptables cabinet aux clients (migration 015).
+router.get  ('/users/:userId/affectations', authGuard, requireRole('super_admin'), tenantsCtrl.getAffectations);
+router.put  ('/users/:userId/affectations', authGuard, requireRole('super_admin'), tenantsCtrl.setAffectations);
 
 // ── Pièces justificatives (module de permission "pieces") ─────────────────
 // "pieces.edit" gouverne la définition des justificatifs attendus par

@@ -1,8 +1,11 @@
 const { sequelize, Journal, ArretCaisse } = require('../models');
+const { userHasPermission } = require('../services/permission.service');
 
 // ── POST /api/journaux/:id/arreter ────────────────────────────────────────
-// Autorisé au responsable_arret du journal, ou à un directeur/super_admin/
-// comptable_cabinet (RG-03 / RG-04).
+// Autorisé au responsable_arret désigné du journal, ou à qui détient
+// journaux.arreter (par défaut : le DIRECTEUR seul — décision du 02/10/2026,
+// migration 015). Le comptable cabinet n'arrête plus les caisses.
+// super_admin : toujours autorisé (getEffectivePermissions → null).
 const arreter = async (req, res) => {
   const { mois, annee, commentaire, solde_final } = req.body;
   if (!mois || !annee) return res.status(400).json({ error: 'mois et annee requis.' });
@@ -14,8 +17,10 @@ const arreter = async (req, res) => {
     });
     if (!journal) return res.status(404).json({ error: 'Journal introuvable.' });
     const isResponsable = journal.responsable_arret === req.user.id;
-    const isAdmin = ['directeur', 'super_admin', 'comptable_cabinet'].includes(req.user.role);
-    if (!isResponsable && !isAdmin) {
+    const peutArreter = isResponsable || await userHasPermission(
+      { tenantId: req.tenantId, userId: req.user.id, role: req.user.role }, 'journaux.arreter'
+    );
+    if (!peutArreter) {
       return res.status(403).json({ error: "Vous n'êtes pas le responsable d'arrêt de ce journal." });
     }
 

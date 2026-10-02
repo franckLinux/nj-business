@@ -9,7 +9,8 @@ import PiecesTab from '@/components/config/PiecesTab';
 import RolesTab from '@/components/config/RolesTab';
 
 // Reprend loadConfig()/switchTab() de legacy/js/app.js (l. 3913-3948).
-// Les 6 onglets (+ Rôles pour super_admin) sont maintenant tous portés.
+// Les 6 onglets (+ Rôles : super_admin, ou directeur via roles.edit — décision
+// du 02/10/2026) sont maintenant tous portés.
 const TABS = [
   { id: 'entite', label: '🏢 Entité', Comp: EntiteTab },
   { id: 'users', label: '👥 Utilisateurs', Comp: UsersTab },
@@ -20,11 +21,11 @@ const TABS = [
 ];
 
 export default function ConfigPage() {
-  const { user } = useApp();
-  const isSuperAdmin = user?.role === 'super_admin';
+  const { user, can } = useApp();
+  const voitRoles = user?.role === 'super_admin' || can('roles.edit');
   const [active, setActive] = useState('entite');
 
-  const tabs = isSuperAdmin ? [...TABS, { id: 'roles', label: '🎭 Rôles', Comp: RolesTab }] : TABS;
+  const tabs = voitRoles ? [...TABS, { id: 'roles', label: '🎭 Rôles', Comp: RolesTab }] : TABS;
   const ActiveComp = tabs.find((t) => t.id === active)?.Comp || EntiteTab;
 
   return (

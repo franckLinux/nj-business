@@ -3,6 +3,7 @@
 const { Op } = require('sequelize');
 const { sequelize, BudgetCaisse, DemandeDepassement, Mouvement, Journal, User, Tenant } = require('../models');
 const { sendDepassementAlert } = require('../services/email.service');
+const { usersAvecPermission } = require('../services/permission.service');
 
 // ── GET /api/budget-caisse?journal_id=&mois=&annee= ──────────────────────
 const getBudgetCaisse = async (req, res) => {
@@ -174,13 +175,14 @@ const createDemande = async (req, res) => {
       demande_par: req.user.id, demandeur_nom: caissierNom, statut: 'en_attente', type_depassement: typeD,
     });
 
-    // Récupérer email du directeur
-    const directeur = await User.findOne({
-      where: { tenant_id: req.tenantId, role: 'directeur', actif: true, email: { [Op.ne]: '' } },
-    });
+    // Destinataires : toute personne active qui peut VALIDER la demande
+    // (permission budget.demande_validate), et non le premier « directeur »
+    // trouvé — la règle d'autorisation et la règle de notification coïncident.
+    const valideurs = (await usersAvecPermission(req.tenantId, 'budget.demande_validate'))
+      .filter((u) => u.email);
 
     let emailSent = false;
-    if (directeur) {
+    for (const directeur of valideurs) {
       const { sent } = await sendDepassementAlert({
         dirEmail:         directeur.email,
         dirNom:           directeur.username,
@@ -193,7 +195,7 @@ const createDemande = async (req, res) => {
         intitule, beneficiaire,
         demandeId: demande.id,
       });
-      emailSent = sent;
+      emailSent = emailSent || sent;
     }
 
     res.status(201).json({ ...demande.toJSON(), email_sent: emailSent });

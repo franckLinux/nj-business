@@ -2,6 +2,7 @@
 // Garantit que chaque requête s'exécute dans le contexte du bon tenant
 const { query } = require('../config/database');
 const { isCabinet } = require('./auth');
+const { peutAccederTenant } = require('../services/affectation.service');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -11,7 +12,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *     son propre client, l'en-tête et l'URL sont ignorés ;
  *  2. req.headers['x-tenant-id'] ou req.params.tenantId — UNIQUEMENT pour un
  *     membre du cabinet (super_admin / comptable_cabinet sans client) qui
- *     choisit le client à administrer.
+ *     choisit le client à administrer — pour un comptable_cabinet, parmi les
+ *     clients qui lui sont affectés (cabinet_affectations, migration 015).
  * Tout autre compte sans client (ex. caissier créé hors contexte client) est
  * refusé : auparavant il pouvait viser n'importe quel client via l'en-tête.
  */
@@ -32,6 +34,18 @@ const tenantGuard = async (req, res, next) => {
 
   if (!UUID_RE.test(String(tenantId))) {
     return res.status(400).json({ error: 'Identifiant client invalide.' });
+  }
+
+  // Comptable cabinet : seulement les clients qui lui sont affectés (015).
+  if (!req.user.tenantId) {
+    try {
+      if (!(await peutAccederTenant(req.user, String(tenantId)))) {
+        return res.status(403).json({ error: 'Ce client ne vous est pas affecté.' });
+      }
+    } catch (err) {
+      console.error('[Tenant] contrôle affectation :', err.message);
+      return res.status(500).json({ error: 'Erreur serveur.' });
+    }
   }
 
   // Vérification que le tenant existe et est actif

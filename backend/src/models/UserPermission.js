@@ -4,6 +4,8 @@ module.exports = (sequelize, DataTypes) => {
   const UserPermission = sequelize.define('UserPermission', {
     user_id: { type: DataTypes.UUID, primaryKey: true },
     permission_code: { type: DataTypes.STRING(100), primaryKey: true },
+    // 'grant' = ajoutée au rôle, 'deny' = retirée du rôle (migration 014).
+    effet: { type: DataTypes.STRING(5), allowNull: false, defaultValue: 'grant', validate: { isIn: [['grant', 'deny']] } },
     granted_at: DataTypes.DATE,
   }, {
     tableName: 'user_permissions',

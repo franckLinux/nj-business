@@ -93,14 +93,6 @@ export default function PermissionsPage() {
 
   useEffect(() => { charger(); }, [charger]);
 
-  const onDelete = async (code) => {
-    if (!window.confirm(`Supprimer la permission "${code}" ? Cette action est irréversible.`)) return;
-    const res = await api.delete(`/permissions/${encodeURIComponent(code)}`);
-    if (res.error) { toast(res.error, 'error'); return; }
-    toast('Permission supprimée.', 'success');
-    charger();
-  };
-
   if (erreur) return <div className="alert-err">{erreur}</div>;
   if (!perms) return <div className="loading-msg">Chargement…</div>;
 
@@ -114,11 +106,9 @@ export default function PermissionsPage() {
           <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Permissions</h2>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{perms.length} permission{perms.length > 1 ? 's' : ''} · {Object.keys(byModule).length} modules</span>
         </div>
-        {isSuperAdmin && (
-          <button className="btn-add" onClick={() => setModal('new')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', fontSize: 13 }}>
-            <span style={{ fontSize: 16, lineHeight: 1 }}>+</span> Nouvelle permission
-          </button>
-        )}
+        {/* Catalogue défini par les migrations SQL : pas de création ni de
+            suppression depuis l'interface, seuls libellés et descriptions
+            sont modifiables. */}
       </div>
 
       {Object.entries(byModule).map(([mod, list]) => {
@@ -145,7 +135,6 @@ export default function PermissionsPage() {
                         <td>
                           <div className="row-actions">
                             <button className="btn-icon" onClick={() => setModal({ edit: p })}>✏️</button>
-                            <button className="btn-icon danger" onClick={() => onDelete(p.code)}>✕</button>
                           </div>
                         </td>
                       )}

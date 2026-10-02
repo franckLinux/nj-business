@@ -12,6 +12,10 @@
 
 const { query } = require('../config/database');
 const { sendMouvementAttenteAlert } = require('./email.service');
+const { usersAvecPermission } = require('./permission.service');
+
+// Qui valide une dépense en attente : la PERMISSION, pas le rôle « directeur ».
+const PERM_VALIDATION = 'journal.validate';
 
 /**
  * Crée une notification in-app pour UN destinataire (best-effort).
@@ -33,22 +37,22 @@ const creerNotification = async (o) => {
 };
 
 /**
- * Notifie tous les destinataires d'un rôle donné (in-app), une ligne par utilisateur.
+ * Notifie (in-app) tous les utilisateurs actifs du client qui détiennent une
+ * permission. Remplace l'ancienne notification par rôle : un profil métier
+ * ayant journal.validate sans être « directeur » n'était jamais prévenu, et un
+ * directeur à qui l'on avait retiré la validation l'était quand même.
  * @returns {Promise<number>} nombre de notifications créées.
  */
-const notifierRole = async (o) => {
+const notifierPermission = async (o) => {
   let n = 0;
   try {
-    const { rows: users } = await query(
-      `SELECT id FROM users WHERE tenant_id=$1 AND role=$2 AND actif=true`,
-      [o.tenantId, o.role]
-    );
+    const users = await usersAvecPermission(o.tenantId, o.permission);
     for (const u of users) {
       const r = await creerNotification({ ...o, destinataireId: u.id });
       if (r) n += 1;
     }
   } catch (e) {
-    console.warn('[Notif] notifierRole :', e.message);
+    console.warn('[Notif] notifierPermission :', e.message);
   }
   return n;
 };
@@ -72,21 +76,17 @@ const notifyMouvementEnAttente = async (p) => {
     const tenantNom = tRows[0]?.nom || 'Entité';
 
     // ── Notification in-app (cloche) à chaque directeur actif ────────────────
-    await notifierRole({
-      tenantId: p.tenantId, role: 'directeur',
+    await notifierPermission({
+      tenantId: p.tenantId, permission: PERM_VALIDATION,
       type: 'attente_creee',
       titre: `Dépense à valider — ${m.rubrique_code}`,
       message: `${p.caissierNom || 'La caisse'} a soumis « ${m.intitule} » (${(parseFloat(m.sortie)||0).toLocaleString('fr-FR')} FCFA) en attente de votre autorisation.`,
       refType: 'mouvement_attente', refId: m.id,
     });
 
-    // Destinataires e-mail : directeurs actifs du tenant
-    const { rows: dirs } = await query(
-      `SELECT username, email, COALESCE(canal_notif,'email') AS canal_notif
-         FROM users
-        WHERE tenant_id=$1 AND role='directeur' AND actif=true`,
-      [p.tenantId]
-    );
+    // Destinataires e-mail : personnes actives habilitées à valider
+    const dirs = (await usersAvecPermission(p.tenantId, PERM_VALIDATION))
+      .map((u) => ({ ...u, canal_notif: u.canal_notif || 'email' }));
 
     for (const d of dirs) {
       const canal = d.canal_notif;
@@ -150,4 +150,4 @@ const notifyDecisionMouvement = async (p) => {
   });
 };
 
-module.exports = { creerNotification, notifierRole, notifyMouvementEnAttente, notifyDecisionMouvement };
+module.exports = { creerNotification, notifierPermission, notifyMouvementEnAttente, notifyDecisionMouvement };

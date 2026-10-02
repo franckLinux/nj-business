@@ -3,6 +3,7 @@ import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import PermissionsAssignModal from '@/components/PermissionsAssignModal';
+import AffectationsModal from '@/components/AffectationsModal';
 
 // Reprend loadTabUsers()/openModalUser()/saveUser()/openModalResetPwd()/toggleUser()/deleteUser()
 // de legacy/js/app.js (l. 4774-5170).
@@ -209,7 +210,7 @@ function ResetPasswordModal({ userId, username, onClose, onDone }) {
 }
 
 export default function UsersTab() {
-  const { user: me, can } = useApp();
+  const { user: me, can, activeTenantId } = useApp();
   const toast = useToast();
   const [users, setUsers] = useState(null);
   const [erreur, setErreur] = useState('');
@@ -302,6 +303,9 @@ export default function UsersTab() {
                         {canEdit && <button className="btn-icon" onClick={() => setModal({ edit: u })}>✏️</button>}
                         {canEdit && <button className="btn-icon" onClick={() => setModal({ reset: u })}>🔑</button>}
                         {isSuperAdmin && <button className="btn-icon" title="Permissions" onClick={() => setModal({ perms: u })}>🔐</button>}
+                        {isSuperAdmin && !activeTenantId && u.role === 'comptable_cabinet' && (
+                          <button className="btn-icon" title="Clients affectés" onClick={() => setModal({ affect: u })}>🏢</button>
+                        )}
                         {canEdit && <button className={'btn-icon' + (u.actif ? ' danger' : '')} onClick={() => onToggle(u.id)} disabled={isMe}>{u.actif ? '⏸' : '▶️'}</button>}
                         {canDelete && !isMe && <button className="btn-icon danger" onClick={() => onDelete(u.id, u.username)}>✕</button>}
                       </div>
@@ -327,6 +331,13 @@ export default function UsersTab() {
           username={modal.reset.username}
           onClose={() => setModal(null)}
           onDone={() => { setModal(null); toast('Mot de passe réinitialisé ✓', 'success'); }}
+        />
+      )}
+      {modal?.affect && (
+        <AffectationsModal
+          user={modal.affect}
+          onClose={() => setModal(null)}
+          onSaved={(n) => { setModal(null); toast(`${n} client${n > 1 ? 's' : ''} affecté${n > 1 ? 's' : ''}.`, 'success'); }}
         />
       )}
       {modal?.perms && (

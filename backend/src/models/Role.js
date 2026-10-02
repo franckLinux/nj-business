@@ -8,6 +8,8 @@ module.exports = (sequelize, DataTypes) => {
     description: DataTypes.TEXT,
     couleur: { type: DataTypes.TEXT, defaultValue: '#6366f1' },
     tenant_id: DataTypes.UUID,
+    // Rôle système (directeur, caissier…) : global, non supprimable (migration 014).
+    is_system: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   }, {
     tableName: 'roles',

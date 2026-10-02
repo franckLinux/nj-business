@@ -7,8 +7,8 @@
 // sont récupérés avec succès (cacheFirstStatic), plutôt que pré-listés.
 // =====================================================================
 
-const CACHE_STATIC  = 'nj-caisse-pro-static-v3';
-const CACHE_DYNAMIC = 'nj-caisse-pro-dynamic-v3';
+const CACHE_STATIC  = 'nj-caisse-pro-static-v4';
+const CACHE_DYNAMIC = 'nj-caisse-pro-dynamic-v4';
 
 const APP_SHELL = ['/', '/manifest.json'];
 
