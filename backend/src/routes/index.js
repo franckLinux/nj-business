@@ -1,6 +1,6 @@
 // src/routes/index.js — CaissePro v2 — Routes complètes
 const router = require('express').Router();
-const { authGuard, requireRole } = require('../middleware/auth');
+const { authGuard, requireRole, requireCabinet } = require('../middleware/auth');
 const { tenantGuard }             = require('../middleware/tenant');
 const { validate }                = require('../middleware/validate');
 const { requirePermission }       = require('../middleware/permission');
@@ -161,13 +161,13 @@ router.get('/dashboard/stats', authGuard, tenantGuard, dashCtrl.getStats);
 // ── Permissions ───────────────────────────────────────────────────────────
 const permCtrl = require('../controllers/permissions.controller');
 const { createPermissionRules, updatePermissionRules, codesArrayRules } = require('../validators/permissions.validator');
-router.get   ('/permissions',                        authGuard, requireRole('super_admin','comptable_cabinet'), permCtrl.getPermissions);
+router.get   ('/permissions',                        authGuard, requireCabinet, permCtrl.getPermissions);
 router.post  ('/permissions',                        authGuard, requireRole('super_admin'),                    createPermissionRules, validate, permCtrl.createPermission);
 router.put   ('/permissions/:code',                  authGuard, requireRole('super_admin'),                    updatePermissionRules, validate, permCtrl.updatePermission);
 router.delete('/permissions/:code',                  authGuard, requireRole('super_admin'),                    permCtrl.deletePermission);
-router.get   ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin','comptable_cabinet'), permCtrl.getTenantPermissions);
+router.get   ('/tenants/:tenantId/permissions',      authGuard, requireCabinet, permCtrl.getTenantPermissions);
 router.post  ('/tenants/:tenantId/permissions',      authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setTenantPermissions);
-router.get   ('/users/:userId/permissions',          authGuard, requireRole('super_admin','comptable_cabinet'), permCtrl.getUserPermissions);
+router.get   ('/users/:userId/permissions',          authGuard, requireCabinet, permCtrl.getUserPermissions);
 router.post  ('/users/:userId/permissions',          authGuard, requireRole('super_admin'),                    codesArrayRules, validate, permCtrl.setUserPermissions);
 
 // ── Rôles personnalisés ───────────────────────────────────────────────────
@@ -183,7 +183,7 @@ router.post  ('/roles/:id/permissions',    authGuard, tenantGuard, requireRole('
 // ── Tenants ───────────────────────────────────────────────────────────────
 const tenantsCtrl = require('../controllers/tenants.controller');
 const { createTenantRules, toggleActifRules } = require('../validators/tenants.validator');
-router.get  ('/tenants',           authGuard, requireRole('super_admin','comptable_cabinet'), tenantsCtrl.getTenants);
+router.get  ('/tenants',           authGuard, requireCabinet, tenantsCtrl.getTenants);
 router.post ('/tenants',           authGuard, requireRole('super_admin'),                     createTenantRules, validate, tenantsCtrl.createTenant);
 router.patch('/tenants/:id/actif', authGuard, requireRole('super_admin'),                     toggleActifRules, validate, tenantsCtrl.toggleActif);
 

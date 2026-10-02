@@ -14,15 +14,23 @@ const ROLES_COLORS = {
   directeur: '#dbeafe', caissier: '#fce7f3', auditeur: '#fef3c7',
   comptable_cabinet: '#dcfce7', super_admin: '#ede9fe',
 };
-const ROLES_CREABLES = ['directeur', 'caissier', 'auditeur', 'comptable_cabinet'];
+// Même règle que le serveur (users.controller.js → rolesAttribuables) :
+// dans un client → rôles du client ; hors client (super_admin) → comptable_cabinet.
+// super_admin n'est jamais proposé.
+const ROLES_CLIENT = ['directeur', 'caissier', 'auditeur'];
+const ROLES_CABINET = ['comptable_cabinet'];
 
 // Exporté : réutilisé par JournauxTab pour la création rapide d'un responsable
 // depuis la modale journal (bouton « + Créer »).
 export function UserModal({ user, onClose, onSaved }) {
   const isEdit = !!user;
+  const { activeTenantId, user: me } = useApp();
+  const rolesBase = (activeTenantId || me?.tenantId) ? ROLES_CLIENT : ROLES_CABINET;
+  // En édition, le rôle actuel reste affiché même s'il n'est plus attribuable.
+  const rolesCreables = isEdit && !rolesBase.includes(user.role) ? [user.role, ...rolesBase] : rolesBase;
   const [username, setUsername] = useState(user?.username || '');
   const [email, setEmail] = useState(user?.email || '');
-  const [role, setRole] = useState(user?.role || 'caissier');
+  const [role, setRole] = useState(user?.role || (rolesBase.includes('caissier') ? 'caissier' : rolesBase[0]));
   const [customRoleId, setCustomRoleId] = useState(user?.custom_role_id || null);
   const [pwd, setPwd] = useState('');
   const [pwd2, setPwd2] = useState('');
@@ -76,7 +84,7 @@ export function UserModal({ user, onClose, onSaved }) {
             <label>Accès système <span className="req">*</span></label>
             <span className="field-hint" style={{ marginBottom: 6, display: 'block' }}>Détermine ce que l'utilisateur peut administrer</span>
             <select style={{ background: '#f8fafc' }} value={role} onChange={(e) => setRole(e.target.value)}>
-              {ROLES_CREABLES.map((r) => <option key={r} value={r}>{ROLES_LABELS[r]}</option>)}
+              {rolesCreables.map((r) => <option key={r} value={r}>{ROLES_LABELS[r]}</option>)}
             </select>
           </div>
 

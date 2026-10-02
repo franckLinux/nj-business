@@ -144,8 +144,11 @@ export function AppProvider({ children }) {
   }, [user]);
 
   // Appartenance au cabinet (choix du client à administrer) : c'est une
-  // identité, pas une fonctionnalité — reste porté par le rôle.
-  const isAdmin = ['super_admin', 'comptable_cabinet'].includes(user?.role);
+  // identité, pas une fonctionnalité — reste porté par le rôle. Même règle que
+  // le serveur (middleware/auth.js → isCabinet) : un comptable_cabinet
+  // rattaché à un client n'est PAS membre du cabinet.
+  const isAdmin = user?.role === 'super_admin'
+    || (user?.role === 'comptable_cabinet' && !user?.tenantId);
   const peutVoirAttente = can('journal.validate');
 
   const tenantLabel = activeTenantNom
