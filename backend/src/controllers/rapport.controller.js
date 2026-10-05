@@ -1,5 +1,6 @@
 const { Op, fn, col } = require('sequelize');
 const { Journal, Ran, Banque, Mouvement, Tenant } = require('../models');
+const { soldesJournaux } = require('../services/journal.service');
 
 const MOIS = ['Janvier','Fevrier','Mars','Avril','Mai','Juin',
               'Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
@@ -30,7 +31,9 @@ const getCompteEmploi = async (req, res) => {
     // ── 3. Banque + 4. Mouvements du mois groupés par journal + rubrique ─────
     const [journaux, ranRows, bqPrev, bqCourant, mvtRows, tenant] = await Promise.all([
       Journal.findAll({
-        where: { tenant_id: tenantId, actif: true, type: { [Op.ne]: 'banque' } },
+        // Tous les journaux, BANQUE comprise : ses mouvements étaient déjà
+        // comptés dans les emplois alors que son RAN et son solde ne l'étaient pas.
+        where: { tenant_id: tenantId, actif: true },
         attributes: ['id', 'nom', 'code', 'type'],
         order: [['ordre', 'ASC'], ['nom', 'ASC']],
         raw: true,
@@ -56,19 +59,22 @@ const getCompteEmploi = async (req, res) => {
       Tenant.findOne({ where: { id: tenantId }, attributes: ['nom', 'devise', 'directeur_nom', 'caissier_nom'] }),
     ]);
 
+    // RAN de chaque journal = solde final du mois précédent (ou solde
+    // d'ouverture), calculé comme partout ailleurs — plus la ligne ran brute.
+    const soldes = await soldesJournaux(tenantId, mois, yr, journaux.map((j) => j.id));
     const ranByJournalId = {};
-    const ranLegacy = {};   // type_caisse → montant (quand journal_id IS NULL)
+    journaux.forEach((j) => { ranByJournalId[j.id] = soldes.get(Number(j.id))?.ran || 0; });
+    const ranLegacy = {};   // type_caisse → montant (anciennes saisies sans journal)
     ranRows.forEach(r => {
-      if (r.journal_id !== null) {
-        ranByJournalId[r.journal_id] = parseFloat(r.montant);
-      } else {
-        ranLegacy[r.type_caisse] = (ranLegacy[r.type_caisse] || 0) + parseFloat(r.montant);
-      }
+      if (r.journal_id === null) ranLegacy[r.type_caisse] = (ranLegacy[r.type_caisse] || 0) + parseFloat(r.montant);
     });
 
-    const soldeBanqueInitial = parseFloat(bqPrev?.solde_final) || 0;
-    const fondsRecusBanque   = parseFloat(bqCourant?.fonds_recus) || 0;
-    const soldeBanqueFinal   = parseFloat(bqCourant?.solde_final) || 0;
+    // Ancienne saisie manuelle de la banque : seulement s'il n'existe aucun
+    // journal banque (sinon double comptage).
+    const banqueManuelle     = !journaux.some((j) => j.type === 'banque');
+    const soldeBanqueInitial = banqueManuelle ? (parseFloat(bqPrev?.solde_final) || 0) : 0;
+    const fondsRecusBanque   = banqueManuelle ? (parseFloat(bqCourant?.fonds_recus) || 0) : 0;
+    const soldeBanqueFinal   = banqueManuelle ? (parseFloat(bqCourant?.solde_final) || 0) : 0;
 
     // ── 5. Agréger par journal + pivot rubriques pour Section II ─────────────
     const mvtByJournal  = {};

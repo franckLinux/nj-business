@@ -1,5 +1,6 @@
 const { sequelize, Journal, ArretCaisse } = require('../models');
 const { userHasPermission } = require('../services/permission.service');
+const { soldeJournal } = require('../services/journal.service');
 
 // ── POST /api/journaux/:id/arreter ────────────────────────────────────────
 // Autorisé au responsable_arret désigné du journal, ou à qui détient
@@ -24,6 +25,10 @@ const arreter = async (req, res) => {
       return res.status(403).json({ error: "Vous n'êtes pas le responsable d'arrêt de ce journal." });
     }
 
+    const soldeCalcule = (await soldeJournal(req.tenantId, mois, parseInt(annee, 10), journalId)).solde;
+    if (solde_final !== undefined && Math.abs((parseFloat(solde_final) || 0) - soldeCalcule) > 0.5) {
+      console.warn(`[Arrêt caisse] solde affiché ${solde_final} ≠ solde calculé ${soldeCalcule} (journal ${journalId}) : le calcul serveur est retenu.`);
+    }
     const arret = await sequelize.transaction(async (t) => {
       const [row] = await ArretCaisse.findOrCreate({
         where: { tenant_id: req.tenantId, journal_id: journalId, mois, annee: parseInt(annee, 10) },
@@ -32,7 +37,9 @@ const arreter = async (req, res) => {
       });
       row.arrete_le   = new Date();
       row.arrete_par  = req.user.id;
-      row.solde_final = parseFloat(solde_final) || 0;
+      // Solde arrêté = solde CALCULÉ par le serveur (RAN + entrées − sorties),
+      // jamais la valeur envoyée par le navigateur.
+      row.solde_final = soldeCalcule;
       row.commentaire = commentaire || '';
       await row.save({ transaction: t });
       return row;

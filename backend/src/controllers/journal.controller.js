@@ -9,7 +9,14 @@ const {
   moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
   typeCaisseDuJournal, enregistrerRan, situationJournaux, MOIS: MOIS_VALIDES,
   mettreEnAttente, controleBudgetSortie,
+  verifierPeriodeOuverte, verifierSoldeNonNegatif, soldeJournal, ErreurComptable, cle, SQL_CLE, filtreOuverture,
 } = require('../services/journal.service');
+
+// Refus comptable (mois arrêté, solde insuffisant) → 409 avec le message clair.
+const refusComptable = (res, err) => {
+  if (err instanceof ErreurComptable) { res.status(err.status).json({ error: err.message }); return true; }
+  return false;
+};
 
 // ── GET /api/journal?mois=&annee=&journal_id=&rubrique_code= ─────────────
 const getJournal = async (req, res) => {
@@ -114,6 +121,16 @@ const createMouvement = async (req, res) => {
     } catch (_) { /* défaut 'especes' */ }
   }
 
+  // Contrôles comptables : mois ouvert, et caisse jamais négative.
+  try {
+    await verifierPeriodeOuverte(req.tenantId, jid, mois, an);
+    await verifierSoldeNonNegatif(req.tenantId, jid, mois, an, (parseFloat(entree) || 0) - montantSortie);
+  } catch (err) {
+    if (refusComptable(res, err)) return;
+    console.error('[Journal] contrôle comptable :', err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+
   // RG-05 : les contrôles ne s'appliquent qu'aux SORTIES (entrées exemptées).
   if (montantSortie > 0) {
     let ctrl;
@@ -184,9 +201,18 @@ const updateMouvement = async (req, res) => {
     // Mouvement existant (pour retrouver mois/annee/journal et exclure sa propre sortie du cumul)
     const old = await Mouvement.findOne({
       where: { id, tenant_id: req.tenantId },
-      attributes: ['mois', 'annee', 'journal_id'],
+      attributes: ['mois', 'annee', 'journal_id', 'entree', 'sortie'],
     });
     if (!old) return res.status(404).json({ error: 'Mouvement introuvable.' });
+    try {
+      await verifierPeriodeOuverte(req.tenantId, old.journal_id, old.mois, old.annee);
+      const delta = ((parseFloat(entree) || 0) - montantSortie)
+                  - ((parseFloat(old.entree) || 0) - (parseFloat(old.sortie) || 0));
+      await verifierSoldeNonNegatif(req.tenantId, old.journal_id, old.mois, old.annee, delta);
+    } catch (err) {
+      if (refusComptable(res, err)) return;
+      throw err;
+    }
 
     // Contrôle budgétaire sur la NOUVELLE valeur (RG-03 / RG-06 / RG-04) — refus sec.
     // On ferme ainsi le contournement : impossible de gonfler une sortie par édition.
@@ -232,9 +258,19 @@ const updateMouvement = async (req, res) => {
 // ── DELETE /api/journal/:id ────────────────────────────────────────────────
 const deleteMouvement = async (req, res) => {
   try {
+    const old = await Mouvement.findOne({
+      where: { id: req.params.id, tenant_id: req.tenantId },
+      attributes: ['mois', 'annee', 'journal_id', 'entree', 'sortie'], raw: true,
+    });
+    if (!old) return res.status(404).json({ error: 'Mouvement introuvable.' });
+    await verifierPeriodeOuverte(req.tenantId, old.journal_id, old.mois, old.annee);
+    // Supprimer une ENTRÉE retire de l'argent de la caisse : même contrôle.
+    await verifierSoldeNonNegatif(req.tenantId, old.journal_id, old.mois, old.annee,
+      (parseFloat(old.sortie) || 0) - (parseFloat(old.entree) || 0));
     await Mouvement.destroy({ where: { id: req.params.id, tenant_id: req.tenantId } });
     res.json({ message: 'Mouvement supprimé.' });
   } catch (err) {
+    if (refusComptable(res, err)) return;
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
@@ -262,7 +298,9 @@ const getRan = async (req, res) => {
     const montant = await autoRan(req.tenantId, mois, an, filtre);
     const prev = moisPrecedent(mois, an);
     const soldePrev = await calcSoldeFinal(req.tenantId, prev.mois, prev.annee, filtre);
+    const etat = filtre.journal_id ? await etatSaisieRan(req.tenantId, filtre.journal_id, mois, an) : { modifiable: true };
     res.json({
+      ...etat,
       montant,
       mois_precedent:   prev.mois,
       annee_precedente: prev.annee,
@@ -273,6 +311,49 @@ const getRan = async (req, res) => {
     console.error('[Journal] getRan :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
+};
+
+// ── RAN : saisie limitée au solde d'OUVERTURE (décision du 05/10/2026) ───
+// Le RAN ne se saisit qu'au premier mois d'activité d'un journal. Ensuite il
+// vaut toujours le solde final du mois précédent (calculé) : on ne peut plus
+// créer d'écart de report. Une correction se fait par une écriture.
+const etatSaisieRan = async (tenantId, journalId, mois, annee) => {
+  const k = cle(mois, annee);
+  const q = (sql, r) => sequelize.query(sql, { replacements: { t: tenantId, j: journalId, k, ...r }, type: sequelize.QueryTypes.SELECT });
+  const [avant] = await q(`SELECT mois, annee FROM journal WHERE tenant_id = :t AND journal_id = :j AND ${SQL_CLE} < :k ORDER BY ${SQL_CLE} LIMIT 1`);
+  if (avant) {
+    const prev = moisPrecedent(mois, annee);
+    return { modifiable: false, raison: `Le RAN de ${mois} ${annee} est le solde final de ${prev.mois} ${prev.annee}, calculé automatiquement : `
+      + `il ne se saisit qu'à l'ouverture de la caisse (des écritures existent depuis ${avant.mois} ${avant.annee}). `
+      + 'Pour corriger un solde, passez une écriture dans le mois concerné.' };
+  }
+  const [arret] = await q(`SELECT mois, annee FROM arrets_caisse WHERE tenant_id = :t AND journal_id = :j AND ${SQL_CLE} >= :k LIMIT 1`).catch(() => []);
+  if (arret) {
+    return { modifiable: false, raison: `La caisse est arrêtée pour ${arret.mois} ${arret.annee} : le solde d'ouverture ne peut plus être modifié. Faites d'abord réouvrir la caisse.` };
+  }
+  return { modifiable: true, raison: '' };
+};
+
+// Un seul solde d'ouverture par journal : l'ancien (autre mois) est neutralisé
+// (conservé en 'report', jamais supprimé), celui du mois saisi est créé/mis à jour.
+const enregistrerOuverture = async ({ tenantId, journalId, mois, annee, typeCaisse, montant }) => {
+  const avecOrigine = Boolean(await filtreOuverture());
+  await sequelize.transaction(async (t) => {
+    const opts = { replacements: { t: tenantId, j: journalId, mois, annee, tc: typeCaisse, m: montant }, transaction: t };
+    if (avecOrigine) {
+      await sequelize.query(`UPDATE ran SET origine = 'report' WHERE tenant_id = :t AND journal_id = :j
+                               AND origine = 'ouverture' AND NOT (mois = :mois AND annee = :annee)`, opts);
+      const maj = await sequelize.query(`UPDATE ran SET montant = :m, origine = 'ouverture', type_caisse = :tc
+                               WHERE tenant_id = :t AND journal_id = :j AND mois = :mois AND annee = :annee RETURNING id`,
+      { ...opts, type: sequelize.QueryTypes.SELECT });
+      if (maj.length === 0) {
+        await sequelize.query(`INSERT INTO ran (tenant_id, mois, annee, journal_id, type_caisse, montant, origine)
+                               VALUES (:t, :mois, :annee, :j, :tc, :m, 'ouverture')`, opts);
+      }
+    } else {
+      await enregistrerRan({ tenantId, mois, annee, journalId, typeCaisse, montant });
+    }
+  });
 };
 
 // ── POST /api/journal/ran — saisie manuelle ──────────────────────────────
@@ -294,19 +375,12 @@ const setRan = async (req, res) => {
       // ICI, pas par le frontend.
       const journal = await Journal.findOne({ where: { id: journalId, tenant_id: req.tenantId }, attributes: ['id', 'type'], raw: true });
       if (!journal) return res.status(404).json({ error: 'Journal introuvable pour ce client.' });
-      // Journal banque : RAN saisi comme pour les autres journaux (solde
-      // d'ouverture du compte). Il n'existe pas d'écran de rapprochement
-      // bancaire : l'ancien blocage renvoyait vers une fonction inexistante.
+      // Journal banque : RAN saisi comme pour les autres journaux.
       typeCaisse = typeCaisseDuJournal(journal.type);
-
-      // Un solde d'ouverture ne se modifie plus après l'arrêt de caisse.
-      const arret = await ArretCaisse.findOne({
-        where: { tenant_id: req.tenantId, journal_id: journalId, mois, annee: an },
-        attributes: ['id'], raw: true,
-      });
-      if (arret) {
-        return res.status(409).json({ error: 'Ce journal est arrêté pour ce mois : le RAN ne peut plus être modifié. Faites d\'abord réouvrir le journal.' });
-      }
+      const etat = await etatSaisieRan(req.tenantId, journalId, mois, an);
+      if (!etat.modifiable) return res.status(409).json({ error: etat.raison });
+      await enregistrerOuverture({ tenantId: req.tenantId, journalId, mois, annee: an, typeCaisse, montant: valeur });
+      return res.json({ message: 'Solde d\'ouverture enregistré.' });
     }
 
     await enregistrerRan({ tenantId: req.tenantId, mois, annee: an, journalId, typeCaisse, montant: valeur });
@@ -335,7 +409,8 @@ const getJournauxRecap = async (req, res) => {
   try {
     const [journaux, banque] = await Promise.all([
       Journal.findAll({
-        where: { tenant_id: tenantId, actif: true, type: { [Op.ne]: 'banque' } },
+        // Journal banque inclus : il se lit comme les autres caisses.
+        where: { tenant_id: tenantId, actif: true },
         attributes: ['id', 'nom', 'code', 'type', 'ordre'], raw: true,
       }),
       Banque.findOne({ where: { tenant_id: tenantId, mois, annee: yr } }),
@@ -351,7 +426,8 @@ const getJournauxRecap = async (req, res) => {
 
     res.json({
       journaux: rows,
-      banque: {
+      // Ancienne saisie banque : affichée seulement sans journal banque.
+      banque: journaux.some((j) => j.type === 'banque') ? { solde_initial: 0, fonds_recus: 0, solde_final: 0 } : {
         solde_initial: parseFloat(banque?.solde_initial) || 0,
         fonds_recus:   parseFloat(banque?.fonds_recus) || 0,
         solde_final:   parseFloat(banque?.solde_final) || 0,

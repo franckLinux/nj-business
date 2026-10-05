@@ -1,4 +1,5 @@
 // src/controllers/mouvements_attente.controller.js
+const { verifierPeriodeOuverte, verifierSoldeNonNegatif, ErreurComptable } = require('../services/journal.service');
 // File des dépenses (sorties) bloquées en attente d'autorisation (RG-03 / RG-04).
 // L'approbation bascule la ligne en écriture réelle dans `journal` (transaction atomique).
 const { sequelize, MouvementAttente, Mouvement, Rubrique, Journal, User } = require('../models');
@@ -81,6 +82,11 @@ const approuver = async (req, res) => {
         throw notFound;
       }
 
+      // Même contrôles comptables qu'une saisie directe : mois ouvert et
+      // caisse jamais négative (la dépense reste en attente sinon).
+      await verifierPeriodeOuverte(m.tenant_id, m.journal_id, m.mois, m.annee);
+      await verifierSoldeNonNegatif(m.tenant_id, m.journal_id, m.mois, m.annee, -(parseFloat(m.sortie) || 0));
+
       const j = await Mouvement.create({
         tenant_id: m.tenant_id, date: m.date, mois: m.mois, annee: m.annee,
         journal_id: m.journal_id, type_caisse: m.type_caisse, rubrique_code: m.rubrique_code,
@@ -106,6 +112,7 @@ const approuver = async (req, res) => {
 
     res.json({ ok: true, journal });
   } catch (err) {
+    if (err instanceof ErreurComptable) return res.status(err.status).json({ error: `Approbation impossible : ${err.message}` });
     if (err.code === 'NOT_FOUND') {
       return res.status(404).json({ error: 'Dépense en attente introuvable ou déjà traitée.' });
     }

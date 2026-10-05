@@ -15,6 +15,10 @@ export default function RanModal({ journal, ranActuel, onClose, onSaved }) {
   const [prevLabel, setPrevLabel] = useState('');
   const [erreur, setErreur] = useState('');
   const [saving, setSaving] = useState(false);
+  // Le serveur dit si le RAN est saisissable (solde d'ouverture, 1er mois)
+  // ou s'il est le report calculé du mois précédent (lecture seule).
+  const [modifiable, setModifiable] = useState(true);
+  const [raison, setRaison] = useState('');
 
   // Indicatif seulement : le serveur détermine le type de caisse à partir du journal.
   const caisse = ['om', 'momo', 'carte_prepayee'].includes(journal?.type) ? 'om' : 'especes';
@@ -24,6 +28,10 @@ export default function RanModal({ journal, ranActuel, onClose, onSaved }) {
     api.get(`/journal/ran?mois=${mois}&annee=${annee}&journal_id=${journal.id}&caisse=${caisse}`).then((data) => {
       if (annule) return;
       setPrevLoading(false);
+      if (!data.error && data.modifiable === false) {
+        setModifiable(false); setRaison(data.raison || '');
+        if (typeof data.montant === 'number') setMontant(data.montant);
+      }
       if (!data.error && typeof data.solde_precedent === 'number') {
         setPrevSolde(data.solde_precedent);
         setPrevLabel(`Solde de ${data.mois_precedent} ${data.annee_precedente}`);
@@ -88,14 +96,20 @@ export default function RanModal({ journal, ranActuel, onClose, onSaved }) {
             )}
           </div>
 
+          {!modifiable ? (
+            <div style={{ background: '#eff6ff', border: '1.5px solid #bfdbfe', borderRadius: 12, padding: '14px 16px', fontSize: 13, color: '#1e3a8a' }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>RAN reporté automatiquement : {fmt(Number(montant) || 0, devise)}</div>
+              {raison}
+            </div>
+          ) : (<>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>OU SAISIR MANUELLEMENT</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>SOLDE D'OUVERTURE DE LA CAISSE</span>
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
           </div>
 
           <div className="form-section">
-            <label>Montant RAN <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>({devise})</span></label>
+            <label>Solde d'ouverture <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>({devise})</span></label>
             <div style={{ position: 'relative' }}>
               <input
                 type="number" min="0" step="500" value={montant}
@@ -106,13 +120,16 @@ export default function RanModal({ journal, ranActuel, onClose, onSaved }) {
             </div>
           </div>
 
+          </>)}
           {erreur && <div className="alert-err" style={{ marginTop: 8 }}>{erreur}</div>}
         </div>
         <div className="modal-foot" style={{ gap: 10 }}>
-          <button className="btn-secondary" onClick={onClose}>Annuler</button>
-          <button className="btn-primary" style={{ width: 'auto', marginTop: 0 }} onClick={onSave} disabled={saving}>
-            💾 Enregistrer
-          </button>
+          <button className="btn-secondary" onClick={onClose}>{modifiable ? 'Annuler' : 'Fermer'}</button>
+          {modifiable && (
+            <button className="btn-primary" style={{ width: 'auto', marginTop: 0 }} onClick={onSave} disabled={saving}>
+              💾 Enregistrer
+            </button>
+          )}
         </div>
       </div>
     </div>

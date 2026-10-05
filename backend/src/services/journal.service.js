@@ -77,8 +77,136 @@ const resolveFiltre = async (tenantId, journalId, caisse) => {
   return { journal_id: null, type_caisse: null };
 };
 
+// ══ CONTINUITÉ COMPTABLE DES SOLDES (migration 025) ════════════════════════
+// Pour un journal :
+//   solde final(M) = solde d'ouverture (RAN saisi au 1er mois)
+//                    + Σ (entrées − sorties) de tous les mois ≤ M
+//   RAN(M)         = solde final(M-1)  — calculé, jamais figé en base.
+// Une écriture tardive sur un mois passé se répercute donc sur tous les mois
+// suivants, et un mois jamais consulté ne casse plus la chaîne des reports.
+const { QueryTypes } = require('sequelize');
+const cle = (mois, annee) => Number(annee) * 12 + MOIS.indexOf(mois) + 1;
+const SQL_CLE = `(annee * 12 + array_position(ARRAY['Janvier','Fevrier','Mars','Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre']::text[], mois))`;
+const libellePeriode = (k) => `${MOIS[(k - 1) % 12]} ${Math.floor((k - 1) / 12)}`;
+
+// Colonne ran.origine (025) : tant qu'elle n'existe pas (démarrage en cours),
+// toute ligne ran rattachée à un journal est lue comme un solde d'ouverture.
+let origineOk = null;
+const filtreOuverture = async () => {
+  if (origineOk === null || origineOk === false) {
+    const [r] = await Ran.sequelize.query(
+      "SELECT 1 AS ok FROM information_schema.columns WHERE table_name = 'ran' AND column_name = 'origine'",
+      { type: QueryTypes.SELECT });
+    origineOk = Boolean(r);
+  }
+  return origineOk ? "AND origine = 'ouverture'" : '';
+};
+
+/**
+ * Situation d'un ou plusieurs journaux pour un mois, en UNE requête.
+ * Renvoie Map(journal_id → { ran, entrees, sorties, solde, ran_source, cle_ouverture }).
+ * ran_source : 'ouverture' (RAN saisi ce mois-ci) | 'report' (solde du mois précédent).
+ */
+const soldesJournaux = async (tenantId, mois, annee, journalIds) => {
+  const ids = [...new Set(journalIds.map(Number))].filter((n) => n > 0);
+  const res = new Map();
+  if (!ids.length) return res;
+  const k = cle(mois, annee);
+  const fo = await filtreOuverture();
+  const rows = await Ran.sequelize.query(`
+    WITH o AS (SELECT journal_id, ${SQL_CLE} AS k, montant FROM ran
+                WHERE tenant_id = :t AND journal_id IN (:ids) ${fo}),
+         m AS (SELECT journal_id, ${SQL_CLE} AS k, COALESCE(SUM(entree),0) AS e, COALESCE(SUM(sortie),0) AS s
+                 FROM journal WHERE tenant_id = :t AND journal_id IN (:ids) GROUP BY 1, 2)
+    SELECT j.id AS journal_id,
+           COALESCE((SELECT SUM(montant) FROM o WHERE o.journal_id = j.id AND o.k <  :k), 0)
+         + COALESCE((SELECT SUM(e - s)  FROM m WHERE m.journal_id = j.id AND m.k <  :k), 0) AS report,
+           COALESCE((SELECT SUM(montant) FROM o WHERE o.journal_id = j.id AND o.k = :k), 0) AS ouverture,
+           (SELECT COUNT(*) FROM o WHERE o.journal_id = j.id AND o.k = :k) AS a_ouverture,
+           COALESCE((SELECT SUM(e) FROM m WHERE m.journal_id = j.id AND m.k = :k), 0) AS entrees,
+           COALESCE((SELECT SUM(s) FROM m WHERE m.journal_id = j.id AND m.k = :k), 0) AS sorties,
+           (SELECT MIN(o.k) FROM o WHERE o.journal_id = j.id) AS cle_ouverture
+      FROM unnest(ARRAY[:ids]::int[]) AS j(id)`,
+  { replacements: { t: tenantId, ids, k }, type: QueryTypes.SELECT });
+  for (const r of rows) {
+    const ran = (parseFloat(r.report) || 0) + (parseFloat(r.ouverture) || 0);
+    const entrees = parseFloat(r.entrees) || 0;
+    const sorties = parseFloat(r.sorties) || 0;
+    res.set(Number(r.journal_id), {
+      ran, entrees, sorties, solde: ran + entrees - sorties,
+      ran_source: Number(r.a_ouverture) > 0 ? 'ouverture' : 'report',
+      cle_ouverture: r.cle_ouverture ? Number(r.cle_ouverture) : null,
+    });
+  }
+  return res;
+};
+
+const soldeJournal = async (tenantId, mois, annee, journalId) =>
+  (await soldesJournaux(tenantId, mois, annee, [journalId])).get(Number(journalId))
+  || { ran: 0, entrees: 0, sorties: 0, solde: 0, ran_source: 'report', cle_ouverture: null };
+
+class ErreurComptable extends Error {
+  constructor(status, message) { super(message); this.status = status; }
+}
+
+// Un mois arrêté (ou suivi d'un mois arrêté) ne reçoit plus d'écriture :
+// modifier M changerait le solde arrêté de M et de tous les mois suivants.
+const verifierPeriodeOuverte = async (tenantId, journalId, mois, annee) => {
+  if (!journalId) return;
+  const [a] = await Ran.sequelize.query(
+    `SELECT mois, annee FROM arrets_caisse
+      WHERE tenant_id = :t AND journal_id = :j AND ${SQL_CLE} >= :k
+      ORDER BY annee, ${SQL_CLE} LIMIT 1`,
+    { replacements: { t: tenantId, j: journalId, k: cle(mois, annee) }, type: QueryTypes.SELECT }).catch(() => []);
+  if (a) {
+    throw new ErreurComptable(409, a.mois === mois && Number(a.annee) === Number(annee)
+      ? `La caisse est arrêtée pour ${mois} ${annee} : aucune écriture ne peut plus y être ajoutée, modifiée ou supprimée. Faites d'abord réouvrir la caisse.`
+      : `La caisse est arrêtée pour ${a.mois} ${a.annee} : une écriture sur ${mois} ${annee} modifierait ce solde arrêté. Faites d'abord réouvrir la caisse.`);
+  }
+};
+
+// Espèces, mobile money, carte : le solde ne peut jamais devenir négatif, ni
+// sur le mois de l'écriture ni sur les mois suivants (qui en héritent).
+// La banque est exclue (découvert possible).
+const verifierSoldeNonNegatif = async (tenantId, journalId, mois, annee, delta) => {
+  if (!journalId || !(delta < 0)) return;
+  const [j] = await Ran.sequelize.query('SELECT type, nom FROM journaux WHERE id = :j AND tenant_id = :t',
+    { replacements: { j: journalId, t: tenantId }, type: QueryTypes.SELECT });
+  if (!j || j.type === 'banque') return;
+  const fo = await filtreOuverture();
+  const flux = await Ran.sequelize.query(`
+    SELECT k, SUM(v) AS v FROM (
+      SELECT ${SQL_CLE} AS k, montant AS v FROM ran WHERE tenant_id = :t AND journal_id = :j ${fo}
+      UNION ALL
+      SELECT ${SQL_CLE} AS k, COALESCE(entree,0) - COALESCE(sortie,0) FROM journal WHERE tenant_id = :t AND journal_id = :j
+    ) x GROUP BY k ORDER BY k`, { replacements: { t: tenantId, j: journalId }, type: QueryTypes.SELECT });
+  const k0 = cle(mois, annee);
+  let cumul = 0;
+  let pire = null;
+  const cles = [...new Set([...flux.map((f) => Number(f.k)), k0])].sort((a, b) => a - b);
+  const parCle = new Map(flux.map((f) => [Number(f.k), parseFloat(f.v) || 0]));
+  for (const k of cles) {
+    cumul += parCle.get(k) || 0;
+    if (k >= k0) {
+      const apres = cumul + delta;
+      if (apres < -0.004 && (pire === null || apres < pire.solde)) pire = { k, solde: apres };
+    }
+  }
+  if (pire) {
+    const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
+    const dispo = pire.solde - delta;
+    throw new ErreurComptable(409, `Solde insuffisant dans « ${j.nom} » : disponible ${fmt(dispo)} FCFA`
+      + (pire.k !== k0 ? ` (au plus bas en ${libellePeriode(pire.k)})` : ` en ${mois} ${annee}`)
+      + `, montant demandé ${fmt(-delta)} FCFA. Une caisse ne peut pas devenir négative.`);
+  }
+};
+
 // ── Calcul solde final ───────────────────────────────────────────────────
 const calcSoldeFinal = async (tenantId, mois, annee, filtre) => {
+  if (filtre.journal_id) {
+    const s = await soldeJournal(tenantId, mois, annee, filtre.journal_id);
+    return { ran: s.ran, entrees: s.entrees, sorties: s.sorties, solde: s.solde };
+  }
   const mvtWhere = { tenant_id: tenantId, mois, annee };
   if (filtre.journal_id) mvtWhere.journal_id = filtre.journal_id;
   else if (filtre.type_caisse) mvtWhere.type_caisse = filtre.type_caisse;
@@ -109,6 +237,8 @@ const calcSoldeFinal = async (tenantId, mois, annee, filtre) => {
 
 // ── RAN automatique depuis mois précédent ────────────────────────────────
 const autoRan = async (tenantId, mois, annee, filtre) => {
+  // Journal : RAN calculé (ouverture ou report), aucune écriture en base.
+  if (filtre.journal_id) return (await soldeJournal(tenantId, mois, annee, filtre.journal_id)).ran;
   const existingWhere = filtre.journal_id
     ? { tenant_id: tenantId, mois, annee, journal_id: filtre.journal_id }
     : { tenant_id: tenantId, mois, annee, type_caisse: filtre.type_caisse || 'especes', journal_id: null };
@@ -256,48 +386,32 @@ const situationJournaux = async (tenantId, mois, annee, journaux) => {
   const ids = journaux.map((j) => j.id);
   if (ids.length === 0) return [];
   const { ArretCaisse } = require('../models');
-  const [ranRows, mvtRows, arrets] = await Promise.all([
-    Ran.findAll({ where: { tenant_id: tenantId, mois, annee, journal_id: ids }, attributes: ['journal_id', 'montant'], raw: true }),
+  const [soldes, nbRows, arrets] = await Promise.all([
+    soldesJournaux(tenantId, mois, annee, ids),
     Mouvement.findAll({
       where: { tenant_id: tenantId, mois, annee, journal_id: ids },
-      attributes: [
-        'journal_id',
-        [Mouvement.sequelize.fn('COALESCE', Mouvement.sequelize.fn('SUM', Mouvement.sequelize.col('entree')), 0), 'total_entrees'],
-        [Mouvement.sequelize.fn('COALESCE', Mouvement.sequelize.fn('SUM', Mouvement.sequelize.col('sortie')), 0), 'total_sorties'],
-        [Mouvement.sequelize.fn('COUNT', Mouvement.sequelize.col('id')), 'nb'],
-      ],
+      attributes: ['journal_id', [Mouvement.sequelize.fn('COUNT', Mouvement.sequelize.col('id')), 'nb']],
       group: ['journal_id'], raw: true,
     }),
     ArretCaisse.findAll({ where: { tenant_id: tenantId, mois, annee, journal_id: ids }, attributes: ['journal_id', 'solde_final', 'arrete_le'], raw: true }),
   ]);
-  const ranBy = new Map(ranRows.map((r) => [r.journal_id, parseFloat(r.montant) || 0]));
-  const mvtBy = new Map(mvtRows.map((m) => [m.journal_id, m]));
+  const nbBy = new Map(nbRows.map((m) => [m.journal_id, parseInt(m.nb, 10) || 0]));
   const arretBy = new Map(arrets.map((a) => [a.journal_id, { solde_arrete: parseFloat(a.solde_final) || 0, arrete_le: a.arrete_le }]));
-  const prev = moisPrecedent(mois, annee);
-
-  return Promise.all(journaux.map(async (j) => {
-    let ran = ranBy.get(j.id);
-    let ran_reporte = false;
-    if (ran === undefined) {
-      const sp = await calcSoldeFinal(tenantId, prev.mois, prev.annee, { journal_id: j.id, type_caisse: typeCaisseDuJournal(j.type) });
-      ran = sp.solde;
-      ran_reporte = true;
-    }
-    const m = mvtBy.get(j.id);
-    const total_entrees = parseFloat(m?.total_entrees) || 0;
-    const total_sorties = parseFloat(m?.total_sorties) || 0;
+  return journaux.map((j) => {
+    const s = soldes.get(Number(j.id)) || { ran: 0, entrees: 0, sorties: 0, solde: 0, ran_source: 'report' };
     return {
       ...j,
-      ran, ran_reporte, total_entrees, total_sorties,
-      nb_mouvements: parseInt(m?.nb, 10) || 0,
-      solde_final: ran + total_entrees - total_sorties,
+      ran: s.ran, ran_reporte: s.ran_source === 'report', total_entrees: s.entrees, total_sorties: s.sorties,
+      nb_mouvements: nbBy.get(j.id) || 0,
+      solde_final: s.solde,
       arrete: arretBy.get(j.id) || null,
     };
-  }));
+  });
 };
 
 module.exports = {
-  situationJournaux,
+  situationJournaux, soldesJournaux, soldeJournal, verifierPeriodeOuverte, verifierSoldeNonNegatif,
+  ErreurComptable, cle, SQL_CLE, filtreOuverture,
   MOIS, moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
   typeCaisseDuJournal, enregistrerRan,
   mettreEnAttente, controleBudgetSortie,
