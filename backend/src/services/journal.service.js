@@ -25,6 +25,39 @@ const moisPrecedent = (mois, annee) => {
   return { mois: MOIS[idx - 1], annee };
 };
 
+// ── Type de caisse d'un journal ─────────────────────────────────────────
+// SOURCE UNIQUE : la colonne ran.type_caisse n'accepte que 'especes' / 'om'
+// (CHECK en base). Le frontend calculait sa propre valeur (carte prépayée →
+// especes) alors que le serveur disait 'om' : le RAN d'une même caisse
+// pouvait être lu et écrit sous deux types différents. Le serveur décide.
+const typeCaisseDuJournal = (type) =>
+  (['om', 'momo', 'carte_prepayee'].includes(type) ? 'om' : 'especes');
+
+// ── Enregistrer un RAN (création ou mise à jour) ─────────────────────────
+// Mise à jour d'abord, insertion sinon, puis nouvelle mise à jour si une
+// insertion concurrente (double clic, deux onglets) a gagné la course.
+// Remplace Ran.findOrCreate + lock, qui échouait en 500 dès qu'une contrainte
+// d'unicité était heurtée (ancienne contrainte par type de caisse, voir 016/017).
+const enregistrerRan = async ({ tenantId, mois, annee, journalId, typeCaisse, montant }) => {
+  const where = journalId
+    ? { tenant_id: tenantId, mois, annee, journal_id: journalId }
+    : { tenant_id: tenantId, mois, annee, type_caisse: typeCaisse, journal_id: null };
+  const [n] = await Ran.update({ montant }, { where });
+  if (n > 0) return;
+  try {
+    await Ran.create({ ...where, type_caisse: typeCaisse, montant });
+  } catch (err) {
+    if (err.name !== 'SequelizeUniqueConstraintError') throw err;
+    const [n2] = await Ran.update({ montant }, { where });
+    if (n2 > 0) return;
+    // La ligne en conflit n'est PAS la nôtre : c'est l'ancienne contrainte
+    // UNIQUE(tenant, mois, annee, type_caisse) qui bloque une 2e caisse.
+    const e = new Error('CONTRAINTE_RAN_OBSOLETE');
+    e.code = 'CONTRAINTE_RAN_OBSOLETE';
+    throw e;
+  }
+};
+
 // ── Résoudre journal_id → type_caisse (rétrocompatibilité) ──────────────
 // Si journal_id fourni → on l'utilise comme filtre principal
 // Si caisse fourni (ancien mode) → on filtre par type_caisse
@@ -36,8 +69,7 @@ const resolveFiltre = async (tenantId, journalId, caisse) => {
       attributes: ['id', 'type', 'code'],
     });
     if (!j) throw new Error('Journal introuvable.');
-    const typeCaisse = ['om', 'momo', 'carte_prepayee'].includes(j.type) ? 'om' : 'especes';
-    return { journal_id: j.id, type_caisse: typeCaisse };
+    return { journal_id: j.id, type_caisse: typeCaisseDuJournal(j.type) };
   }
   if (caisse) {
     return { journal_id: null, type_caisse: caisse };
@@ -88,16 +120,18 @@ const autoRan = async (tenantId, mois, annee, filtre) => {
   const soldePrev = await calcSoldeFinal(tenantId, prev.mois, prev.annee, filtre);
 
   if (soldePrev.solde !== 0) {
-    if (filtre.journal_id) {
-      await Ran.findOrCreate({
-        where: { tenant_id: tenantId, mois, annee, journal_id: filtre.journal_id },
-        defaults: { type_caisse: filtre.type_caisse || 'especes', montant: soldePrev.solde },
+    // Report automatique du solde du mois précédent. Une simple LECTURE ne
+    // doit jamais échouer à cause de cette écriture opportuniste : en cas de
+    // conflit, on renvoie quand même le montant calculé.
+    try {
+      await enregistrerRan({
+        tenantId, mois, annee,
+        journalId: filtre.journal_id || null,
+        typeCaisse: filtre.type_caisse || 'especes',
+        montant: soldePrev.solde,
       });
-    } else {
-      await Ran.findOrCreate({
-        where: { tenant_id: tenantId, mois, annee, type_caisse: filtre.type_caisse || 'especes' },
-        defaults: { montant: soldePrev.solde },
-      });
+    } catch (err) {
+      console.error('[Journal] autoRan (report non enregistré) :', err.code || err.message);
     }
     return soldePrev.solde;
   }
@@ -212,7 +246,59 @@ const controleBudgetSortie = async (tenantId, p) => {
   return { bloque: false, motif: null, montant_prevu: approuve, cumul: sr, plafond, warning };
 };
 
+// ── Situation du mois de plusieurs journaux (lecture seule) ─────────────
+// RAN + entrées − sorties, calculé EXACTEMENT comme la page du journal :
+// RAN saisi/enregistré s'il existe, sinon report du solde du mois précédent.
+// Utilisé par le tableau de bord et le récapitulatif, qui affichaient
+// jusqu'ici des chiffres différents de la page journal (RAN ignoré ou à 0).
+// N'écrit rien : une page de synthèse ne doit pas créer de RAN.
+const situationJournaux = async (tenantId, mois, annee, journaux) => {
+  const ids = journaux.map((j) => j.id);
+  if (ids.length === 0) return [];
+  const { ArretCaisse } = require('../models');
+  const [ranRows, mvtRows, arrets] = await Promise.all([
+    Ran.findAll({ where: { tenant_id: tenantId, mois, annee, journal_id: ids }, attributes: ['journal_id', 'montant'], raw: true }),
+    Mouvement.findAll({
+      where: { tenant_id: tenantId, mois, annee, journal_id: ids },
+      attributes: [
+        'journal_id',
+        [Mouvement.sequelize.fn('COALESCE', Mouvement.sequelize.fn('SUM', Mouvement.sequelize.col('entree')), 0), 'total_entrees'],
+        [Mouvement.sequelize.fn('COALESCE', Mouvement.sequelize.fn('SUM', Mouvement.sequelize.col('sortie')), 0), 'total_sorties'],
+        [Mouvement.sequelize.fn('COUNT', Mouvement.sequelize.col('id')), 'nb'],
+      ],
+      group: ['journal_id'], raw: true,
+    }),
+    ArretCaisse.findAll({ where: { tenant_id: tenantId, mois, annee, journal_id: ids }, attributes: ['journal_id', 'solde_final', 'arrete_le'], raw: true }),
+  ]);
+  const ranBy = new Map(ranRows.map((r) => [r.journal_id, parseFloat(r.montant) || 0]));
+  const mvtBy = new Map(mvtRows.map((m) => [m.journal_id, m]));
+  const arretBy = new Map(arrets.map((a) => [a.journal_id, { solde_arrete: parseFloat(a.solde_final) || 0, arrete_le: a.arrete_le }]));
+  const prev = moisPrecedent(mois, annee);
+
+  return Promise.all(journaux.map(async (j) => {
+    let ran = ranBy.get(j.id);
+    let ran_reporte = false;
+    if (ran === undefined) {
+      const sp = await calcSoldeFinal(tenantId, prev.mois, prev.annee, { journal_id: j.id, type_caisse: typeCaisseDuJournal(j.type) });
+      ran = sp.solde;
+      ran_reporte = true;
+    }
+    const m = mvtBy.get(j.id);
+    const total_entrees = parseFloat(m?.total_entrees) || 0;
+    const total_sorties = parseFloat(m?.total_sorties) || 0;
+    return {
+      ...j,
+      ran, ran_reporte, total_entrees, total_sorties,
+      nb_mouvements: parseInt(m?.nb, 10) || 0,
+      solde_final: ran + total_entrees - total_sorties,
+      arrete: arretBy.get(j.id) || null,
+    };
+  }));
+};
+
 module.exports = {
+  situationJournaux,
   MOIS, moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
+  typeCaisseDuJournal, enregistrerRan,
   mettreEnAttente, controleBudgetSortie,
 };

@@ -31,10 +31,16 @@ export default function NotifBell() {
     if (typeof res?.nb === 'number') setCount(res.nb);
   };
 
+  // Allègement : sondage toutes les 2 min (au lieu de 45 s), suspendu quand
+  // l'onglet est en arrière-plan, et relancé dès qu'on revient sur l'onglet.
+  // Un onglet oublié ouvert ne consomme plus de requêtes pour rien.
   useEffect(() => {
     refreshCount();
-    const id = setInterval(() => { if (navigator.onLine) refreshCount(); }, 45000);
-    return () => clearInterval(id);
+    const tick = () => { if (navigator.onLine && !document.hidden) refreshCount(); };
+    const id = setInterval(tick, 120000);
+    const onVisible = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -52,10 +52,21 @@ const request = async (method, url, body) => {
   if (!text) return res.ok ? {} : { error: `Erreur ${res.status}` };
   try {
     const parsed = JSON.parse(text);
+    let out = parsed;
     if (parsed && typeof parsed.success === 'boolean') {
-      return parsed.data ?? (parsed.success ? {} : { error: parsed.message });
+      out = parsed.data ?? (parsed.success ? {} : { error: parsed.message });
     }
-    return parsed;
+    // Interface plus récente que le serveur : la route n'existe pas encore
+    // côté backend. Message explicite plutôt que « Route API inconnue ».
+    if (res.status === 404 && out?.error === 'Route API inconnue.') {
+      return { ...out, error: 'Cette fonction n\'est pas encore disponible sur le serveur : le backend déployé est plus ancien que l\'interface. Redéployez le backend (dossier src/) puis redémarrez l\'application.' };
+    }
+    // super_admin sans accès support sur un écran de caisse (réforme, étape 8) :
+    // la fenêtre de demande d'accès support s'ouvre (Layout.jsx).
+    if (res.status === 403 && out?.code === 'SUPPORT_REQUIS' && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('support-requis', { detail: { tenantId: out.tenant_id } }));
+    }
+    return out;
   } catch {
     return { error: `Réponse inattendue du serveur (${res.status}).` };
   }

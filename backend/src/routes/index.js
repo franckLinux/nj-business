@@ -213,12 +213,51 @@ router.delete('/pieces/item/:pieceId',      authGuard, tenantGuard, requirePermi
 
 // ── Plan Comptable SYSCOHADA (module de permission "plan_comptable") ──────
 const planCtrl = require('../controllers/plan_comptable.controller');
-const { createCompteRules } = require('../validators/plan_comptable.validator');
-router.get('/plan-comptable/search',  authGuard, requirePermission('plan_comptable.view'), planCtrl.search);
+const { createCompteRules, updateCompteRules, statutCompteRules } = require('../validators/plan_comptable.validator');
+router.get('/plan-comptable/search',  authGuard, tenantGuard, requirePermission('plan_comptable.view'), planCtrl.search);
 router.get('/plan-comptable/classes', authGuard, planCtrl.getClasses);
-router.get('/plan-comptable/list',    authGuard, requirePermission('plan_comptable.view'), planCtrl.list);
-router.get('/plan-comptable/stats',   authGuard, requirePermission('plan_comptable.view'), planCtrl.getStats);
+router.get('/plan-comptable/list',    authGuard, tenantGuard, requirePermission('plan_comptable.view'), planCtrl.list);
+router.get('/plan-comptable/stats',   authGuard, tenantGuard, requirePermission('plan_comptable.view'), planCtrl.getStats);
 router.post  ('/plan-comptable',         authGuard, tenantGuard, requirePermission('plan_comptable.edit'), createCompteRules, validate, planCtrl.createCompte);
 router.delete('/plan-comptable/:compte', authGuard, tenantGuard, requirePermission('plan_comptable.delete'), planCtrl.deleteCompte);
+// Gestion du plan propre au client (réforme du plan, étape 5).
+router.get   ('/plan-comptable/comptes',                authGuard, tenantGuard, requirePermission('plan_comptable.view'),   planCtrl.listComptes);
+router.put   ('/plan-comptable/comptes/:id',            authGuard, tenantGuard, requirePermission('plan_comptable.edit'),   updateCompteRules, validate, planCtrl.updateCompte);
+router.patch ('/plan-comptable/comptes/:id/statut',     authGuard, tenantGuard, requirePermission('plan_comptable.delete'), statutCompteRules, validate, planCtrl.updateStatut);
+router.get   ('/plan-comptable/comptes/:id/historique', authGuard, tenantGuard, requirePermission('plan_comptable.view'),   planCtrl.getHistorique);
+
+// ── Modèle global de plan comptable (réforme du plan, étape 6) ───────────
+// Administration plateforme uniquement : super_admin. Les modifications ne
+// touchent aucun client tant qu'elles ne sont pas publiées, et une
+// publication ne modifie que les NOUVEAUX clients.
+const pmCtrl = require('../controllers/plan_modele.controller');
+const admin = [authGuard, requireRole('super_admin')];
+router.get   ('/plan-modele/versions',               ...admin, pmCtrl.getVersions);
+router.get   ('/plan-modele/apercu',                 ...admin, pmCtrl.getApercu);
+router.post  ('/plan-modele/versions/publier',       ...admin, pmCtrl.publier);
+router.get   ('/plan-modele/comptes',                ...admin, pmCtrl.getComptes);
+router.post  ('/plan-modele/comptes',                ...admin, pmCtrl.createCompte);
+router.put   ('/plan-modele/comptes/:id',            ...admin, pmCtrl.updateCompte);
+router.patch ('/plan-modele/comptes/:id/statut',     ...admin, pmCtrl.updateStatut);
+router.get   ('/plan-modele/comptes/:id/historique', ...admin, pmCtrl.getHistorique);
+// Synchronisation modèle → clients (étape 7) : aperçu puis application
+// explicite, client par client. Jamais automatique.
+router.get   ('/plan-modele/synchro/clients',               ...admin, pmCtrl.getSynchroClients);
+router.get   ('/plan-modele/synchro/historique',            ...admin, pmCtrl.getSynchroHistorique);
+router.get   ('/plan-modele/synchro/:tenantId/apercu',      ...admin, pmCtrl.getSynchroApercu);
+router.post  ('/plan-modele/synchro/:tenantId/appliquer',   ...admin, pmCtrl.postSynchroAppliquer);
+
+// ── Administration plateforme (réforme, étape 8) — super_admin ───────────
+// Vue administrative des clients (aucune donnée de transaction) et accès
+// support temporaire aux données métier d'un client.
+const pfCtrl = require('../controllers/plateforme.controller');
+router.get   ('/plateforme/clients',            ...admin, pfCtrl.getClients);
+router.get   ('/plateforme/clients/:id',        ...admin, pfCtrl.getClient);
+router.put   ('/plateforme/clients/:id',        ...admin, pfCtrl.putClient);
+router.patch ('/plateforme/clients/:id/actif',  ...admin, pfCtrl.patchActif);
+router.get   ('/plateforme/audit',              ...admin, pfCtrl.getAudit);
+router.get   ('/plateforme/support',            ...admin, pfCtrl.getSupport);
+router.post  ('/plateforme/support',            ...admin, pfCtrl.postSupport);
+router.delete('/plateforme/support/:id',        ...admin, pfCtrl.deleteSupport);
 
 module.exports = router;

@@ -77,6 +77,19 @@ const getEffectivePermissions = async ({ tenantId, userId, role }) => {
   return rows.map((r) => r.permission_code);
 };
 
+/**
+ * Permissions accordées INDIVIDUELLEMENT à la personne (exceptions 'grant').
+ * Le frontend s'en sert pour réafficher un onglet de paramétrage qu'on a
+ * explicitement ouvert à quelqu'un (ex. rubriques pour une caissière).
+ */
+const getPermissionsAccordees = async (userId) => {
+  const rows = await sequelize.query(
+    `SELECT permission_code FROM user_permissions WHERE user_id = :userId AND effet = 'grant'`,
+    { replacements: { userId }, type: sequelize.QueryTypes.SELECT }
+  );
+  return rows.map((r) => r.permission_code);
+};
+
 const userHasPermission = async (ctx, code) => {
   const accordees = await getEffectivePermissions(ctx);
   return accordees === null || accordees.includes(code);
@@ -126,6 +139,6 @@ const usersAvecPermission = async (tenantId, code) => {
 };
 
 module.exports = {
-  getEffectivePermissions, getBasePermissions, userHasPermission,
+  getEffectivePermissions, getBasePermissions, getPermissionsAccordees, userHasPermission,
   verifierCodesAccordables, usersAvecPermission,
 };

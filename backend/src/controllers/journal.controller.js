@@ -7,6 +7,7 @@ const { Op, fn, col } = require('sequelize');
 const { sequelize, Mouvement, Journal, Rubrique, ArretCaisse, User, BudgetCaisse, AppelFonds, Ran, Banque } = require('../models');
 const {
   moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
+  typeCaisseDuJournal, enregistrerRan, situationJournaux, MOIS: MOIS_VALIDES,
   mettreEnAttente, controleBudgetSortie,
 } = require('../services/journal.service');
 
@@ -268,6 +269,8 @@ const getRan = async (req, res) => {
       solde_precedent:  soldePrev.solde,
     });
   } catch (err) {
+    if (err.message === 'Journal introuvable.') return res.status(404).json({ error: 'Journal introuvable pour ce client.' });
+    console.error('[Journal] getRan :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
@@ -276,35 +279,45 @@ const getRan = async (req, res) => {
 const setRan = async (req, res) => {
   const { mois, annee, caisse, journal_id, montant } = req.body;
   if (!req.tenantId) return res.status(400).json({ error: 'Client requis.' });
+  const an = parseInt(annee, 10);
+  const valeur = Number(montant);
+  if (!MOIS_VALIDES.includes(mois) || !an) return res.status(400).json({ error: 'Mois ou année invalide.' });
+  if (!Number.isFinite(valeur) || valeur < 0) return res.status(400).json({ error: 'Montant invalide.' });
+
   try {
-    // Le RAN est désormais ouvert aux caissières (journal.ran) : on vérifie
-    // que le journal appartient bien au client et que le mois n'est pas arrêté
-    // — un solde d'ouverture ne se modifie plus après l'arrêt de caisse.
+    let journalId = null;
+    let typeCaisse = caisse === 'om' ? 'om' : 'especes';
+
     if (journal_id) {
-      const jid = parseInt(journal_id, 10);
-      const journal = await Journal.findOne({ where: { id: jid, tenant_id: req.tenantId }, attributes: ['id'], raw: true });
+      journalId = parseInt(journal_id, 10);
+      // Le journal doit appartenir au client ; son type de caisse est décidé
+      // ICI, pas par le frontend.
+      const journal = await Journal.findOne({ where: { id: journalId, tenant_id: req.tenantId }, attributes: ['id', 'type'], raw: true });
       if (!journal) return res.status(404).json({ error: 'Journal introuvable pour ce client.' });
+      if (journal.type === 'banque') return res.status(400).json({ error: 'Le RAN d\'un journal banque se gère dans le rapprochement bancaire.' });
+      typeCaisse = typeCaisseDuJournal(journal.type);
+
+      // Un solde d'ouverture ne se modifie plus après l'arrêt de caisse.
       const arret = await ArretCaisse.findOne({
-        where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: parseInt(annee, 10) },
+        where: { tenant_id: req.tenantId, journal_id: journalId, mois, annee: an },
         attributes: ['id'], raw: true,
       });
       if (arret) {
         return res.status(409).json({ error: 'Ce journal est arrêté pour ce mois : le RAN ne peut plus être modifié. Faites d\'abord réouvrir le journal.' });
       }
     }
-    await sequelize.transaction(async (t) => {
-      const where = journal_id
-        ? { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), journal_id: parseInt(journal_id, 10) }
-        : { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), type_caisse: caisse || 'especes' };
-      const defaults = journal_id ? { type_caisse: caisse || 'especes' } : {};
-      const [row] = await Ran.findOrCreate({ where, defaults, transaction: t, lock: t.LOCK.UPDATE });
-      row.montant = parseFloat(montant) || 0;
-      await row.save({ transaction: t });
-    });
+
+    await enregistrerRan({ tenantId: req.tenantId, mois, annee: an, journalId, typeCaisse, montant: valeur });
     res.json({ message: 'RAN mis à jour.' });
   } catch (err) {
-    console.error('[Journal] setRan :', err.message);
-    res.status(500).json({ error: 'Erreur serveur.' });
+    console.error('[Journal] setRan :', err.code || '', err.message, err.parent?.detail || '');
+    if (err.code === 'CONTRAINTE_RAN_OBSOLETE') {
+      return res.status(409).json({
+        error: 'La base n\'autorise encore qu\'un seul RAN par type de caisse et par mois. '
+             + 'Appliquez les migrations (redémarrage de l\'application ou /api/admin/setup), puis réessayez.',
+      });
+    }
+    res.status(500).json({ error: 'Erreur serveur lors de l\'enregistrement du RAN.' });
   }
 };
 
@@ -318,39 +331,21 @@ const getJournauxRecap = async (req, res) => {
   const yr = parseInt(annee, 10);
 
   try {
-    const [journaux, ranRows, mvtRows, banque, arrets] = await Promise.all([
+    const [journaux, banque] = await Promise.all([
       Journal.findAll({
         where: { tenant_id: tenantId, actif: true, type: { [Op.ne]: 'banque' } },
         attributes: ['id', 'nom', 'code', 'type', 'ordre'], raw: true,
       }),
-      Ran.findAll({ where: { tenant_id: tenantId, mois, annee: yr }, attributes: ['journal_id', 'montant'], raw: true }),
-      Mouvement.findAll({
-        where: { tenant_id: tenantId, mois, annee: yr },
-        attributes: ['journal_id', [fn('COALESCE', fn('SUM', col('entree')), 0), 'total_entrees'], [fn('COALESCE', fn('SUM', col('sortie')), 0), 'total_sorties']],
-        group: ['journal_id'], raw: true,
-      }),
       Banque.findOne({ where: { tenant_id: tenantId, mois, annee: yr } }),
-      ArretCaisse.findAll({ where: { tenant_id: tenantId, mois, annee: yr }, attributes: ['journal_id', 'solde_final', 'arrete_le'], raw: true }),
     ]);
-
-    const ranByJournal = new Map(ranRows.map(r => [r.journal_id, parseFloat(r.montant)]));
-    const mvtByJournal = new Map(mvtRows.map(m => [m.journal_id, m]));
-    const arretByJournal = new Map(arrets.map(a => [a.journal_id, { solde_arrete: a.solde_final, arrete_le: a.arrete_le }]));
-
-    const rows = [...journaux]
-      .sort((a, b) => (a.ordre ?? Infinity) - (b.ordre ?? Infinity) || a.nom.localeCompare(b.nom))
-      .map(j => {
-        const ran = ranByJournal.get(j.id) || 0;
-        const mvt = mvtByJournal.get(j.id) || { total_entrees: 0, total_sorties: 0 };
-        const total_entrees = parseFloat(mvt.total_entrees) || 0;
-        const total_sorties = parseFloat(mvt.total_sorties) || 0;
-        return {
-          ...j,
-          ran, total_entrees, total_sorties,
-          solde_final: ran + total_entrees - total_sorties,
-          arrete: arretByJournal.get(j.id) || null,
-        };
-      });
+    // Même calcul que la page journal et le tableau de bord (RAN reporté du
+    // mois précédent quand aucun RAN n'est enregistré — il valait 0 ici).
+    const tries = [...journaux]
+      .sort((a, b) => (a.ordre ?? Infinity) - (b.ordre ?? Infinity) || a.nom.localeCompare(b.nom));
+    const rows = (await situationJournaux(tenantId, mois, yr, tries)).map((r) => ({
+      ...r,
+      arrete: r.arrete ? { solde_arrete: r.arrete.solde_arrete, arrete_le: r.arrete.arrete_le } : null,
+    }));
 
     res.json({
       journaux: rows,

@@ -1,11 +1,18 @@
 // src/controllers/dashboard.controller.js
 const { sequelize, Mouvement, Journal } = require('../models');
+const { MOIS, situationJournaux } = require('../services/journal.service');
 
-// ── GET /api/dashboard/stats?annee= ───────────────────────────────────────
+// ── GET /api/dashboard/stats?annee=&mois= ─────────────────────────────────
+// Les cartes par journal donnent la situation du MOIS sélectionné, calculée
+// comme la page du journal (RAN + entrées − sorties). Avant, le solde était
+// la somme de tous les mouvements depuis l'origine, sans RAN : il ne
+// correspondait à rien de ce que la caissière voit dans ses journaux.
 const getStats = async (req, res) => {
-  const yr = parseInt(req.query.annee) || new Date().getFullYear();
+  if (!req.tenantId) return res.status(400).json({ error: 'Client requis.' });
+  const yr = parseInt(req.query.annee, 10) || new Date().getFullYear();
+  const mois = MOIS.includes(req.query.mois) ? req.query.mois : MOIS[new Date().getMonth()];
   try {
-    const [totaux, journaux, soldesParJournal, tendance] = await Promise.all([
+    const [totaux, journaux, tendance] = await Promise.all([
       Mouvement.findOne({
         where: { tenant_id: req.tenantId, annee: yr },
         attributes: [
@@ -17,19 +24,8 @@ const getStats = async (req, res) => {
       }),
       Journal.findAll({
         where: { tenant_id: req.tenantId, actif: true },
-        attributes: ['id', 'nom', 'type', 'code'],
-        order: [['ordre', 'ASC']],
-        raw: true,
-      }),
-      // Somme par journal, tous mois/années confondus (LEFT JOIN émulé : les
-      // journaux sans mouvement n'apparaissent pas ici et valent 0 plus bas).
-      Mouvement.findAll({
-        where: { tenant_id: req.tenantId },
-        attributes: [
-          'journal_id',
-          [sequelize.fn('COALESCE', sequelize.fn('SUM', sequelize.literal('entree - sortie')), 0), 'solde'],
-        ],
-        group: ['journal_id'],
+        attributes: ['id', 'nom', 'type', 'code', 'ordre'],
+        order: [['ordre', 'ASC'], ['nom', 'ASC']],
         raw: true,
       }),
       Mouvement.findAll({
@@ -40,18 +36,20 @@ const getStats = async (req, res) => {
           [sequelize.fn('COALESCE', sequelize.fn('SUM', sequelize.col('sortie')), 0), 'sorties'],
         ],
         group: ['mois'],
-        order: [[sequelize.fn('MIN', sequelize.col('date')), 'ASC']],
         raw: true,
       }),
     ]);
 
-    const soldeByJournalId = new Map(soldesParJournal.map((s) => [s.journal_id, parseFloat(s.solde)]));
-    const soldesJournaux = journaux.map((j) => ({ ...j, solde: soldeByJournalId.get(j.id) || 0 }));
+    const situation = await situationJournaux(req.tenantId, mois, yr, journaux);
+    const soldesJournaux = situation.map((j) => ({ ...j, solde: j.solde_final }));
 
     res.json({
-      totalEntrees: parseFloat(totaux.totalEntrees),
-      totalSorties: parseFloat(totaux.totalSorties),
-      nbMouvements: parseInt(totaux.nbMouvements, 10),
+      mois,
+      annee: yr,
+      totalEntrees: parseFloat(totaux.totalEntrees) || 0,
+      totalSorties: parseFloat(totaux.totalSorties) || 0,
+      nbMouvements: parseInt(totaux.nbMouvements, 10) || 0,
+      tresorerieMois: soldesJournaux.reduce((s, j) => s + j.solde, 0),
       soldesJournaux,
       tendance,
     });

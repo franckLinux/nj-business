@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import TenantSelectorModal from './TenantSelectorModal';
+import SupportAcces from './SupportAcces';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 
@@ -17,6 +18,8 @@ const TITLES = {
   '/config': 'Configuration',
   '/tenants': 'Clients (Tenants)',
   '/permissions': 'Gestion des permissions',
+  '/plan-modele': 'Modèle comptable',
+  '/plateforme': 'Administration plateforme',
   '/attente': 'Dépenses en attente',
 };
 
@@ -34,9 +37,12 @@ export default function Layout() {
   // Un super_admin/comptable_cabinet qui se connecte sans tenant actif doit
   // choisir un client avant de continuer — reprend le bloc de launchApp()
   // (legacy/js/app.js l. 6278-6280) qui ouvre showTenantSelector() au boot.
+  // Les écrans d'administration plateforme ne dépendent d'aucun client : on
+  // n'y impose pas le choix d'un client.
+  const pageSansClient = ['/plan-modele', '/tenants', '/permissions', '/plateforme'].includes(location.pathname);
   useEffect(() => {
-    if (isAdmin && !user?.tenantId && !activeTenantId) openTenantSelector();
-  }, [isAdmin, user, activeTenantId, openTenantSelector]);
+    if (isAdmin && !user?.tenantId && !activeTenantId && !pageSansClient) openTenantSelector();
+  }, [isAdmin, user, activeTenantId, openTenantSelector, pageSansClient]);
 
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
   let title = TITLES[location.pathname] || 'Tableau de bord';
@@ -45,22 +51,26 @@ export default function Layout() {
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';
   }
 
+  // Badges : rechargés au plus une fois par minute, et non plus à CHAQUE
+  // changement de page (2 requêtes par clic dans le menu auparavant).
+  const dernierBadges = useRef(0);
   useEffect(() => {
     if (!peutVoirAttente) return;
-    let annule = false;
+    if (Date.now() - dernierBadges.current < 60000) return;
+    dernierBadges.current = Date.now();
     api.get('/mouvements-attente/count').then((r) => {
-      if (!annule && !r.error && typeof r.count === 'number') setBadgeAttente(r.count);
+      if (!r.error && typeof r.count === 'number') setBadgeAttente(r.count);
     });
     api.get('/budget-caisse/depassements/count').then((r) => {
-      if (!annule && !r.error && typeof r.count === 'number') setBadgeDepassements(r.count);
+      if (!r.error && typeof r.count === 'number') setBadgeDepassements(r.count);
     });
-    return () => { annule = true; };
   }, [peutVoirAttente, location.pathname]);
 
   return (
     <div id="screen-app" className="screen" style={{ display: 'flex' }}>
       <Sidebar badgeAttente={badgeAttente} badgeDepassements={badgeDepassements} />
       <main className="main-content">
+        <SupportAcces />
         <Topbar title={title} />
         <section className="page active">
           <Outlet />

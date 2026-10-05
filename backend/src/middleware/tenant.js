@@ -3,6 +3,7 @@
 const { query } = require('../config/database');
 const { isCabinet } = require('./auth');
 const { peutAccederTenant } = require('../services/affectation.service');
+const support = require('../services/support.service');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -59,6 +60,21 @@ const tenantGuard = async (req, res, next) => {
     }
     req.tenantId   = rows[0].id;
     req.tenantInfo = rows[0];
+    // super_admin « limité » (étape 8) : données métier du client uniquement
+    // pendant un accès support explicite, motivé et limité dans le temps.
+    if (req.user.role === 'super_admin' && support.modeLimite()) {
+      const chemin = (req.originalUrl.split('?')[0] || '').replace(/^\/api/, '');
+      if (support.estRouteMetier(chemin)) {
+        const session = await support.sessionActive(req.user.id, rows[0].id);
+        if (!session) {
+          return res.status(403).json({
+            error: 'Accès support requis : les données de caisse de ce client ne sont accessibles qu\'avec un accès support temporaire.',
+            code: 'SUPPORT_REQUIS', tenant_id: rows[0].id,
+          });
+        }
+        req.supportSession = session;
+      }
+    }
     next();
   } catch (err) {
     console.error('[Tenant] Erreur vérification tenant :', err.message);

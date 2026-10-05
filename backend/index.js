@@ -42,9 +42,30 @@ app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' })); // uplo
 app.use(express.urlencoded({ extended: true }));
 
 // ── Rate limiting ─────────────────────────────────────────────────────────
+// Passenger (PlanetHoster) est un proxy inverse : sans `trust proxy`, req.ip
+// vaut l'adresse du proxy pour TOUT le monde, et le quota était donc partagé
+// par l'ensemble des utilisateurs du cabinet → 429 en cascade sur toutes les
+// pages (notifications/count, journaux, config…) dès quelques personnes connectées.
+app.set('trust proxy', 1);
+
+// Quota par PERSONNE connectée (clé = jeton), par IP sinon. Un jeton est
+// propre à une session : plusieurs collègues derrière la même box internet
+// (même IP publique) ne se consomment plus mutuellement leur quota.
+const crypto = require('crypto');
+const cleQuota = (req) => {
+  const auth = req.get('Authorization') || '';
+  if (auth.startsWith('Bearer ') && auth.length > 20) {
+    return 'u:' + crypto.createHash('sha256').update(auth).digest('hex').slice(0, 32);
+  }
+  return 'ip:' + req.ip;
+};
+
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max:      parseInt(process.env.RATE_LIMIT_MAX) || 200,
+  max:      parseInt(process.env.RATE_LIMIT_MAX) || 1500,
+  keyGenerator: cleQuota,
+  // La sonde de santé ne doit jamais être bloquée (supervision, diagnostic).
+  skip: (req) => req.originalUrl.startsWith('/api/health') || req.originalUrl.startsWith('/api/admin/ping'),
   message:  { error: 'Trop de requêtes. Réessayez dans quelques minutes.' },
   standardHeaders: true,
   legacyHeaders:   false,

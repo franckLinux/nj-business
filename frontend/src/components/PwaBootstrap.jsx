@@ -16,8 +16,20 @@ export default function PwaBootstrap() {
     syncManager.init();
 
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`)
+      // Une nouvelle version du service worker prend la main (skipWaiting +
+      // clients.claim) : on recharge UNE fois pour charger le nouveau bundle,
+      // au lieu de laisser l'utilisateur sur l'ancienne version.
+      let rechargee = false;
+      const hadController = Boolean(navigator.serviceWorker.controller);
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || rechargee) return;
+        rechargee = true;
+        window.location.reload();
+      });
+
+      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { updateViaCache: 'none' })
         .then((reg) => {
+          reg.update().catch(() => {});
           reg.addEventListener('updatefound', () => {
             const sw = reg.installing;
             sw.addEventListener('statechange', () => {

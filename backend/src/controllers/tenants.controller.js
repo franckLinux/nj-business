@@ -1,6 +1,6 @@
 // src/controllers/tenants.controller.js
 const { Op } = require('sequelize');
-const { Tenant } = require('../models');
+const { sequelize, Tenant } = require('../models');
 const { query, getClient } = require('../config/database');
 const { tenantsAccessibles } = require('../services/affectation.service');
 const { seedRubriquesDefaut } = require('./rubriques.controller');
@@ -29,20 +29,50 @@ const createTenant = async (req, res) => {
   if (!slug || !nom) return res.status(400).json({ error: 'Nom et slug obligatoires.' });
   if (!/^[a-z0-9-]+$/.test(slug)) return res.status(400).json({ error: 'Slug invalide.' });
   try {
-    const tenant = await Tenant.create({
-      slug,
-      nom,
-      caissier_nom: caissier_nom || '',
-      directeur_nom: directeur_nom || '',
-      devise: devise || 'FCFA',
+    // UNE seule transaction : client + rubriques + journaux + plan comptable.
+    // La moindre erreur annule tout — plus de client « à moitié créé ».
+    const tenant = await sequelize.transaction(async (transaction) => {
+      const t = await Tenant.create({
+        slug,
+        nom,
+        caissier_nom: caissier_nom || '',
+        directeur_nom: directeur_nom || '',
+        devise: devise || 'FCFA',
+      }, { transaction });
+      await seedRubriquesDefaut(t.id, { transaction });
+      await seedJournauxDefaut(t.id, { transaction });
+
+      // Plan comptable propre au client, copié de la version publiée du
+      // modèle (migration 019). Ignoré si la 019 n'est pas encore appliquée.
+      const [fn] = await sequelize.query(
+        "SELECT 1 AS ok FROM pg_proc WHERE proname = 'plan_client_initialiser'",
+        { transaction, type: sequelize.QueryTypes.SELECT }
+      );
+      if (fn) {
+        await sequelize.query('SELECT plan_client_initialiser(:id, NULL, :userId)', {
+          replacements: { id: t.id, userId: req.user.id },
+          transaction, type: sequelize.QueryTypes.SELECT,
+        });
+      }
+      await sequelize.query(
+        `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+         VALUES (:id, :userId, 'CREATION_CLIENT', 'plateforme', :id, CAST(:v AS jsonb))`,
+        { replacements: { id: t.id, userId: req.user.id, v: JSON.stringify({ nom, slug }) },
+          transaction, type: sequelize.QueryTypes.INSERT });
+      return t;
     });
-    await seedRubriquesDefaut(tenant.id);
-    await seedJournauxDefaut(tenant.id);
     res.status(201).json(tenant);
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: 'Slug déjà utilisé.' });
     console.error('[Tenants] createTenant :', err.message);
-    res.status(500).json({ error: 'Erreur serveur.' });
+    // Erreur levée par plan_client_initialiser (modèle absent ou non publié) :
+    // la transaction a tout annulé, on l'explique à l'administrateur.
+    if (/mod[eè]le|version/i.test(err.message || '')) {
+      return res.status(409).json({
+        error: `Client non créé : ${err.message} Publiez une version du modèle de plan comptable, puis réessayez.`,
+      });
+    }
+    res.status(500).json({ error: 'Erreur serveur : le client n\'a pas été créé.' });
   }
 };
 

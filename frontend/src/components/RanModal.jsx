@@ -16,7 +16,8 @@ export default function RanModal({ journal, ranActuel, onClose, onSaved }) {
   const [erreur, setErreur] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const caisse = journal?.type === 'om' || journal?.type === 'momo' ? 'om' : 'especes';
+  // Indicatif seulement : le serveur détermine le type de caisse à partir du journal.
+  const caisse = ['om', 'momo', 'carte_prepayee'].includes(journal?.type) ? 'om' : 'especes';
 
   useEffect(() => {
     let annule = false;

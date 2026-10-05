@@ -2,7 +2,7 @@
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const { query } = require('../config/database');
-const { getEffectivePermissions } = require('../services/permission.service');
+const { getEffectivePermissions, getPermissionsAccordees } = require('../services/permission.service');
 
 /**
  * POST /api/auth/login
@@ -50,6 +50,7 @@ const login = async (req, res) => {
     await query('UPDATE users SET derniere_connexion = NOW() WHERE id = $1', [user.id]);
 
     const permissions = await getEffectivePermissions({ tenantId: user.tenant_id, userId: user.id, role: user.role });
+    const permissionsAccordees = await getPermissionsAccordees(user.id);
 
     res.json({
       accessToken,
@@ -61,6 +62,7 @@ const login = async (req, res) => {
         tenantNom:   user.tenant_nom,
         tenantSlug:  user.tenant_slug,
         devise:      user.devise || process.env.DEVISE || 'FCFA',
+        permissionsAccordees, // exceptions individuelles 'grant' (affichage des onglets)
         permissions, // null = pas de restriction configurée (rôle fixe seul) ; tableau = liste exclusive
       },
     });
@@ -85,8 +87,16 @@ const me = async (req, res) => {
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Utilisateur introuvable.' });
     const u = rows[0];
-    const permissions = await getEffectivePermissions({ tenantId: u.tenant_id, userId: u.id, role: u.role });
-    res.json({ ...u, permissions });
+    // Le plafond appliqué doit être celui du client CONSULTÉ, exactement comme
+    // le fait requirePermission (req.tenantId = en-tête X-Tenant-Id pour le
+    // cabinet). Sans cela, un membre du cabinet positionné sur un client voyait
+    // des onglets (calculés sans plafond) que l'API lui refusait ensuite (403).
+    const enTete = req.get('X-Tenant-Id');
+    const uuidValide = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const tenantContexte = u.tenant_id || (enTete && uuidValide.test(enTete) ? enTete : null);
+    const permissions = await getEffectivePermissions({ tenantId: tenantContexte, userId: u.id, role: u.role });
+    const permissionsAccordees = await getPermissionsAccordees(u.id);
+    res.json({ ...u, permissions, permissionsAccordees });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }

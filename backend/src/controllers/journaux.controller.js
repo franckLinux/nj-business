@@ -180,7 +180,8 @@ const deleteJournal = async (req, res) => {
 
 // ── Seed journaux par défaut pour un nouveau tenant ──────────────────────
 // Utilise la nouvelle convention de codes (CS1, OM1, MM1, BQ1, CP1).
-const seedJournauxDefaut = async (tenantId) => {
+// `transaction` (facultative) : voir seedRubriquesDefaut.
+const seedJournauxDefaut = async (tenantId, { transaction } = {}) => {
   const defauts = [
     { code:'CS1', nom:'Caisse Principale',  type:'caisse',         ordre:1 },
     { code:'OM1', nom:'Orange Money',        type:'om',             ordre:2 },
@@ -190,6 +191,7 @@ const seedJournauxDefaut = async (tenantId) => {
   ];
   for (const j of defauts) {
     await Journal.findOrCreate({
+      transaction,
       where: { tenant_id: tenantId, code: j.code },
       defaults: { nom: j.nom, type: j.type, ordre: j.ordre },
     });

@@ -18,6 +18,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: true,
+    // Pas de .map en production : -2,2 Mo à déployer, et le code source
+    // n'est plus lisible publiquement.
+    sourcemap: false,
   },
 });

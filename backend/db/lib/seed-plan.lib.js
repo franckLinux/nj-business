@@ -8,8 +8,12 @@
 //    • Transactionnel : tout ou rien.
 //    • Les comptes personnalisés (source = 'custom') créés depuis l'application
 //      ne sont JAMAIS écrasés ni désactivés.
-//    • Les comptes du référentiel déjà présents sont réactivés (actif = true)
-//      et leur intitulé/classe/nature réalignés sur le référentiel.
+//    • Depuis la réforme du plan (étape 6, migration 020) le modèle global est
+//      administré depuis l'application : le chargement AJOUTE uniquement les
+//      comptes absents. Il ne réécrit plus les libellés et ne réactive plus un
+//      compte que l'administrateur a désactivé ou archivé (auparavant, chaque
+//      démarrage avec AUTO_SETUP effaçait ces modifications). Les comptes
+//      ajoutés restent « non publiés » jusqu'à la prochaine publication.
 // ============================================================================
 const { pool } = require('../../src/config/database');
 const { PLAN_COMPTABLE } = require('../data/plan-comptable-syscohada');
@@ -98,21 +102,15 @@ const seedPlanComptable = async ({ client = null, prune = false } = {}) => {
         SELECT s.compte, s.intitule, s.classe, s.nature, 'syscohada', true
         FROM UNNEST($1::text[], $2::text[], $3::int[], $4::text[])
              AS s(compte, intitule, classe, nature)
-        ON CONFLICT (lower(btrim(compte))) DO UPDATE
-          SET intitule = EXCLUDED.intitule,
-              classe   = EXCLUDED.classe,
-              nature   = EXCLUDED.nature,
-              actif    = true
-          -- un compte créé par l'utilisateur reste sa propriété : on n'y touche pas
-          WHERE ${TABLE}.source IS DISTINCT FROM 'custom'
-        RETURNING (xmax = 0) AS insere
+        ON CONFLICT (lower(btrim(compte))) DO NOTHING
+        RETURNING true AS insere
         `,
         [comptes, intitules, classes, natures]
       );
 
-      const crees      = rows.filter((r) => r.insere).length;
-      const misAJour   = rows.length - crees;
-      const intacts    = PLAN_COMPTABLE.length - rows.length; // conflits sur comptes 'custom'
+      const crees      = rows.length;
+      const misAJour   = 0;                                   // plus de réécriture (voir en-tête)
+      const intacts    = PLAN_COMPTABLE.length - rows.length; // déjà présents : laissés tels quels
 
       let desactives = 0;
       if (prune) {
@@ -127,6 +125,14 @@ const seedPlanComptable = async ({ client = null, prune = false } = {}) => {
         );
         desactives = rowCount;
       }
+
+      // Réforme du plan (migration 018) : rattacher les comptes nouvellement
+      // chargés à la version publiée du modèle et recalculer leur parent.
+      // Sans effet si la 018 n'est pas encore appliquée.
+      const { rows: fn } = await c.query(
+        "SELECT 1 FROM pg_proc WHERE proname = 'plan_modele_recalculer'"
+      );
+      if (fn.length > 0) await c.query('SELECT plan_modele_recalculer()');
 
       await c.query('COMMIT');
 

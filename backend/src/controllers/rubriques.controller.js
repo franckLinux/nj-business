@@ -96,9 +96,12 @@ const deleteRubrique = async (req, res) => {
 };
 
 // Seed rubriques par défaut pour un nouveau tenant
-const seedRubriquesDefaut = async (tenantId) => {
+// `transaction` (facultative) : permet à la création d'un client de tout
+// faire dans une seule transaction (tenants.controller → createTenant).
+const seedRubriquesDefaut = async (tenantId, { transaction } = {}) => {
   for (const r of RUBRIQUES_DEFAUT) {
     await Rubrique.findOrCreate({
+      transaction,
       where: { tenant_id: tenantId, code: r.code },
       defaults: {
         intitule: r.intitule,

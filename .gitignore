@@ -20,3 +20,6 @@ backend/uploads/*
 
 # Archives de sauvegarde manuelle / artefacts de déploiement oubliés (ex: backend.zip, dist.zip)
 *.zip
+
+# Copies de la base de production (données clients) — jamais commitées
+sauvegardes/

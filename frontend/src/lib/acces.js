@@ -1,0 +1,49 @@
+// lib/acces.js — permission « d'entrée » de chaque écran.
+// Source unique pour le menu latéral, les onglets de Configuration et la
+// garde des routes : un écran dont la personne n'a pas la permission de
+// consultation n'est ni affiché dans le menu, ni accessible par l'URL.
+// Les codes sont ceux exigés par l'API de l'écran (routes/index.js) : sans
+// eux, l'écran ne ferait qu'afficher « Permission requise : … ».
+
+// Une liste = toutes requises (l'écran appelle plusieurs API).
+export const PAGE_PERMS = {
+  '/journaux-recap': 'journal.view',
+  '/budget':         ['budget.view', 'journal.view'],
+  '/previsions':     ['previsions.view', 'budget.view'],
+  '/appel-fonds':    ['appel_fonds.view', 'banque.view'],
+  '/compte-emploi':  'rapport.view',
+  '/attente':        'journal.validate',
+};
+
+// Onglets de la page Configuration.
+// Un onglet n'est affiché qu'à qui peut AGIR dessus (permission de gestion).
+// La simple consultation ne suffit pas : la caissière a besoin de
+// `rubriques.view`, `users.view`, `pieces.view`… pour saisir (listes
+// déroulantes, pièces jointes), sans pour autant devoir voir les écrans de
+// paramétrage correspondants. Exception : l'auditeur, en lecture seule, voit
+// les onglets qu'il peut consulter. Et un onglet qu'un administrateur a
+// explicitement accordé à la personne (exception individuelle, par ex.
+// « Voir les rubriques » cochée pour une caissière) réapparaît aussi.
+export const CONFIG_TABS = {
+  entite:    { voir: 'config.view',         gerer: ['config.edit'] },
+  users:     { voir: 'users.view',          gerer: ['users.create', 'users.edit', 'users.delete'] },
+  journaux:  { voir: 'journaux.view',       gerer: ['journaux.edit'] },
+  plan:      { voir: 'plan_comptable.view', gerer: ['plan_comptable.edit', 'plan_comptable.delete'] },
+  rubriques: { voir: 'rubriques.view',      gerer: ['rubriques.edit'] },
+  pieces:    { voir: 'pieces.view',         gerer: ['pieces.edit'] },
+};
+
+export const voitOngletConfig = (user, can, id) => {
+  const t = CONFIG_TABS[id];
+  if (!t) return false;
+  if (t.gerer.some((c) => can(c))) return true;
+  if (!can(t.voir)) return false;
+  if (user?.role === 'auditeur') return true;
+  const accordees = Array.isArray(user?.permissionsAccordees) ? user.permissionsAccordees : [];
+  return [t.voir, ...t.gerer].some((c) => accordees.includes(c));
+};
+
+export const voitConfiguration = (user, can) => Object.keys(CONFIG_TABS).some((id) => voitOngletConfig(user, can, id));
+
+// can() étendu aux listes de codes (tous requis).
+export const peut = (can, code) => (Array.isArray(code) ? code.every((c) => can(c)) : can(code));

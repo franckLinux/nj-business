@@ -51,6 +51,16 @@ export function AppProvider({ children }) {
   }, []);
 
   // Le token doit être posé sur la couche API avant tout appel réseau.
+  // Appel SYNCHRONE pendant le rendu, en plus de l'effet ci-dessous : React
+  // exécute les effets des pages (enfants) AVANT celui du fournisseur. Au
+  // rechargement d'une page (F5, PWA rouverte), les premiers appels partaient
+  // donc sans jeton → 401 → déconnexion. configureApi n'a aucun effet de bord
+  // visuel : l'appeler à chaque rendu est sans risque.
+  configureApi({
+    token,
+    tenantId: activeTenantId || user?.tenantId || null,
+    onUnauthorized: logout,
+  });
   useEffect(() => {
     configureApi({
       token,
@@ -105,20 +115,37 @@ export function AppProvider({ children }) {
   // n'apparaîtrait qu'à la prochaine reconnexion de la personne concernée.
   // On ne récupère que `permissions` et `role` : /auth/me renvoie le reste des
   // champs en snake_case, les fusionner écraserait l'objet user du login.
+  // Rafraîchies aussi quand la personne revient sur l'onglet du navigateur
+  // (au plus une fois par minute), et à chaque changement de client consulté
+  // (le plafond du client change les droits) : un droit qu'on vient de lui accorder
+  // — ex. l'onglet Rubriques — apparaît sans qu'elle ait à se reconnecter.
   useEffect(() => {
     if (!token) return;
     let annule = false;
-    api.get('/auth/me').then((me) => {
-      if (annule || me?.error || !me) return;
-      setUser((precedent) => {
-        if (!precedent) return precedent;
-        const suivant = { ...precedent, role: me.role, permissions: me.permissions };
-        try { localStorage.setItem(USER_KEY, JSON.stringify(suivant)); } catch { /* stockage plein ou indisponible */ }
-        return suivant;
+    let dernier = 0;
+    const rafraichir = () => {
+      if (Date.now() - dernier < 60000) return;
+      dernier = Date.now();
+      api.get('/auth/me').then((me) => {
+        if (annule || me?.error || !me) return;
+        setUser((precedent) => {
+          if (!precedent) return precedent;
+          const suivant = { ...precedent, role: me.role, permissions: me.permissions, permissionsAccordees: me.permissionsAccordees || [] };
+          try { localStorage.setItem(USER_KEY, JSON.stringify(suivant)); } catch { /* stockage plein ou indisponible */ }
+          return suivant;
+        });
       });
-    });
-    return () => { annule = true; };
-  }, [token]);
+    };
+    rafraichir();
+    const onVisible = () => { if (!document.hidden) rafraichir(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      annule = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [token, activeTenantId]);
 
   const selectTenant = useCallback((id, nom, dev) => {
     setActiveTenantId(id);
@@ -139,7 +166,10 @@ export function AppProvider({ children }) {
   // pas encore chargée, on refuse par défaut le temps que /auth/me réponde.
   const can = useCallback((code) => {
     if (!user) return false;
-    if (user.role === 'super_admin' || user.permissions === null) return true;
+    // Seul le super_admin est sans restriction. Une liste `null` héritée d'un
+    // ancien serveur (resté dans le stockage du navigateur) ne doit plus tout
+    // ouvrir : on refuse jusqu'au rafraîchissement par /auth/me.
+    if (user.role === 'super_admin') return true;
     return Array.isArray(user.permissions) && user.permissions.includes(code);
   }, [user]);
 
