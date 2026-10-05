@@ -1,8 +1,11 @@
 // src/controllers/appel_fonds_synthese.controller.js
 // Synthèse Demande de Fonds — transposition de prev_ui / app_26.r
 // treso_dispo <- tres + total_ress  (formule R)
-const { fn, col } = require('sequelize');
-const { Ran, Banque, Mouvement, RessourceAttente, DepenseAttente, Budget, BudgetValidation, User } = require('../models');
+const { Banque, Journal, RessourceAttente, DepenseAttente, Budget, BudgetValidation, User } = require('../models');
+const { situationJournaux } = require('../services/journal.service');
+
+const FAMILLE = (type) => (type === 'banque' ? 'banque'
+  : ['om', 'momo', 'carte_prepayee'].includes(type) ? 'mobile' : 'especes');
 
 const MOIS = ['Janvier','Fevrier','Mars','Avril','Mai','Juin',
               'Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
@@ -24,35 +27,33 @@ const getSynthese = async (req, res) => {
   const next = moisSuivant(mois, an);
 
   try {
-    // ── 1. Trésorerie courante ───────────────────────────────────────────────
-    // Solde espèces : RAN + cumul journal (especes)
-    // Solde OM      : RAN + cumul journal (om)
-    // Solde banque  : banque.solde_final du mois courant
-    const [ranEspVal, ranOMVal, banque, journalCumul, resAttRows, depAttRows] = await Promise.all([
-      Ran.sum('montant', { where: { tenant_id: tenantId, mois, annee: an, type_caisse: 'especes' } }),
-      Ran.sum('montant', { where: { tenant_id: tenantId, mois, annee: an, type_caisse: 'om' } }),
+    // ── 1. Trésorerie courante — détaillée par journal (caisse) ─────────────
+    // Chaque caisse = son SOLDE DU MOIS (RAN + entrées − sorties), calculé
+    // comme sur la page journal et le tableau de bord. La banque provient du
+    // solde du mois de son journal banque (plus de saisie manuelle).
+    // Repli : sans journal banque actif, ancien solde saisi (table banque).
+    const journaux = await Journal.findAll({
+      where: { tenant_id: tenantId, actif: true },
+      attributes: ['id', 'nom', 'type', 'code', 'ordre'],
+      order: [['ordre', 'ASC'], ['nom', 'ASC']],
+      raw: true,
+    });
+    const [situation, banque, resAttRows, depAttRows] = await Promise.all([
+      situationJournaux(tenantId, mois, an, journaux),
       Banque.findOne({ where: { tenant_id: tenantId, mois, annee: an } }),
-      Mouvement.findAll({
-        where: { tenant_id: tenantId, mois, annee: an },
-        attributes: ['type_caisse', [fn('COALESCE', fn('SUM', col('entree')), 0), 'total_e'], [fn('COALESCE', fn('SUM', col('sortie')), 0), 'total_s']],
-        group: ['type_caisse'], raw: true,
-      }),
       RessourceAttente.findAll({ where: { tenant_id: tenantId, mois, annee: an }, order: [['id', 'ASC']] }),
       DepenseAttente.findAll({ where: { tenant_id: tenantId, mois, annee: an }, order: [['id', 'ASC']] }),
     ]);
-
-    const ranEspece   = ranEspVal || 0;
-    const ranOM       = ranOMVal || 0;
-    const soldeBanque = parseFloat(banque?.solde_final) || 0;
-
-    let jEspE = 0, jEspS = 0, jOME = 0, jOMS = 0;
-    journalCumul.forEach(r => {
-      if (r.type_caisse === 'especes') { jEspE = parseFloat(r.total_e); jEspS = parseFloat(r.total_s); }
-      else                             { jOME  = parseFloat(r.total_e); jOMS  = parseFloat(r.total_s); }
-    });
-
-    const solde_espece = ranEspece + jEspE - jEspS;
-    const solde_om     = ranOM     + jOME  - jOMS;
+    const lignesTreso = situation.map((j) => ({
+      id: j.id, nom: j.nom, code: j.code, type: j.type, famille: FAMILLE(j.type),
+      ran: j.ran, entrees: j.total_entrees, sorties: j.total_sorties, solde: j.solde_final,
+      arrete: Boolean(j.arrete),
+    }));
+    const somme = (f) => lignesTreso.filter((l) => l.famille === f).reduce((t, l) => t + (Number(l.solde) || 0), 0);
+    const aJournalBanque = lignesTreso.some((l) => l.famille === 'banque');
+    const solde_espece = somme('especes');
+    const solde_om     = somme('mobile');
+    const soldeBanque  = aJournalBanque ? somme('banque') : (parseFloat(banque?.solde_final) || 0);
     const total_tres   = solde_espece + solde_om + soldeBanque;
 
     // ── 2. Ressources & dépenses en attente ──────────────────────────────────
@@ -104,6 +105,8 @@ const getSynthese = async (req, res) => {
         solde_om:     solde_om,
         solde_banque: soldeBanque,
         total:        total_tres,
+        journaux:     lignesTreso,
+        banque_saisie_manuelle: !aJournalBanque,
       },
       tresorerie_apres_attente,
       ressources_attente: resAttRows,

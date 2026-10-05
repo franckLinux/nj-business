@@ -284,9 +284,12 @@ export function printDemandeFonds(s) {
     <div class="ph"><h2>DEMANDE DE FONDS</h2><p>Pour la période : <b>${s.mois_cible} ${s.annee_cible}</b></p><p>Imprimé le : ${dateStr}</p></div>
     <h3>1. Trésorerie Actuelle (${s.mois} ${s.annee})</h3>
     <table><tbody>
-      <tr><td>Solde caisse espèces</td><td class="ev" style="text-align:right">${fmtN(tr.solde_espece)}</td></tr>
+      ${(tr.journaux && tr.journaux.length)
+    ? tr.journaux.map((j) => `<tr><td>Solde ${j.nom} (${j.code})</td><td class="ev" style="text-align:right">${fmtN(j.solde)}</td></tr>`).join('')
+      + (tr.banque_saisie_manuelle ? `<tr><td>Solde final en banque</td><td class="ev" style="text-align:right">${fmtN(tr.solde_banque)}</td></tr>` : '')
+    : `<tr><td>Solde caisse espèces</td><td class="ev" style="text-align:right">${fmtN(tr.solde_espece)}</td></tr>
       <tr><td>Solde caisse OM</td><td class="ev" style="text-align:right">${fmtN(tr.solde_om)}</td></tr>
-      <tr><td>Solde final en banque</td><td class="ev" style="text-align:right">${fmtN(tr.solde_banque)}</td></tr>
+      <tr><td>Solde final en banque</td><td class="ev" style="text-align:right">${fmtN(tr.solde_banque)}</td></tr>`}
       <tr class="tot"><td>TOTAL TRÉSORERIE</td><td class="sol" style="text-align:right">${fmtN(tr.total)}</td></tr></tbody></table>
     ${s.ressources_attente.length ? `<h3>2. Ressources Additionnelles Attendues</h3><table><tbody>${lignesRes}<tr class="tot"><td colspan="2">TOTAL RESSOURCES</td><td class="ev" style="text-align:right">${fmtN(s.total_ressources)}</td></tr></tbody></table>` : ''}
     ${s.depenses_attente.length ? `<h3>3. Dépenses en Attente</h3><table><tbody>${lignesDep}<tr class="tot"><td colspan="2">TOTAL EN ATTENTE</td><td class="sol" style="text-align:right">${fmtN(s.total_attente)}</td></tr></tbody></table>` : ''}

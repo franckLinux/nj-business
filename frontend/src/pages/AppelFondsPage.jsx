@@ -112,15 +112,29 @@ export default function AppelFondsPage() {
         <table>
           <thead><tr><th>Désignation</th><th style={{ textAlign: 'right' }}>Montant</th></tr></thead>
           <tbody>
-            <tr><td>Solde caisse espèces</td><td style={{ textAlign: 'right', color: 'var(--accent-green)' }}>{fmt(tr.solde_espece, devise)}</td></tr>
-            <tr><td>Solde caisse OM</td><td style={{ textAlign: 'right', color: 'var(--accent-green)' }}>{fmt(tr.solde_om, devise)}</td></tr>
-            <tr>
-              <td>Solde final en banque</td>
-              <td style={{ textAlign: 'right' }}>
-                {isCaissiere
-                  ? <SoldeBanqueInput initial={banque?.solde_final || 0} onSave={onSaveBanque} />
-                  : <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>{fmt(tr.solde_banque, devise)}</span>}
-              </td>
+            {(tr.journaux || []).map((j) => (
+              <tr key={j.id}>
+                <td>
+                  {j.famille === 'banque' ? '🏦' : j.famille === 'mobile' ? '📱' : '💵'} Solde {j.nom} <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({j.code})</span>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    RAN {fmt(j.ran, devise)} + entrées {fmt(j.entrees, devise)} − sorties {fmt(j.sorties, devise)}{j.arrete ? ' · arrêté' : ''}
+                  </div>
+                </td>
+                <td style={{ textAlign: 'right', color: j.solde < 0 ? 'var(--accent-red)' : 'var(--accent-green)', fontWeight: 600 }}>{fmt(j.solde, devise)}</td>
+              </tr>
+            ))}
+            {tr.banque_saisie_manuelle && (
+              <tr>
+                <td>Solde final en banque <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(aucun journal banque : saisie manuelle)</span></td>
+                <td style={{ textAlign: 'right' }}>
+                  {isCaissiere
+                    ? <SoldeBanqueInput initial={banque?.solde_final || 0} onSave={onSaveBanque} />
+                    : <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>{fmt(tr.solde_banque, devise)}</span>}
+                </td>
+              </tr>
+            )}
+            <tr style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              <td>Sous-totaux : espèces {fmt(tr.solde_espece, devise)} · mobile money {fmt(tr.solde_om, devise)} · banque {fmt(tr.solde_banque, devise)}</td><td />
             </tr>
           </tbody>
           <tfoot><tr style={{ background: '#f8fafc', fontWeight: 700 }}><td>TOTAL TRÉSORERIE</td><td style={{ textAlign: 'right' }}>{fmt(tr.total, devise)}</td></tr></tfoot>
