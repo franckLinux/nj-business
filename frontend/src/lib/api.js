@@ -66,6 +66,11 @@ const request = async (method, url, body) => {
     if (res.status === 403 && out?.code === 'SUPPORT_REQUIS' && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('support-requis', { detail: { tenantId: out.tenant_id } }));
     }
+    // Démonstration expirée (contrôle serveur) : AppContext ferme la session
+    // et la page de connexion affiche le message.
+    if (res.status === 403 && out?.code === 'DEMO_EXPIREE' && authToken && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('demo-expiree', { detail: { message: out.error } }));
+    }
     return out;
   } catch {
     return { error: `Réponse inattendue du serveur (${res.status}).` };

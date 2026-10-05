@@ -1,4 +1,5 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { peutGererProspects } from '@/lib/acces';
 import { useApp } from '@/context/AppContext';
 import NavGroup from './NavGroup';
 import { PAGE_PERMS, peut, voitConfiguration } from '@/lib/acces';
@@ -160,6 +161,12 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
               <NavLink to="/plateforme" className={navClass}>
                 <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
                 Administration plateforme
+              </NavLink>
+            )}
+            {peutGererProspects(user, can) && (
+              <NavLink to="/prospects" className={navClass}>
+                <svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><line x1="19" y1="8" x2="19" y2="14" /><line x1="22" y1="11" x2="16" y2="11" /></svg>
+                Prospects &amp; démos
               </NavLink>
             )}
             {user?.role === 'super_admin' && (

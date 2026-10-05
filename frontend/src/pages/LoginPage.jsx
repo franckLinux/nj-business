@@ -5,9 +5,14 @@ import { useApp } from '@/context/AppContext';
 // dans legacy/index.html.
 export default function LoginPage() {
   const { login } = useApp();
-  const [username, setUsername] = useState('');
+  // Après activation d'une démo : identifiant pré-rempli. Après expiration :
+  // message de fin de démonstration. Lus une seule fois puis effacés.
+  const lireUneFois = (cle) => {
+    try { const v = sessionStorage.getItem(cle) || ''; sessionStorage.removeItem(cle); return v; } catch { return ''; }
+  };
+  const [username, setUsername] = useState(() => lireUneFois('login_prefill'));
   const [password, setPassword] = useState('');
-  const [erreur, setErreur] = useState('');
+  const [erreur, setErreur] = useState(() => lireUneFois('login_message'));
   const [enCours, setEnCours] = useState(false);
 
   const doLogin = async () => {
@@ -37,7 +42,7 @@ export default function LoginPage() {
           <label>Identifiant</label>
           <input
             type="text"
-            placeholder="Ex: caissiere"
+            placeholder="Ex: caissiere ou adresse e-mail"
             autoComplete="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}

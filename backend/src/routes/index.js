@@ -260,4 +260,22 @@ router.get   ('/plateforme/support',            ...admin, pfCtrl.getSupport);
 router.post  ('/plateforme/support',            ...admin, pfCtrl.postSupport);
 router.delete('/plateforme/support/:id',        ...admin, pfCtrl.deleteSupport);
 
+// ── Prospects et comptes de démonstration (réforme prospects) ─────────────
+// Cabinet : super_admin, ou comptable cabinet titulaire de « prospects.gerer ».
+const prCtrl = require('../controllers/prospects.controller');
+const prospects = [authGuard, prCtrl.requireProspects];
+router.get   ('/prospects',                  ...prospects, prCtrl.lister);
+router.get   ('/prospects/apercu-email',     ...prospects, prCtrl.apercu);
+router.post  ('/prospects',                  ...prospects, prCtrl.creer);
+router.get   ('/prospects/:id',              ...prospects, prCtrl.detail);
+router.put   ('/prospects/:id',              ...prospects, prCtrl.modifier);
+router.post  ('/prospects/:id/invitation',   ...prospects, prCtrl.inviter);
+router.post  ('/prospects/:id/prolongation', ...prospects, prCtrl.prolonger);
+router.post  ('/prospects/:id/statut',       ...prospects, prCtrl.statut);
+// Public : lien d'activation reçu par le prospect (aucun JWT).
+router.get   ('/activation/:token',          prCtrl.verifierActivation);
+router.post  ('/activation/:token',          prCtrl.activer);
+// Tâche quotidienne (cron cPanel) : rappels, expirations, notification interne.
+router.all   ('/taches/quotidiennes',        prCtrl.requireTacheToken, prCtrl.taches);
+
 module.exports = router;

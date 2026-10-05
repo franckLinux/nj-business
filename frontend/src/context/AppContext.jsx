@@ -50,6 +50,16 @@ export function AppProvider({ children }) {
     setJournauxGrouped({});
   }, []);
 
+  // Démonstration terminée en cours de session : déconnexion + message.
+  useEffect(() => {
+    const fin = (e) => {
+      try { sessionStorage.setItem('login_message', e.detail?.message || 'Votre période de démonstration est terminée.'); } catch { /* indisponible */ }
+      logout();
+    };
+    window.addEventListener('demo-expiree', fin);
+    return () => window.removeEventListener('demo-expiree', fin);
+  }, [logout]);
+
   // Le token doit être posé sur la couche API avant tout appel réseau.
   // Appel SYNCHRONE pendant le rendu, en plus de l'effet ci-dessous : React
   // exécute les effets des pages (enfants) AVANT celui du fournisseur. Au
@@ -130,7 +140,8 @@ export function AppProvider({ children }) {
         if (annule || me?.error || !me) return;
         setUser((precedent) => {
           if (!precedent) return precedent;
-          const suivant = { ...precedent, role: me.role, permissions: me.permissions, permissionsAccordees: me.permissionsAccordees || [] };
+          const suivant = { ...precedent, role: me.role, permissions: me.permissions, permissionsAccordees: me.permissionsAccordees || [],
+            type_compte: me.type_compte || 'client', demo_expire_le: me.demo_expire_le || null };
           try { localStorage.setItem(USER_KEY, JSON.stringify(suivant)); } catch { /* stockage plein ou indisponible */ }
           return suivant;
         });

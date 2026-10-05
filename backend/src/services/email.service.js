@@ -273,4 +273,71 @@ const sendMouvementAttenteAlert = async (o) => {
   }
 };
 
-module.exports = { sendDepassementAlert, sendMouvementAttenteAlert };
+// ── Prospects / démonstration (réforme prospects) ─────────────────────────
+// Retour normalisé : { statut: 'envoye' | 'non_envoye' | 'adresse_invalide', erreur }.
+// Jamais de mot de passe dans un e-mail : uniquement un lien d'activation.
+const echapper = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dateFr = (d) => new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+
+const gabarit = (titre, corps) => `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/></head>
+<body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:0">
+<div style="max-width:600px;margin:30px auto;background:white;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
+  <div style="background:linear-gradient(135deg,#1e293b,#0f172a);padding:24px 30px;text-align:center">
+    <h1 style="color:white;margin:0;font-size:20px">${echapper(process.env.APP_NAME || 'NJ Caisse Pro')}</h1>
+    <p style="color:rgba(255,255,255,.65);margin:6px 0 0;font-size:13px">${echapper(titre)}</p>
+  </div>
+  <div style="padding:26px 30px;font-size:14px;color:#1e293b;line-height:1.6">${corps}</div>
+  <div style="background:#f8fafc;padding:14px 30px;font-size:11px;color:#64748b;text-align:center">
+    ${echapper(process.env.CABINET_NAME || '')} · Compte de DÉMONSTRATION — données fictives, ne pas y saisir de données réelles.
+  </div>
+</div></body></html>`;
+
+const envoyer = async ({ to, subject, html }) => {
+  const transporter = createTransporter();
+  if (!transporter) return { statut: 'non_envoye', erreur: 'SMTP non configuré (SMTP_HOST vide)' };
+  try {
+    await transporter.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, html });
+    return { statut: 'envoye', erreur: '' };
+  } catch (err) {
+    const invalide = err.code === 'EENVELOPE' || /recipient|address|550|553|501/i.test(err.message || '');
+    return { statut: invalide ? 'adresse_invalide' : 'non_envoye', erreur: err.message };
+  }
+};
+
+const contenuInvitation = ({ nom, lien, debut, fin, contact }) => ({
+  subject: `Votre accès de démonstration à ${process.env.APP_NAME || 'NJ Caisse Pro'}`,
+  html: gabarit('Accès de démonstration', `
+    <p>Bonjour ${echapper(nom)},</p>
+    <p>Vous êtes invité(e) à découvrir <strong>${echapper(process.env.APP_NAME || 'NJ Caisse Pro')}</strong>,
+       la plateforme de gestion de caisse du cabinet.</p>
+    <p style="text-align:center;margin:26px 0">
+      <a href="${echapper(lien)}" style="background:#2563eb;color:white;padding:12px 26px;border-radius:8px;text-decoration:none;font-weight:bold">Activer mon accès</a>
+    </p>
+    <p><strong>Première connexion :</strong> le bouton ouvre une page où vous choisissez votre mot de passe.
+       Votre identifiant est votre adresse e-mail. Ce lien est personnel, utilisable une seule fois et valable 72 heures.</p>
+    <p><strong>Période de démonstration :</strong> du ${dateFr(debut)} au ${dateFr(fin)}.</p>
+    <p><strong>Disponible :</strong> caisses et journaux, saisie des mouvements, report à nouveau, budgets et prévisions,
+       appels de fonds, tableau de bord, rapports, plan comptable OHADA de démonstration.</p>
+    <p><strong>Limites :</strong> espace de test isolé, 2 utilisateurs maximum, aucune donnée réelle ; l'accès se ferme
+       automatiquement à la fin de la période.</p>
+    ${contact ? `<p>Contact : ${echapper(contact)}</p>` : ''}
+    <p style="font-size:12px;color:#64748b">Si le bouton ne fonctionne pas, copiez ce lien : ${echapper(lien)}</p>`),
+});
+
+const sendInvitationDemo = (opts) => envoyer({ to: opts.to, ...contenuInvitation(opts) });
+
+const TEXTES_RAPPEL = {
+  avant: (fin) => [`Votre démonstration se termine le ${dateFr(fin)}`, `Votre accès de démonstration se termine le <strong>${dateFr(fin)}</strong>. Contactez-nous pour passer à un forfait et conserver votre accès.`],
+  jour:  (fin) => ['Votre démonstration se termine aujourd\'hui', `Votre accès de démonstration se termine aujourd'hui (${dateFr(fin)}). Contactez-nous pour poursuivre avec un forfait.`],
+  apres: (fin) => ['Votre démonstration est terminée', `Votre période de démonstration s'est terminée le ${dateFr(fin)}. Vos données de test sont conservées temporairement : contactez-nous pour prolonger ou adhérer.`],
+};
+const sendRappelDemo = ({ to, nom, type, fin, contact }) => {
+  const [sujet, texte] = TEXTES_RAPPEL[type](fin);
+  return envoyer({ to, subject: sujet, html: gabarit('Démonstration', `<p>Bonjour ${echapper(nom)},</p><p>${texte}</p>${contact ? `<p>Contact : ${echapper(contact)}</p>` : ''}`) });
+};
+const sendNotificationAdmin = ({ to, sujet, lignes }) => envoyer({
+  to, subject: sujet, html: gabarit('Notification interne', `<ul>${lignes.map((l) => `<li>${echapper(l)}</li>`).join('')}</ul>`),
+});
+
+module.exports = {
+  sendInvitationDemo, sendRappelDemo, sendNotificationAdmin, contenuInvitation, sendDepassementAlert, sendMouvementAttenteAlert };

@@ -218,7 +218,7 @@ export default function PlateformePage() {
           <tbody>
             {clients.map((c) => (
               <tr key={c.id} onClick={() => setDetail(c.id)} style={{ cursor: 'pointer' }} title="Voir le détail">
-                <td style={{ fontWeight: 700 }}>{c.nom}</td>
+                <td style={{ fontWeight: 700 }}>{c.nom}{c.type_compte === 'demo' && <span style={{ marginLeft: 6, background: '#fefce8', color: '#a16207', fontSize: 10, padding: '2px 6px', borderRadius: 10 }}>DÉMO · fin {dateFr(c.demo_expire_le)}</span>}</td>
                 <td style={{ fontSize: 12 }}>{c.responsable || '—'}<div style={{ color: 'var(--text-muted)' }}>{[c.contact_email, c.contact_telephone].filter(Boolean).join(' · ')}</div></td>
                 <td style={{ fontSize: 12 }}>{[c.ville, c.pays].filter(Boolean).join(', ') || '—'}</td>
                 <td style={{ fontSize: 12 }}>{dateFr(c.created_at)}</td>

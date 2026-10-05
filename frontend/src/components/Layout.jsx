@@ -10,6 +10,7 @@ import { api } from '@/lib/api';
 // Titres de page — repris tels quels de la table `titles` de showPage().
 const TITLES = {
   '/': 'Tableau de bord',
+  '/prospects': 'Prospects & démonstrations',
   '/journaux-recap': 'Journaux de caisse',
   '/budget': 'Suivi Budgétaire',
   '/previsions': 'Prévisions de dépenses',
@@ -39,7 +40,7 @@ export default function Layout() {
   // (legacy/js/app.js l. 6278-6280) qui ouvre showTenantSelector() au boot.
   // Les écrans d'administration plateforme ne dépendent d'aucun client : on
   // n'y impose pas le choix d'un client.
-  const pageSansClient = ['/plan-modele', '/tenants', '/permissions', '/plateforme'].includes(location.pathname);
+  const pageSansClient = ['/plan-modele', '/tenants', '/permissions', '/plateforme', '/prospects'].includes(location.pathname);
   // Le super_admin administre la plateforme : il n'est plus forcé à choisir
   // un client (il en choisit un via le badge du haut ou la fiche client).
   // Le comptable cabinet, lui, travaille toujours DANS un client.
@@ -74,6 +75,12 @@ export default function Layout() {
       <Sidebar badgeAttente={badgeAttente} badgeDepassements={badgeDepassements} />
       <main className="main-content">
         <SupportAcces />
+        {user?.type_compte === 'demo' && user?.demo_expire_le && (
+          <div style={{ background: '#fefce8', color: '#854d0e', borderBottom: '1px solid #fde68a', padding: '8px 16px', fontSize: 13 }}>
+            🧪 Compte de <strong>démonstration</strong> — données fictives uniquement. Accès ouvert jusqu'au{' '}
+            <strong>{new Date(user.demo_expire_le).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong>.
+          </div>
+        )}
         <Topbar title={title} />
         <section className="page active">
           <Outlet />

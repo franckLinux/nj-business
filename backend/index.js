@@ -79,6 +79,12 @@ const loginLimiter = rateLimit({
 
 app.use('/api/', limiter);
 app.use('/api/auth/login', loginLimiter);
+// Lien d'activation des démos et tâche planifiée : publics, donc bridés par IP.
+app.use(['/api/activation', '/api/taches'], rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Trop de tentatives. Veuillez patienter 15 minutes.' },
+}));
 
 // ── Pièces jointes stockées sur disque local ──────────────────────────────
 const storage = require('./src/services/storage.service');

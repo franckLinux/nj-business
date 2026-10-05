@@ -15,13 +15,18 @@ import TenantsPage from '@/pages/TenantsPage';
 import PermissionsPage from '@/pages/PermissionsPage';
 import PlanModelePage from '@/pages/PlanModelePage';
 import PlateformePage from '@/pages/PlateformePage';
+import ProspectsPage from '@/pages/ProspectsPage';
+import ActivationPage from '@/pages/ActivationPage';
 import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
-import { PAGE_PERMS, peut, voitConfiguration } from '@/lib/acces';
+import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
 
 // Toutes les pages listées dans MIGRATION.md sont désormais portées.
 export default function App() {
   const { isAuthenticated } = useApp();
+  // Lien d'activation d'une démo : page publique, prioritaire sur la session.
+  const activation = window.location.pathname.match(/^\/activation\/([A-Za-z0-9_-]+)\/?$/);
+  if (activation) return <ActivationPage token={activation[1]} />;
 
   return (
     <>
@@ -65,6 +70,7 @@ function AuthenticatedApp() {
         <Route path="permissions"    element={<PermissionsPage />} />
         <Route path="plan-modele"    element={<Autorise ok={user?.role === 'super_admin'}><PlanModelePage /></Autorise>} />
         <Route path="plateforme"     element={<Autorise ok={user?.role === 'super_admin'}><PlateformePage /></Autorise>} />
+        <Route path="prospects"      element={<Autorise ok={peutGererProspects(user, can)}><ProspectsPage /></Autorise>} />
         <Route path="*"              element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

@@ -23,7 +23,7 @@ const journaliser = (t, { tenantId, userId, action, avant, apres }) => sequelize
 );
 
 const SQL_CLIENTS = `
-  SELECT t.id, t.nom, t.slug, t.actif, t.suspension_motif, t.created_at, t.devise,
+  SELECT t.id, t.nom, t.slug, t.actif, t.suspension_motif, t.created_at, t.devise, t.type_compte, t.demo_expire_le,
          t.contact_nom, t.contact_email, t.contact_telephone, t.pays, t.ville,
          COALESCE(NULLIF(t.contact_nom, ''), NULLIF(t.dirigeant_nom, ''), NULLIF(t.directeur_nom, '')) AS responsable,
          v.code AS plan_version, t.plan_initialise_le, t.plan_derniere_synchro, t.plan_derniere_modif,

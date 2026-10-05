@@ -1,4 +1,5 @@
 // src/controllers/users.controller.js
+const { verifierLimiteUtilisateursDemo } = require('../services/prospects.service');
 const bcrypt = require('bcryptjs');
 const { sequelize, User, Role } = require('../models');
 
@@ -86,6 +87,9 @@ const createUser = async (req, res) => {
   try {
     const errProfil = await verifierProfil(roleId, req.tenantId);
     if (errProfil) return res.status(400).json({ error: errProfil });
+    // Espace de démonstration : nombre d'utilisateurs limité.
+    try { await verifierLimiteUtilisateursDemo(req.tenantId); }
+    catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
 
     const hash = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS, 10) || 12);
     const user = await User.create({

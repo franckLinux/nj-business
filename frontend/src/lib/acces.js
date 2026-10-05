@@ -47,3 +47,13 @@ export const voitConfiguration = (user, can) => Object.keys(CONFIG_TABS).some((i
 
 // can() étendu aux listes de codes (tous requis).
 export const peut = (can, code) => (Array.isArray(code) ? code.every((c) => can(c)) : can(code));
+
+// Prospects et démonstrations : super_admin, ou membre du cabinet (sans client
+// de rattachement) titulaire de « prospects.gerer ». La permission accordée
+// individuellement compte même quand un client est sélectionné (le plafond du
+// client consulté ne concerne pas cette fonction plateforme).
+export const peutGererProspects = (user, can) => Boolean(user) && (
+  user.role === 'super_admin'
+  || (user.role === 'comptable_cabinet' && !user.tenantId
+      && (can('prospects.gerer') || (user.permissionsAccordees || []).includes('prospects.gerer')))
+);

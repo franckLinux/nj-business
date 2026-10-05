@@ -2,6 +2,7 @@
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
 const { query } = require('../config/database');
+const { demoExpiree, messageDemoExpiree } = require('../middleware/auth');
 const { getEffectivePermissions, getPermissionsAccordees } = require('../services/permission.service');
 
 /**
@@ -13,10 +14,16 @@ const login = async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT u.id, u.username, u.password_hash, u.role, u.tenant_id, u.actif,
-              t.nom AS tenant_nom, t.slug AS tenant_slug, t.devise
+              t.nom AS tenant_nom, t.slug AS tenant_slug, t.devise,
+              -- to_jsonb : sans erreur si la migration 023 n'est pas encore jouée
+              to_jsonb(t)->>'type_compte' AS type_compte, to_jsonb(t)->>'demo_expire_le' AS demo_expire_le
        FROM users u
        LEFT JOIN tenants t ON t.id = u.tenant_id
-       WHERE u.username = $1`,
+       WHERE u.username = $1
+          -- Comptes de démo : identifiant = e-mail, insensible à la casse.
+          OR (position('@' in $1) > 0 AND lower(u.username) = lower($1))
+       ORDER BY (u.username = $1) DESC
+       LIMIT 1`,
       [username.trim()]
     );
 
@@ -25,14 +32,17 @@ const login = async (req, res) => {
     }
 
     const user = rows[0];
-    if (!user.actif) {
-      return res.status(403).json({ error: 'Compte désactivé. Contactez votre administrateur.' });
-    }
-
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
       return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect.' });
     }
+    // Contrôles APRÈS le mot de passe : ne rien révéler de l'état d'un compte
+    // à qui ne connaît pas son mot de passe.
+    if (!user.actif) {
+      return res.status(403).json({ error: 'Compte désactivé. Contactez votre administrateur.' });
+    }
+    const finDemo = await demoExpiree(user.tenant_id);
+    if (finDemo) return res.status(403).json(messageDemoExpiree(finDemo));
 
     // Génération JWT
     const tokenPayload = {
@@ -62,6 +72,8 @@ const login = async (req, res) => {
         tenantNom:   user.tenant_nom,
         tenantSlug:  user.tenant_slug,
         devise:      user.devise || process.env.DEVISE || 'FCFA',
+        type_compte:    user.type_compte || 'client',
+        demo_expire_le: user.demo_expire_le || null,
         permissionsAccordees, // exceptions individuelles 'grant' (affichage des onglets)
         permissions, // null = pas de restriction configurée (rôle fixe seul) ; tableau = liste exclusive
       },
@@ -79,7 +91,8 @@ const me = async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT u.id, u.username, u.role, u.tenant_id, u.derniere_connexion,
-              t.nom AS tenant_nom, t.slug AS tenant_slug, t.devise, t.logo_url
+              t.nom AS tenant_nom, t.slug AS tenant_slug, t.devise, t.logo_url,
+              to_jsonb(t)->>'type_compte' AS type_compte, to_jsonb(t)->>'demo_expire_le' AS demo_expire_le
        FROM users u
        LEFT JOIN tenants t ON t.id = u.tenant_id
        WHERE u.id = $1`,
