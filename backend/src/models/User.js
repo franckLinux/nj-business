@@ -1,6 +1,6 @@
 'use strict';
 
-const ROLES = ['super_admin', 'comptable_cabinet', 'directeur', 'caissier', 'auditeur'];
+const ROLES = ['super_admin', 'comptable_cabinet', 'directeur', 'caissier', 'auditeur', 'commercial'];
 const CANAUX_NOTIF = ['email', 'plateforme', 'les_deux', 'aucun'];
 
 module.exports = (sequelize, DataTypes) => {

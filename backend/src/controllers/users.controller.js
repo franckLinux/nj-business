@@ -10,14 +10,15 @@ const { sequelize, User, Role } = require('../models');
 // disposant de users.edit pouvait promouvoir un compte de son client en
 // super_admin et prendre le contrôle de toute la plateforme.
 const ROLES_TENANT = ['directeur', 'caissier', 'auditeur'];
-const ROLES_CABINET_CREABLES = ['comptable_cabinet'];
-const TOUS_ROLES = ['super_admin', 'comptable_cabinet', ...ROLES_TENANT];
+const ROLES_CABINET_CREABLES = ['comptable_cabinet', 'commercial'];
+const TOUS_ROLES = ['super_admin', 'comptable_cabinet', 'commercial', ...ROLES_TENANT];
 const ROLES_VALIDES = [...ROLES_TENANT, ...ROLES_CABINET_CREABLES]; // compat (validators)
 const ROLES_LABELS = {
   directeur: 'Directeur',
   caissier: 'Caissier(ère)',
   auditeur: 'Auditeur',
   comptable_cabinet: 'Comptable Cabinet',
+  commercial: 'Commercial',
   super_admin: 'Super Admin',
 };
 const PRIORITE_ROLE = { directeur: 1, comptable_cabinet: 2, caissier: 3, auditeur: 4 };

@@ -16,6 +16,7 @@ import PermissionsPage from '@/pages/PermissionsPage';
 import PlanModelePage from '@/pages/PlanModelePage';
 import PlateformePage from '@/pages/PlateformePage';
 import ProspectsPage from '@/pages/ProspectsPage';
+import MyNjBusinessPage from '@/pages/MyNjBusinessPage';
 import ActivationPage from '@/pages/ActivationPage';
 import DemandeDemoPage from '@/pages/DemandeDemoPage';
 import PwaBootstrap from '@/components/PwaBootstrap';
@@ -60,6 +61,7 @@ function AuthenticatedApp() {
             demandent un accès support (voir middleware/tenant.js). */}
         <Route index element={user?.role === 'super_admin'
           ? <Navigate to={activeTenantId ? '/config' : '/plateforme'} replace />
+          : user?.role === 'commercial' ? <Navigate to="/mynjbusiness" replace />
           : <DashboardPage />} />
         <Route path="journal/:id"    element={<Autorise code="journal.view"><JournalPage /></Autorise>} />
         <Route path="journaux-recap" element={<Autorise code={PAGE_PERMS['/journaux-recap']}><JournauxRecapPage /></Autorise>} />
@@ -73,6 +75,7 @@ function AuthenticatedApp() {
         <Route path="permissions"    element={<PermissionsPage />} />
         <Route path="plan-modele"    element={<Autorise ok={user?.role === 'super_admin'}><PlanModelePage /></Autorise>} />
         <Route path="plateforme"     element={<Autorise ok={user?.role === 'super_admin'}><PlateformePage /></Autorise>} />
+        <Route path="mynjbusiness"   element={<Autorise ok={peutGererProspects(user, can)}><MyNjBusinessPage /></Autorise>} />
         <Route path="prospects"      element={<Autorise ok={peutGererProspects(user, can)}><ProspectsPage /></Autorise>} />
         <Route path="*"              element={<Navigate to="/" replace />} />
       </Route>

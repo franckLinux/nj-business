@@ -8,6 +8,8 @@ import { ConversionProspect, ForfaitsModal, PaiementsProspect, METHODES } from '
 // Accès : super_admin, ou membre du cabinet titulaire de « prospects.gerer ».
 export const STATUTS = {
   PROSPECT:            { label: 'Prospect',               couleur: '#475569', fond: '#f1f5f9' },
+  CONTACTE:            { label: 'Contacté',               couleur: '#2563eb', fond: '#eff6ff' },
+  INTERESSE:           { label: 'Intéressé',              couleur: '#ea580c', fond: '#fff7ed' },
   INVITATION_ENVOYEE:  { label: 'Invitation envoyée',     couleur: '#1d4ed8', fond: '#eff6ff' },
   DEMO_ACTIVE:         { label: 'Démo active',            couleur: '#15803d', fond: '#f0fdf4' },
   DEMO_EXPIREE:        { label: 'Démo expirée',           couleur: '#c2410c', fond: '#fff7ed' },
@@ -30,8 +32,8 @@ const ACTIONS = {
 };
 // Changements manuels autorisés (miroir de TRANSITIONS côté serveur).
 const TRANSITIONS = {
-  DEMO_ANNULEE:        ['PROSPECT', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
-  PROSPECT_ABANDONNE:  ['PROSPECT', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
+  DEMO_ANNULEE:        ['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
+  PROSPECT_ABANDONNE:  ['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
   PAIEMENT_EN_ATTENTE: ['DEMO_ACTIVE', 'DEMO_EXPIREE'],
   PROSPECT:            ['DEMO_ANNULEE', 'PROSPECT_ABANDONNE'],
 };
@@ -89,7 +91,7 @@ function ChampsProspect({ f, set, datesModifiables, emailModifiable }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0 14px' }}>
         {L({ label: 'Nom complet', k: 'nom_complet', ph: 'Nom et prénom du contact' })}
         {L({ label: 'Entreprise', k: 'entreprise', ph: 'Raison sociale' })}
-        {L({ label: 'E-mail (identifiant de connexion)', k: 'email', type: 'email', req: true, dis: !emailModifiable })}
+        {L({ label: 'E-mail (identifiant de la démo)', k: 'email', type: 'email', dis: !emailModifiable })}
         {L({ label: 'Téléphone', k: 'telephone' })}
         {L({ label: 'Pays', k: 'pays' })}
         {L({ label: 'Ville', k: 'ville' })}
@@ -142,7 +144,8 @@ function NouveauProspect({ onClose, onCree }) {
   const valider = async () => {
     setErreur(''); setDoublon(null);
     if (!f.nom_complet.trim() && !f.entreprise.trim()) { setErreur('Indiquez le nom complet ou l\'entreprise.'); return; }
-    if (!f.email.trim()) { setErreur('L\'adresse e-mail est obligatoire.'); return; }
+    if (!f.email.trim() && !f.telephone.trim()) { setErreur('Indiquez un téléphone ou une adresse e-mail.'); return; }
+    if (envoyer && !f.email.trim()) { setErreur('L\'adresse e-mail est nécessaire pour envoyer l\'accès de démonstration.'); return; }
     if (f.demo_fin <= f.demo_debut) { setErreur('La fin de la démo doit être après le début.'); return; }
     if (envoyer && !window.confirm(`Créer l'espace de démonstration et envoyer l'accès à ${f.email} ?`)) return;
     setEnCours(true);
@@ -212,7 +215,7 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
 
   const enregistrer = async () => {
     const corps = { ...f };
-    if (d.statut === 'PROSPECT') { corps.demo_debut = debutJour(f.demo_debut); corps.demo_fin = finJour(f.demo_fin); } else { delete corps.demo_debut; delete corps.demo_fin; }
+    if (['PROSPECT', 'CONTACTE', 'INTERESSE'].includes(d.statut)) { corps.demo_debut = debutJour(f.demo_debut); corps.demo_fin = finJour(f.demo_fin); } else { delete corps.demo_debut; delete corps.demo_fin; }
     const r = await api.put(`/prospects/${id}`, corps);
     if (r.error) { setErreur(r.error); return; }
     apres('Prospect enregistré.');
@@ -274,7 +277,7 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
                   <button key={k} className={`tab-btn${onglet === k ? ' active' : ''}`} onClick={() => setOnglet(k)}>{l}</button>
                 ))}
               </div>
-              {onglet === 'infos' && <ChampsProspect f={f} set={set} datesModifiables={d.statut === 'PROSPECT' && !ferme} emailModifiable={!d.user_id && !ferme} />}
+              {onglet === 'infos' && <ChampsProspect f={f} set={set} datesModifiables={['PROSPECT', 'CONTACTE', 'INTERESSE'].includes(d.statut) && !ferme} emailModifiable={!d.user_id && !ferme} />}
               {onglet === 'historique' && (
                 <div className="table-wrap"><table>
                   <thead><tr><th>Date</th><th>Action</th><th>Statut</th><th>Motif / détail</th><th>Par</th></tr></thead>
@@ -349,9 +352,9 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
         {d && (
           <div className="modal-foot" style={{ gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {['PROSPECT', 'INVITATION_ENVOYEE'].includes(d.statut) && (
+              {['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE'].includes(d.statut) && (
                 <button className="btn-secondary" onClick={inviter} disabled={enCours}>
-                  {enCours ? 'Envoi…' : d.statut === 'PROSPECT' ? (d.tenant_id ? '✉ Renvoyer un accès' : '✉ Créer la démo et envoyer l\'accès') : '✉ Renvoyer le lien'}
+                  {enCours ? 'Envoi…' : d.statut !== 'INVITATION_ENVOYEE' ? (d.tenant_id ? '✉ Renvoyer un accès' : '✉ Créer la démo et envoyer l\'accès') : '✉ Renvoyer le lien'}
                 </button>
               )}
               {!ferme && d.statut !== 'PAIEMENT_EN_ATTENTE' && !prol && (
@@ -380,7 +383,11 @@ export default function ProspectsPage() {
   const [filtres, setFiltres] = useState({ recherche: '', statut: '', aTraiter: '', tri: 'created_at', ordre: 'desc', page: 1 });
   const [recherche, setRecherche] = useState('');
   const [nouveau, setNouveau] = useState(false);
-  const [detail, setDetail] = useState(null);   // { id, envoi }
+  // Ouverture directe d'une fiche (lien « Fiche complète » de MyNjBusiness).
+  const [detail, setDetail] = useState(() => {
+    const id = new URLSearchParams(window.location.search).get('id');
+    return id ? { id } : null;
+  });   // { id, envoi }
 
   const charger = useCallback(async () => {
     const p = new URLSearchParams({ ...filtres, taille: 20 });

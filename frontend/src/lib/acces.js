@@ -54,6 +54,6 @@ export const peut = (can, code) => (Array.isArray(code) ? code.every((c) => can(
 // client consulté ne concerne pas cette fonction plateforme).
 export const peutGererProspects = (user, can) => Boolean(user) && (
   user.role === 'super_admin'
-  || (user.role === 'comptable_cabinet' && !user.tenantId
+  || ((user.role === 'comptable_cabinet' || user.role === 'commercial') && !user.tenantId
       && (can('prospects.gerer') || (user.permissionsAccordees || []).includes('prospects.gerer')))
 );

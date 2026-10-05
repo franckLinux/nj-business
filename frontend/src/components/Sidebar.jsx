@@ -13,7 +13,8 @@ const subClass = ({ isActive }) => 'nav-item nav-sub' + (isActive ? ' active' : 
 export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
   const { user, isAdmin, peutVoirAttente, journauxGrouped, logout, can, activeTenantId } = useApp();
   // super_admin sans client choisi : uniquement l'administration plateforme.
-  const sansClient = user?.role === 'super_admin' && !activeTenantId;
+  // Commercial : aucune donnée de caisse, uniquement MyNjBusiness.
+  const sansClient = (user?.role === 'super_admin' && !activeTenantId) || user?.role === 'commercial';
   const voit = (path) => peut(can, PAGE_PERMS[path]);
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,7 +38,13 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
       </div>
 
       <nav className="sidebar-nav" id="sidebar-nav">
-{user?.role !== 'super_admin' && (
+{peutGererProspects(user, can) && (
+        <NavLink to="/mynjbusiness" className={navClass}>
+          <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
+          MyNjBusiness
+        </NavLink>
+        )}
+{!['super_admin', 'commercial'].includes(user?.role) && (
         <NavLink to="/" end className={navClass}>
           <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
           Tableau de bord

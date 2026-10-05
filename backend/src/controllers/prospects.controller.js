@@ -2,6 +2,7 @@
 const crypto = require('crypto');
 const svc = require('../services/prospects.service');
 const com = require('../services/commercial.service');
+const pipe = require('../services/pipeline.service');
 const { isCabinet } = require('../middleware/auth');
 const { userHasPermission } = require('../services/permission.service');
 
@@ -26,7 +27,7 @@ const repondre = (ctx, fn, statut = 200) => async (req, res) => {
 const requireProspects = async (req, res, next) => {
   try {
     if (req.user.role === 'super_admin') return next();
-    if (isCabinet(req.user)
+    if ((isCabinet(req.user) || (req.user.role === 'commercial' && !req.user.tenantId))
       && await userHasPermission({ tenantId: null, userId: req.user.id, role: req.user.role }, 'prospects.gerer')) return next();
     res.status(403).json({ error: 'Accès refusé : permission « Gérer les prospects » requise.' });
   } catch (err) {
@@ -34,6 +35,20 @@ const requireProspects = async (req, res, next) => {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
+
+// Périmètre d'un commercial : uniquement ses prospects (404 sinon).
+const scopeProspect = async (req, res, next) => {
+  try {
+    if (req.params.id) await pipe.verifierPerimetre(req.user, uuid(req.params.id));
+    next();
+  } catch (err) {
+    if (err instanceof svc.ErreurMetier) return res.status(err.status).json({ error: err.message });
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+// Réservé à la Direction (super_admin, comptable cabinet) : conversion, etc.
+const requireDirection = (req, res, next) => (pipe.estDirection(req.user)
+  ? next() : res.status(403).json({ error: 'Action réservée à la Direction.' }));
 
 // Tâche planifiée : protégée par un jeton dédié (TACHES_TOKEN). Sans jeton
 // configuré, la route n'existe pas (404).
@@ -47,11 +62,22 @@ const requireTacheToken = (req, res, next) => {
 };
 
 module.exports = {
-  requireProspects,
+  requireProspects, scopeProspect, requireDirection,
+  // MyNjBusiness
+  pipeline:      repondre('pipeline', (req) => pipe.vue({ user: req.user, recherche: req.query.recherche, commercial: req.query.commercial, filtre: req.query.filtre })),
+  pipelineFiche: repondre('pipeline.fiche', (req) => pipe.fiche({ user: req.user, id: uuid(req.params.id) })),
+  pipelineAction: repondre('pipeline.action', (req) => pipe.agir({
+    user: req.user, id: uuid(req.params.id), type: req.body.type, note: req.body.note,
+    prochaineAction: req.body.prochaine_action, prochaineActionLe: req.body.prochaine_action_le, commercialId: req.body.commercial_id,
+  })),
   requireTacheToken,
-  lister:     repondre('liste',   (req) => svc.lister(req.query)),
+  lister:     repondre('liste',   (req) => svc.lister({ ...req.query, commercialId: req.user.role === 'commercial' ? req.user.id : null })),
   detail:     repondre('détail',  (req) => svc.detail(uuid(req.params.id))),
-  creer:      repondre('création', (req) => svc.creer({ donnees: req.body || {}, userId: req.user.id }), 201),
+  creer:      repondre('création', (req) => svc.creer({
+    donnees: req.body || {}, userId: req.user.id,
+    // Le commercial devient responsable de ce qu'il crée ; la Direction peut attribuer.
+    commercialId: req.user.role === 'commercial' ? req.user.id : (req.body.commercial_id || null),
+  }), 201),
   modifier:   repondre('modif',   (req) => svc.modifier({ id: uuid(req.params.id), donnees: req.body || {}, userId: req.user.id })),
   inviter:    repondre('invitation', (req) => svc.inviter({ id: uuid(req.params.id), userId: req.user.id })),
   apercu:     repondre('aperçu',  (req) => svc.apercuEmail({ nom: req.query.nom, debut: req.query.debut, fin: req.query.fin })),
@@ -89,6 +115,7 @@ module.exports = {
   paiement:      repondre('paiement', (req) => com.enregistrerPaiement({ prospectId: uuid(req.params.id), donnees: req.body || {}, userId: req.user.id }), 201),
   statutPaiement: repondre('paiement.statut', (req) => {
     if (!UUID_RE.test(req.params.paiementId)) throw new svc.ErreurMetier(400, 'Identifiant de paiement invalide.');
+    if (!pipe.estDirection(req.user)) throw new svc.ErreurMetier(403, 'Confirmation des paiements réservée à la Direction.');
     return com.changerStatutPaiement({ id: req.params.paiementId, statut: req.body.statut, motif: req.body.motif, userId: req.user.id });
   }),
   convertir:     repondre('conversion', (req) => {

@@ -267,18 +267,24 @@ const prospects = [authGuard, prCtrl.requireProspects];
 router.get   ('/prospects',                  ...prospects, prCtrl.lister);
 router.get   ('/prospects/apercu-email',     ...prospects, prCtrl.apercu);
 router.post  ('/prospects',                  ...prospects, prCtrl.creer);
-router.get   ('/prospects/:id',              ...prospects, prCtrl.detail);
-router.put   ('/prospects/:id',              ...prospects, prCtrl.modifier);
-router.post  ('/prospects/:id/invitation',   ...prospects, prCtrl.inviter);
-router.post  ('/prospects/:id/prolongation', ...prospects, prCtrl.prolonger);
-router.post  ('/prospects/:id/statut',       ...prospects, prCtrl.statut);
+// Routes d'une fiche : périmètre du commercial vérifié côté serveur.
+const fiche = [...prospects, prCtrl.scopeProspect];
+router.get   ('/prospects/:id',              ...fiche, prCtrl.detail);
+router.put   ('/prospects/:id',              ...fiche, prCtrl.modifier);
+router.post  ('/prospects/:id/invitation',   ...fiche, prCtrl.inviter);
+router.post  ('/prospects/:id/prolongation', ...fiche, prCtrl.prolonger);
+router.post  ('/prospects/:id/statut',       ...fiche, prCtrl.statut);
 // Étape 4 : forfaits (catalogue modifiable par le super_admin seul), paiements, conversion.
 router.get   ('/forfaits',                   ...prospects, prCtrl.forfaits);
 router.post  ('/forfaits',                   ...admin, prCtrl.creerForfait);
 router.put   ('/forfaits/:id',               ...admin, prCtrl.modifierForfait);
-router.post  ('/prospects/:id/paiements',    ...prospects, prCtrl.paiement);
+router.post  ('/prospects/:id/paiements',    ...fiche, prCtrl.paiement);
 router.patch ('/paiements/:paiementId/statut', ...prospects, prCtrl.statutPaiement);
-router.post  ('/prospects/:id/conversion',   ...prospects, prCtrl.convertir);
+router.post  ('/prospects/:id/conversion',   ...fiche, prCtrl.requireDirection, prCtrl.convertir);
+// MyNjBusiness — vue pipeline + fiche + actions rapides (périmètre serveur).
+router.get   ('/pipeline',                   ...prospects, prCtrl.pipeline);
+router.get   ('/pipeline/:id',               ...fiche, prCtrl.pipelineFiche);
+router.post  ('/pipeline/:id/action',        ...fiche, prCtrl.pipelineAction);
 // Public : page « Demander une démo » (aucun JWT, débit limité).
 router.post  ('/demande-demo',               prCtrl.demandeWeb);
 // Public : lien d'activation reçu par le prospect (aucun JWT).

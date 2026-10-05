@@ -19,8 +19,9 @@ const { seedRubriquesDefaut } = require('../controllers/rubriques.controller');
 const { seedJournauxDefaut } = require('../controllers/journaux.controller');
 
 const SELECT = sequelize.QueryTypes.SELECT;
-const STATUTS = ['PROSPECT', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE',
+const STATUTS = ['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE',
   'PAIEMENT_EN_ATTENTE', 'CLIENT_ACTIF', 'DEMO_ANNULEE', 'PROSPECT_ABANDONNE'];
+const ETAPES_AVANT_DEMO = ['PROSPECT', 'CONTACTE', 'INTERESSE'];
 const STATUTS_FERMES = ['DEMO_ANNULEE', 'PROSPECT_ABANDONNE', 'CLIENT_ACTIF'];
 const VALIDITE_LIEN_H = 72;
 const MAX_USERS_DEMO = 2;
@@ -79,17 +80,18 @@ const marquerExpires = async ({ tenantId = null } = {}) => sequelize.transaction
 const TRIS = { nom: 'lower(p.nom_complet)', entreprise: 'lower(p.entreprise)', statut: 'p.statut',
   demo_fin: 'p.demo_fin', created_at: 'p.created_at' };
 
-const lister = async ({ recherche = '', statut = '', aTraiter = '', tri = 'created_at', ordre = 'desc', page = 1, taille = 20 }) => {
+const lister = async ({ commercialId = null, recherche = '', statut = '', aTraiter = '', tri = 'created_at', ordre = 'desc', page = 1, taille = 20 }) => {
   await marquerExpires();
   page = Math.max(1, parseInt(page, 10) || 1);
   taille = Math.min(100, Math.max(5, parseInt(taille, 10) || 20));
   const col = TRIS[tri] || TRIS.created_at;
   const sens = String(ordre).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
   const where = `WHERE (:statut = '' OR p.statut = :statut)
+    AND (CAST(:commercialId AS uuid) IS NULL OR p.commercial_id = CAST(:commercialId AS uuid))
     AND (:aTraiter = false OR NOT p.demande_traitee)
     AND (:r = '' OR p.nom_complet ILIKE :like OR p.entreprise ILIKE :like OR p.email ILIKE :like
          OR p.telephone ILIKE :like OR p.ville ILIKE :like)`;
-  const rep = { statut: STATUTS.includes(statut) ? statut : '', r: String(recherche).trim(), aTraiter: String(aTraiter) === '1',
+  const rep = { statut: STATUTS.includes(statut) ? statut : '', r: String(recherche).trim(), aTraiter: String(aTraiter) === '1', commercialId,
     like: `%${String(recherche).trim().replace(/[%_\\]/g, '\\$&')}%`, lim: taille, off: (page - 1) * taille };
   const items = await q(
     `SELECT p.id, p.nom_complet, p.entreprise, p.email, p.telephone, p.ville, p.pays, p.statut,
@@ -102,8 +104,9 @@ const lister = async ({ recherche = '', statut = '', aTraiter = '', tri = 'creat
       ORDER BY ${col} ${sens} NULLS LAST, p.created_at DESC
       LIMIT :lim OFFSET :off`, rep);
   const [{ total }] = await q(`SELECT COUNT(*)::int AS total FROM prospects p ${where}`, rep);
-  const compteurs = await q('SELECT statut, COUNT(*)::int AS n FROM prospects GROUP BY statut');
-  const [{ n: aTraiterNb }] = await q('SELECT COUNT(*)::int AS n FROM prospects WHERE NOT demande_traitee');
+  const perim = 'WHERE (CAST(:c AS uuid) IS NULL OR commercial_id = CAST(:c AS uuid))';
+  const compteurs = await q(`SELECT statut, COUNT(*)::int AS n FROM prospects ${perim} GROUP BY statut`, { c: commercialId });
+  const [{ n: aTraiterNb }] = await q(`SELECT COUNT(*)::int AS n FROM prospects ${perim} AND NOT demande_traitee`, { c: commercialId });
   return { items, total, page, taille, a_traiter: aTraiterNb,
     compteurs: Object.fromEntries(compteurs.map((c) => [c.statut, c.n])) };
 };
@@ -161,14 +164,22 @@ const nettoyer = (d, existant = {}) => {
     }
   }
   if (v.email !== undefined) {
-    v.email = v.email.toLowerCase();
-    if (!EMAIL_RE.test(v.email)) throw new ErreurMetier(400, 'Adresse e-mail invalide.');
+    v.email = v.email.toLowerCase() || null; // facultatif (prospect « terrain »)
+    if (v.email && !EMAIL_RE.test(v.email)) throw new ErreurMetier(400, 'Adresse e-mail invalide.');
   }
   const final = { ...existant, ...v };
   if (!String(final.nom_complet || '').trim() && !String(final.entreprise || '').trim()) {
     throw new ErreurMetier(400, 'Indiquez au moins le nom complet ou l\'entreprise.');
   }
-  if (!final.email) throw new ErreurMetier(400, 'Adresse e-mail obligatoire.');
+  if (!final.email && !String(final.telephone || '').trim()) {
+    throw new ErreurMetier(400, 'Indiquez au moins un téléphone ou une adresse e-mail.');
+  }
+  // Dates de démo par défaut (ajustées au moment de l'envoi de l'accès).
+  if (!final.demo_debut && !existant.id) { v.demo_debut = new Date().toISOString(); final.demo_debut = v.demo_debut; }
+  if (!final.demo_fin && !existant.id) {
+    v.demo_fin = new Date(new Date(final.demo_debut).getTime() + DUREE_DEMO_JOURS * 864e5).toISOString();
+    final.demo_fin = v.demo_fin;
+  }
   if (!final.demo_debut || !final.demo_fin) throw new ErreurMetier(400, 'Dates de début et de fin de démonstration obligatoires.');
   if (new Date(final.demo_fin) <= new Date(final.demo_debut)) {
     throw new ErreurMetier(400, 'La date de fin doit être postérieure à la date de début.');
@@ -176,7 +187,25 @@ const nettoyer = (d, existant = {}) => {
   return v;
 };
 
+// Doublon par téléphone (9 derniers chiffres : +237 6xx… = 6xx…).
+const chiffres = (tel) => String(tel || '').replace(/\D/g, '').slice(-9);
+const verifierTelephoneLibre = async (tel, saufId, t) => {
+  const c = chiffres(tel);
+  if (c.length < 8) return;
+  const [doublon] = await q(
+    `SELECT id, statut FROM prospects
+      WHERE right(regexp_replace(telephone, '\\D', '', 'g'), 9) = :c
+        AND (CAST(:id AS uuid) IS NULL OR id <> CAST(:id AS uuid)) LIMIT 1`,
+    { c, id: saufId || null }, { transaction: t });
+  if (doublon) {
+    const e = new ErreurMetier(409, `Un prospect existe déjà avec ce numéro de téléphone (statut ${doublon.statut}).`);
+    e.existing_id = doublon.id;
+    throw e;
+  }
+};
+
 const verifierEmailLibre = async (mail, saufId, t) => {
+  if (!mail) return;
   const [doublon] = await q(
     `SELECT id, statut FROM prospects WHERE lower(btrim(email)) = :m AND (CAST(:id AS uuid) IS NULL OR id <> CAST(:id AS uuid))`,
     { m: mail, id: saufId || null }, { transaction: t });
@@ -189,9 +218,12 @@ const verifierEmailLibre = async (mail, saufId, t) => {
   if (compte) throw new ErreurMetier(409, 'Cette adresse e-mail est déjà utilisée par un compte utilisateur existant.');
 };
 
-const creer = async ({ donnees, userId }) => sequelize.transaction(async (t) => {
+const creer = async ({ donnees, userId, commercialId = null }) => sequelize.transaction(async (t) => {
   const v = nettoyer(donnees);
   await verifierEmailLibre(v.email, null, t);
+  await verifierTelephoneLibre(v.telephone, null, t);
+  if (commercialId) v.commercial_id = commercialId;
+  if (donnees.source !== undefined) v.source = String(donnees.source || '').trim().slice(0, 60);
   const cols = Object.keys(v);
   const [p] = await q(
     `INSERT INTO prospects (${cols.join(', ')}, created_by)
@@ -208,10 +240,11 @@ const modifier = async ({ id, donnees, userId }) => sequelize.transaction(async 
   // Les dates passent par la prolongation (motif + confirmation), pas ici,
   // une fois l'accès envoyé.
   const d = { ...donnees };
-  if (p.statut !== 'PROSPECT') { delete d.demo_debut; delete d.demo_fin; }
+  if (!['PROSPECT', 'CONTACTE', 'INTERESSE'].includes(p.statut)) { delete d.demo_debut; delete d.demo_fin; }
   if (p.user_id) delete d.email; // l'e-mail est devenu l'identifiant de connexion
   const v = nettoyer(d, p);
   if (v.email && v.email !== p.email) await verifierEmailLibre(v.email, id, t);
+  if (v.telephone && chiffres(v.telephone) !== chiffres(p.telephone)) await verifierTelephoneLibre(v.telephone, id, t);
   const cols = Object.keys(v);
   if (!cols.length) return p;
   const [maj] = await q(
@@ -260,12 +293,21 @@ const creerEspaceDemo = async (t, p, userId) => {
 const inviter = async ({ id, userId }) => {
   const r = await sequelize.transaction(async (t) => {
     const p = await charger(id, t, true);
-    if (!['PROSPECT', 'INVITATION_ENVOYEE'].includes(p.statut)) {
+    if (!['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE'].includes(p.statut)) {
       throw new ErreurMetier(409, `Envoi impossible au statut ${p.statut}.`
         + (p.statut === 'DEMO_EXPIREE' ? ' Prolongez d\'abord la démonstration.' : ''));
     }
-    if (new Date(p.demo_fin) <= new Date()) {
-      throw new ErreurMetier(409, 'La période de démonstration est déjà terminée : modifiez les dates avant l\'envoi.');
+    if (!p.email) throw new ErreurMetier(400, 'Renseignez l\'adresse e-mail du prospect : elle sert d\'identifiant de connexion à la démo.');
+    // Démo pas encore ouverte et dates dépassées (prospect suivi depuis
+    // longtemps) : la période démarre aujourd'hui.
+    if (!p.tenant_id && new Date(p.demo_fin) <= new Date(Date.now() + 864e5)) {
+      const debut = new Date();
+      const fin = new Date(debut.getTime() + DUREE_DEMO_JOURS * 864e5);
+      await ex('UPDATE prospects SET demo_debut = :d, demo_fin = :f WHERE id = :id',
+        { d: debut.toISOString(), f: fin.toISOString(), id }, { transaction: t });
+      p.demo_debut = debut.toISOString(); p.demo_fin = fin.toISOString();
+    } else if (new Date(p.demo_fin) <= new Date()) {
+      throw new ErreurMetier(409, 'La période de démonstration est déjà terminée : prolongez-la avant l\'envoi.');
     }
     let { tenant_id: tenantId, user_id: prospectUserId } = p;
     if (!tenantId) {
@@ -394,8 +436,8 @@ const prolonger = async ({ id, nouvelleFin, motif, userId }) => sequelize.transa
 
 // ── Changement de statut manuel ───────────────────────────────────────────
 const TRANSITIONS = {
-  DEMO_ANNULEE:        ['PROSPECT', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
-  PROSPECT_ABANDONNE:  ['PROSPECT', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
+  DEMO_ANNULEE:        ['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
+  PROSPECT_ABANDONNE:  ['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE', 'PAIEMENT_EN_ATTENTE'],
   PAIEMENT_EN_ATTENTE: ['DEMO_ACTIVE', 'DEMO_EXPIREE'],
   PROSPECT:            ['DEMO_ANNULEE', 'PROSPECT_ABANDONNE'], // réouverture
 };
