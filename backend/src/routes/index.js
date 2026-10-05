@@ -272,6 +272,15 @@ router.put   ('/prospects/:id',              ...prospects, prCtrl.modifier);
 router.post  ('/prospects/:id/invitation',   ...prospects, prCtrl.inviter);
 router.post  ('/prospects/:id/prolongation', ...prospects, prCtrl.prolonger);
 router.post  ('/prospects/:id/statut',       ...prospects, prCtrl.statut);
+// Étape 4 : forfaits (catalogue modifiable par le super_admin seul), paiements, conversion.
+router.get   ('/forfaits',                   ...prospects, prCtrl.forfaits);
+router.post  ('/forfaits',                   ...admin, prCtrl.creerForfait);
+router.put   ('/forfaits/:id',               ...admin, prCtrl.modifierForfait);
+router.post  ('/prospects/:id/paiements',    ...prospects, prCtrl.paiement);
+router.patch ('/paiements/:paiementId/statut', ...prospects, prCtrl.statutPaiement);
+router.post  ('/prospects/:id/conversion',   ...prospects, prCtrl.convertir);
+// Public : page « Demander une démo » (aucun JWT, débit limité).
+router.post  ('/demande-demo',               prCtrl.demandeWeb);
 // Public : lien d'activation reçu par le prospect (aucun JWT).
 router.get   ('/activation/:token',          prCtrl.verifierActivation);
 router.post  ('/activation/:token',          prCtrl.activer);

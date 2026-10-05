@@ -339,5 +339,21 @@ const sendNotificationAdmin = ({ to, sujet, lignes }) => envoyer({
   to, subject: sujet, html: gabarit('Notification interne', `<ul>${lignes.map((l) => `<li>${echapper(l)}</li>`).join('')}</ul>`),
 });
 
+const sendBienvenueClient = ({ to, nom, client, forfait, debut, fin, compteTransfere, lien }) => envoyer({
+  to,
+  subject: `Bienvenue : votre espace ${process.env.APP_NAME || 'NJ Caisse Pro'} est prêt`,
+  html: gabarit('Espace client', `
+    <p>Bonjour ${echapper(nom)},</p>
+    <p>Merci pour votre confiance. L'espace <strong>${echapper(client)}</strong> est ouvert avec le forfait
+       <strong>${echapper(forfait)}</strong>, du ${dateFr(debut)} au ${dateFr(fin)}.</p>
+    <p>${compteTransfere
+    ? 'Connectez-vous avec <strong>le même identifiant et le même mot de passe</strong> que pendant la démonstration. Votre nouvel espace est vierge : les données de test ne sont pas reprises.'
+    : 'Le cabinet vous communique vos accès de connexion.'}</p>
+    ${lien ? `<p style="text-align:center;margin:24px 0"><a href="${echapper(lien)}" style="background:#2563eb;color:white;padding:12px 26px;border-radius:8px;text-decoration:none;font-weight:bold">Ouvrir l'application</a></p>` : ''}
+    ${process.env.DEMO_CONTACT ? `<p>Contact : ${echapper(process.env.DEMO_CONTACT)}</p>` : ''}`)
+    .replace(/Compte de DÉMONSTRATION — données fictives, ne pas y saisir de données réelles\./, ''),
+});
+
 module.exports = {
+  sendBienvenueClient,
   sendInvitationDemo, sendRappelDemo, sendNotificationAdmin, contenuInvitation, sendDepassementAlert, sendMouvementAttenteAlert };

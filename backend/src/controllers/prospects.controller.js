@@ -1,6 +1,7 @@
 // src/controllers/prospects.controller.js — prospects et démonstrations.
 const crypto = require('crypto');
 const svc = require('../services/prospects.service');
+const com = require('../services/commercial.service');
 const { isCabinet } = require('../middleware/auth');
 const { userHasPermission } = require('../services/permission.service');
 
@@ -62,5 +63,36 @@ module.exports = {
   // Public (lien reçu par e-mail)
   verifierActivation: repondre('activation.verif', (req) => svc.verifierActivation(req.params.token)),
   activer:    repondre('activation', (req) => svc.activer({ jeton: req.params.token, motDePasse: req.body.mot_de_passe })),
-  taches:     repondre('tâches', () => svc.tachesQuotidiennes()),
+  taches:     repondre('tâches', async () => {
+    const bilan = await svc.tachesQuotidiennes();
+    const { echus, bientot } = await com.abonnementsEchus();
+    bilan.abonnements_echus = echus.length;
+    bilan.abonnements_j15 = bientot.length;
+    if (echus.length || bientot.length) {
+      bilan.notification_abonnements = await svc.notifierCabinet('Abonnements clients à renouveler', [
+        ...echus.map((a) => `ÉCHU : ${a.client} — ${a.forfait_nom}, fin le ${new Date(a.date_fin).toLocaleDateString('fr-FR')}`),
+        ...bientot.map((a) => `Dans 15 jours : ${a.client} — ${a.forfait_nom}, fin le ${new Date(a.date_fin).toLocaleDateString('fr-FR')}`),
+      ]);
+    }
+    return bilan;
+  }),
+  // Public : page « Demander une démo »
+  demandeWeb: repondre('demande web', (req) => svc.demandeWeb(req.body || {}), 201),
+  // Étape 4 : forfaits, paiements, conversion
+  forfaits:      repondre('forfaits', (req) => com.listerForfaits({ tous: req.query.tous === '1' && req.user.role === 'super_admin' })),
+  creerForfait:  repondre('forfait.création', (req) => com.creerForfait({ donnees: req.body || {}, userId: req.user.id }), 201),
+  modifierForfait: repondre('forfait.modif', (req) => {
+    const id = parseInt(req.params.id, 10);
+    if (!(id > 0)) throw new svc.ErreurMetier(400, 'Identifiant de forfait invalide.');
+    return com.modifierForfait({ id, donnees: req.body || {}, userId: req.user.id });
+  }),
+  paiement:      repondre('paiement', (req) => com.enregistrerPaiement({ prospectId: uuid(req.params.id), donnees: req.body || {}, userId: req.user.id }), 201),
+  statutPaiement: repondre('paiement.statut', (req) => {
+    if (!UUID_RE.test(req.params.paiementId)) throw new svc.ErreurMetier(400, 'Identifiant de paiement invalide.');
+    return com.changerStatutPaiement({ id: req.params.paiementId, statut: req.body.statut, motif: req.body.motif, userId: req.user.id });
+  }),
+  convertir:     repondre('conversion', (req) => {
+    if (req.body.confirmation !== true) throw new svc.ErreurMetier(400, 'Confirmation requise pour la conversion.');
+    return com.convertir({ id: uuid(req.params.id), donnees: req.body || {}, userId: req.user.id });
+  }),
 };

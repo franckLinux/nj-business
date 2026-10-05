@@ -80,6 +80,12 @@ const loginLimiter = rateLimit({
 app.use('/api/', limiter);
 app.use('/api/auth/login', loginLimiter);
 // Lien d'activation des démos et tâche planifiée : publics, donc bridés par IP.
+// Demande de démo publique : 5 envois par heure et par adresse IP.
+app.use('/api/demande-demo', rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Trop de demandes envoyées. Réessayez plus tard ou contactez-nous directement.' },
+}));
 app.use(['/api/activation', '/api/taches'], rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,

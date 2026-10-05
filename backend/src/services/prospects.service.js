@@ -79,20 +79,22 @@ const marquerExpires = async ({ tenantId = null } = {}) => sequelize.transaction
 const TRIS = { nom: 'lower(p.nom_complet)', entreprise: 'lower(p.entreprise)', statut: 'p.statut',
   demo_fin: 'p.demo_fin', created_at: 'p.created_at' };
 
-const lister = async ({ recherche = '', statut = '', tri = 'created_at', ordre = 'desc', page = 1, taille = 20 }) => {
+const lister = async ({ recherche = '', statut = '', aTraiter = '', tri = 'created_at', ordre = 'desc', page = 1, taille = 20 }) => {
   await marquerExpires();
   page = Math.max(1, parseInt(page, 10) || 1);
   taille = Math.min(100, Math.max(5, parseInt(taille, 10) || 20));
   const col = TRIS[tri] || TRIS.created_at;
   const sens = String(ordre).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
   const where = `WHERE (:statut = '' OR p.statut = :statut)
+    AND (:aTraiter = false OR NOT p.demande_traitee)
     AND (:r = '' OR p.nom_complet ILIKE :like OR p.entreprise ILIKE :like OR p.email ILIKE :like
          OR p.telephone ILIKE :like OR p.ville ILIKE :like)`;
-  const rep = { statut: STATUTS.includes(statut) ? statut : '', r: String(recherche).trim(),
+  const rep = { statut: STATUTS.includes(statut) ? statut : '', r: String(recherche).trim(), aTraiter: String(aTraiter) === '1',
     like: `%${String(recherche).trim().replace(/[%_\\]/g, '\\$&')}%`, lim: taille, off: (page - 1) * taille };
   const items = await q(
     `SELECT p.id, p.nom_complet, p.entreprise, p.email, p.telephone, p.ville, p.pays, p.statut,
             p.demo_debut, p.demo_fin, p.forfait_envisage, p.created_at, p.tenant_id,
+            p.source, p.demande_web_le, p.demande_traitee,
             (SELECT i.statut_email FROM prospect_invitations i WHERE i.prospect_id = p.id
               ORDER BY i.created_at DESC LIMIT 1) AS statut_email,
             (SELECT u.derniere_connexion FROM users u WHERE u.id = p.user_id) AS derniere_connexion
@@ -101,7 +103,9 @@ const lister = async ({ recherche = '', statut = '', tri = 'created_at', ordre =
       LIMIT :lim OFFSET :off`, rep);
   const [{ total }] = await q(`SELECT COUNT(*)::int AS total FROM prospects p ${where}`, rep);
   const compteurs = await q('SELECT statut, COUNT(*)::int AS n FROM prospects GROUP BY statut');
-  return { items, total, page, taille, compteurs: Object.fromEntries(compteurs.map((c) => [c.statut, c.n])) };
+  const [{ n: aTraiterNb }] = await q('SELECT COUNT(*)::int AS n FROM prospects WHERE NOT demande_traitee');
+  return { items, total, page, taille, a_traiter: aTraiterNb,
+    compteurs: Object.fromEntries(compteurs.map((c) => [c.statut, c.n])) };
 };
 
 // ── Détail ─────────────────────────────────────────────────────────────────
@@ -126,7 +130,14 @@ const detail = async (id) => {
               (SELECT MAX(u.derniere_connexion) FROM users u WHERE u.tenant_id = t.id) AS dernier_acces
          FROM tenants t WHERE t.id = :id`, { id: p.tenant_id });
   }
-  return { ...p, historique, invitations, espace };
+  const paiements = await q(
+    `SELECT pa.*, f.nom AS forfait_nom, u.username AS auteur FROM paiements pa
+       LEFT JOIN forfaits f ON f.id = pa.forfait_id LEFT JOIN users u ON u.id = pa.created_by
+      WHERE pa.prospect_id = :id ORDER BY pa.date_paiement DESC, pa.created_at DESC`, { id });
+  const abonnements = await q(
+    `SELECT a.*, t.nom AS client_nom FROM abonnements a JOIN tenants t ON t.id = a.tenant_id
+      WHERE a.prospect_id = :id ORDER BY a.created_at DESC`, { id });
+  return { ...p, historique, invitations, espace, paiements, abonnements };
 };
 
 // ── Création / modification ───────────────────────────────────────────────
@@ -204,7 +215,7 @@ const modifier = async ({ id, donnees, userId }) => sequelize.transaction(async 
   const cols = Object.keys(v);
   if (!cols.length) return p;
   const [maj] = await q(
-    `UPDATE prospects SET ${cols.map((c) => `${c} = :${c}`).join(', ')}, updated_at = NOW() WHERE id = :id RETURNING *`,
+    `UPDATE prospects SET ${cols.map((c) => `${c} = :${c}`).join(', ')}, demande_traitee = true, updated_at = NOW() WHERE id = :id RETURNING *`,
     { ...v, id }, { transaction: t });
   const avant = Object.fromEntries(cols.map((c) => [c, p[c]]));
   await historiser(t, { prospectId: id, ancien: p.statut, nouveau: p.statut, action: 'MODIFICATION', details: { avant, apres: v }, userId });
@@ -271,7 +282,7 @@ const inviter = async ({ id, userId }) => {
       `INSERT INTO prospect_invitations (prospect_id, token_hash, expire_le, est_renvoi, created_by)
        VALUES (:id, :h, :exp, :renvoi, :userId) RETURNING id`,
       { id, h: hash(jeton), exp: expire.toISOString(), renvoi: estRenvoi, userId }, { transaction: t });
-    await ex(`UPDATE prospects SET statut = 'INVITATION_ENVOYEE', tenant_id = :tid, user_id = :uid, updated_at = NOW()
+    await ex(`UPDATE prospects SET statut = 'INVITATION_ENVOYEE', tenant_id = :tid, user_id = :uid, demande_traitee = true, updated_at = NOW()
                WHERE id = :id`, { id, tid: tenantId, uid: prospectUserId }, { transaction: t });
     await ex('UPDATE tenants SET actif = true, demo_expire_le = :fin WHERE id = :tid', { tid: tenantId, fin: p.demo_fin }, { transaction: t });
     await historiser(t, { prospectId: id, ancien: p.statut, nouveau: 'INVITATION_ENVOYEE',
@@ -414,12 +425,66 @@ const changerStatut = async ({ id, statut, motif, userId }) => sequelize.transac
     nouveau = new Date(p.demo_fin) <= new Date() ? 'DEMO_EXPIREE' : 'PROSPECT';
     await ex('UPDATE tenants SET suspension_motif = NULL WHERE id = :tid', { tid: p.tenant_id }, { transaction: t });
   }
-  await ex('UPDATE prospects SET statut = :s, updated_at = NOW() WHERE id = :id', { s: nouveau, id }, { transaction: t });
+  await ex('UPDATE prospects SET statut = :s, demande_traitee = true, updated_at = NOW() WHERE id = :id', { s: nouveau, id }, { transaction: t });
   await historiser(t, { prospectId: id, ancien: p.statut, nouveau, action: 'CHANGEMENT_STATUT', motif: String(motif).trim(), userId });
   await auditer(t, { tenantId: p.tenant_id, userId, action: 'PROSPECT_STATUT', entiteId: id,
     avant: { statut: p.statut }, apres: { statut: nouveau, motif: String(motif).trim() } });
   return charger(id, t);
 });
+
+// ── Demande de démo depuis la page publique ───────────────────────────────
+// Rien n'est créé côté accès : la demande arrive en PROSPECT « à traiter » et
+// le cabinet décide d'envoyer (ou non) l'accès. Réponse identique dans tous
+// les cas (nouvelle demande, doublon, compte existant) : la page publique ne
+// doit pas permettre de savoir si une adresse est connue.
+const DUREE_DEMO_JOURS = parseInt(process.env.DEMO_DUREE_JOURS, 10) || 14;
+const CHAMPS_WEB = ['nom_complet', 'entreprise', 'email', 'telephone', 'pays', 'ville', 'secteur',
+  'type_entreprise', 'nb_utilisateurs', 'nb_points_vente', 'besoins'];
+
+const notifierCabinet = async (sujet, lignes) => {
+  const dest = process.env.DEMO_NOTIF_EMAIL
+    || (await q("SELECT string_agg(email, ',') AS e FROM users WHERE role = 'super_admin' AND actif AND email LIKE '%@%'"))[0]?.e;
+  if (!dest) return 'aucun_destinataire';
+  return (await email.sendNotificationAdmin({ to: dest, sujet, lignes })).statut;
+};
+
+const demandeWeb = async (corps) => {
+  // Champ piège invisible pour les humains : un robot le remplit.
+  if (String(corps.site_web || '').trim()) return { ok: true };
+  if (corps.consentement !== true) throw new ErreurMetier(400, 'Merci d\'accepter d\'être recontacté(e) par le cabinet.');
+  if (!String(corps.telephone || '').trim()) throw new ErreurMetier(400, 'Le téléphone est obligatoire.');
+  const d = Object.fromEntries(CHAMPS_WEB.filter((c) => corps[c] !== undefined).map((c) => [c, corps[c]]));
+  const debut = new Date();
+  const v = nettoyer({ ...d, demo_debut: debut, demo_fin: new Date(debut.getTime() + DUREE_DEMO_JOURS * 864e5) });
+
+  const res = await sequelize.transaction(async (t) => {
+    const [existant] = await q('SELECT id, statut FROM prospects WHERE lower(btrim(email)) = :m FOR UPDATE',
+      { m: v.email }, { transaction: t });
+    if (existant) {
+      await ex('UPDATE prospects SET demande_web_le = NOW(), demande_traitee = false, updated_at = NOW() WHERE id = :id',
+        { id: existant.id }, { transaction: t });
+      await historiser(t, { prospectId: existant.id, ancien: existant.statut, nouveau: existant.statut,
+        action: 'NOUVELLE_DEMANDE_WEB', details: { message: v.besoins || '', telephone: v.telephone || '' } });
+      return { nouveau: false, statut: existant.statut };
+    }
+    const [compte] = await q('SELECT 1 FROM users WHERE lower(username) = :m OR lower(email) = :m LIMIT 1', { m: v.email }, { transaction: t });
+    if (compte) return { compteExistant: true };
+    const cols = Object.keys(v);
+    const [p] = await q(
+      `INSERT INTO prospects (${cols.join(', ')}, source, demande_web_le, demande_traitee)
+       VALUES (${cols.map((c) => `:${c}`).join(', ')}, 'Formulaire web', NOW(), false) RETURNING id`, v, { transaction: t });
+    await historiser(t, { prospectId: p.id, nouveau: 'PROSPECT', action: 'DEMANDE_WEB' });
+    return { nouveau: true };
+  });
+
+  const qui = `${v.entreprise || v.nom_complet} <${v.email}> — ${v.telephone || ''} ${v.ville || ''}`.trim();
+  const sujet = res.compteExistant ? 'Demande de démo : adresse déjà cliente'
+    : res.nouveau ? 'Nouvelle demande de démonstration' : 'Nouvelle demande d\'un prospect déjà connu';
+  notifierCabinet(sujet, [qui, ...(v.besoins ? [`Besoins : ${v.besoins}`] : []),
+    ...(res.statut ? [`Statut actuel : ${res.statut}`] : []), 'À traiter dans « Prospects & démos ».'])
+    .catch((e) => console.error('[Prospects] notification demande web :', e.message));
+  return { ok: true };
+};
 
 // ── Limite d'utilisateurs d'un espace de démo (users.controller) ──────────
 const verifierLimiteUtilisateursDemo = async (tenantId) => {
@@ -461,18 +526,13 @@ const tachesQuotidiennes = async () => {
     }
   }
   if (expires.length) {
-    const dest = process.env.DEMO_NOTIF_EMAIL
-      || (await q("SELECT string_agg(email, ',') AS e FROM users WHERE role = 'super_admin' AND actif AND email LIKE '%@%'"))[0]?.e;
-    if (dest) {
-      const r = await email.sendNotificationAdmin({ to: dest, sujet: `${expires.length} démonstration(s) expirée(s)`,
-        lignes: expires.map((p) => `${p.entreprise || p.nom_complet} <${p.email}> — fin le ${new Date(p.demo_fin).toLocaleDateString('fr-FR')}`) });
-      bilan.notification_admin = r.statut;
-    }
+    bilan.notification_admin = await notifierCabinet(`${expires.length} démonstration(s) expirée(s)`,
+      expires.map((p) => `${p.entreprise || p.nom_complet} <${p.email}> — fin le ${new Date(p.demo_fin).toLocaleDateString('fr-FR')}`));
   }
   return bilan;
 };
 
 module.exports = {
   STATUTS, ErreurMetier, lister, detail, creer, modifier, inviter, apercuEmail, verifierActivation, activer,
-  prolonger, changerStatut, marquerExpires, tachesQuotidiennes, verifierLimiteUtilisateursDemo,
+  prolonger, changerStatut, marquerExpires, demandeWeb, notifierCabinet, historiser, auditer, charger, CONSERVATION_JOURS, tachesQuotidiennes, verifierLimiteUtilisateursDemo,
 };

@@ -17,6 +17,7 @@ import PlanModelePage from '@/pages/PlanModelePage';
 import PlateformePage from '@/pages/PlateformePage';
 import ProspectsPage from '@/pages/ProspectsPage';
 import ActivationPage from '@/pages/ActivationPage';
+import DemandeDemoPage from '@/pages/DemandeDemoPage';
 import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
 import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
@@ -27,6 +28,8 @@ export default function App() {
   // Lien d'activation d'une démo : page publique, prioritaire sur la session.
   const activation = window.location.pathname.match(/^\/activation\/([A-Za-z0-9_-]+)\/?$/);
   if (activation) return <ActivationPage token={activation[1]} />;
+  // Page publique de demande de démonstration (lien à diffuser).
+  if (/^\/demande-demo\/?$/.test(window.location.pathname)) return <DemandeDemoPage />;
 
   return (
     <>

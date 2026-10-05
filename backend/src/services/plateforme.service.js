@@ -33,7 +33,9 @@ const SQL_CLIENTS = `
          (SELECT COALESCE(json_agg(DISTINCT u.role), '[]') FROM users u WHERE u.tenant_id = t.id) AS roles,
          (SELECT COUNT(*)::int FROM journaux j WHERE j.tenant_id = t.id AND j.actif) AS nb_journaux,
          (SELECT id FROM plan_modele_versions WHERE statut = 'publiee' LIMIT 1) AS version_publiee_id,
-         t.plan_modele_version_id
+         t.plan_modele_version_id,
+         (SELECT row_to_json(x) FROM (SELECT a.forfait_nom, a.date_fin, a.statut FROM abonnements a
+            WHERE a.tenant_id = t.id ORDER BY a.date_fin DESC LIMIT 1) x) AS abonnement
     FROM tenants t
     LEFT JOIN plan_modele_versions v ON v.id = t.plan_modele_version_id`;
 
@@ -42,6 +44,7 @@ const alertes = (c) => {
   if (!c.actif) a.push('Client suspendu');
   if (!c.plan_initialise_le) a.push('Plan comptable non initialisé');
   else if (c.plan_modele_version_id !== c.version_publiee_id) a.push('Plan comptable en retard sur le modèle');
+  if (c.abonnement && c.abonnement.statut === 'expire') a.push('Abonnement échu');
   if (c.nb_utilisateurs_actifs === 0) a.push('Aucun utilisateur actif');
   if (!c.dernier_acces) a.push('Aucune connexion enregistrée');
   else if (Date.now() - new Date(c.dernier_acces).getTime() > 30 * 86400000) a.push('Aucune connexion depuis 30 jours');

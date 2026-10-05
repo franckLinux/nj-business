@@ -59,6 +59,7 @@ export default function LoginPage() {
           <button className="btn-primary" onClick={doLogin} disabled={enCours}>
             {enCours ? 'Connexion…' : 'Se connecter'}
           </button>
+          <p className="login-hint">Pas encore client ? <a href="/demande-demo">Demander une démonstration</a></p>
           <p className="login-hint">Cabinet Expert-Comptable · Zone CEMAC</p>
         </div>
       </div>

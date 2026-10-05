@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
+import { useApp } from '@/context/AppContext';
+import { ConversionProspect, ForfaitsModal, PaiementsProspect, METHODES } from '@/components/CommercialProspect';
 
 // Prospects et comptes de démonstration (réforme prospects).
 // Accès : super_admin, ou membre du cabinet titulaire de « prospects.gerer ».
@@ -22,7 +24,9 @@ const ACTIONS = {
   CREATION: 'Création', MODIFICATION: 'Modification', INVITATION_CREEE: 'Accès de démo créé', INVITATION_RENVOYEE: 'Accès renvoyé',
   EMAIL_ENVOYE: 'E-mail envoyé', EMAIL_RENVOYE: 'E-mail renvoyé', EMAIL_NON_ENVOYE: 'E-mail non envoyé', EMAIL_ADRESSE_INVALIDE: 'Adresse e-mail invalide',
   ACTIVATION: 'Compte activé par le prospect', PROLONGATION: 'Prolongation', EXPIRATION_AUTOMATIQUE: 'Expiration automatique',
-  CHANGEMENT_STATUT: 'Changement de statut', RAPPEL_AVANT: 'Rappel avant échéance', RAPPEL_JOUR: 'Rappel jour d\'échéance', RAPPEL_APRES: 'Rappel après échéance',
+  CHANGEMENT_STATUT: 'Changement de statut', DEMANDE_WEB: 'Demande reçue par le formulaire web',
+  NOUVELLE_DEMANDE_WEB: 'Nouvelle demande via le formulaire web', PAIEMENT_ENREGISTRE: 'Paiement enregistré',
+  PAIEMENT_RECU: 'Réception du paiement confirmée', PAIEMENT_ANNULE: 'Paiement annulé', CONVERSION: 'Conversion en client', RAPPEL_AVANT: 'Rappel avant échéance', RAPPEL_JOUR: 'Rappel jour d\'échéance', RAPPEL_APRES: 'Rappel après échéance',
 };
 // Changements manuels autorisés (miroir de TRANSITIONS côté serveur).
 const TRANSITIONS = {
@@ -192,6 +196,7 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
   const [envoi, setEnvoi] = useState(envoiInitial || null);
   const [prol, setProl] = useState(null);     // { fin, motif }
   const [chg, setChg] = useState(null);       // { statut, motif }
+  const [conversion, setConversion] = useState(false);
   const [enCours, setEnCours] = useState(false);
 
   const charger = useCallback(async () => {
@@ -260,9 +265,12 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
                   {['DEMO_ACTIVE', 'INVITATION_ENVOYEE'].includes(d.statut) && <span style={{ color: joursRestants(d.demo_fin) <= 3 ? '#c2410c' : 'var(--text-muted)' }}> ({joursRestants(d.demo_fin)} j restants)</span>}</div>
                 <div><span style={{ color: 'var(--text-muted)' }}>Identifiant :</span> {d.email}</div>
                 {d.espace && <div><span style={{ color: 'var(--text-muted)' }}>Dernier accès :</span> {dateFr(d.espace.dernier_acces, true)}</div>}
+                {d.source && <div><span style={{ color: 'var(--text-muted)' }}>Source :</span> {d.source}</div>}
+                {!d.demande_traitee && <div style={{ color: '#1d4ed8', fontWeight: 700 }}>🌐 Demande web à traiter (reçue le {dateFr(d.demande_web_le, true)})</div>}
               </div>
               <div className="tabs-header" style={{ marginBottom: 12 }}>
-                {[['infos', 'Informations'], ['historique', `Historique (${d.historique.length})`], ['acces', `Accès (${d.invitations.length})`]].map(([k, l]) => (
+                {[['infos', 'Informations'], ['historique', `Historique (${d.historique.length})`], ['acces', `Accès (${d.invitations.length})`],
+                  ['paiements', `Paiements (${d.paiements.length})`]].map(([k, l]) => (
                   <button key={k} className={`tab-btn${onglet === k ? ' active' : ''}`} onClick={() => setOnglet(k)}>{l}</button>
                 ))}
               </div>
@@ -277,11 +285,17 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
                       <td style={{ fontSize: 11 }}>{h.ancien_statut && h.ancien_statut !== h.nouveau_statut ? `${STATUTS[h.ancien_statut]?.label || h.ancien_statut} → ` : ''}{STATUTS[h.nouveau_statut]?.label || h.nouveau_statut || ''}</td>
                       <td style={{ fontSize: 12 }}>{h.motif}
                         {h.details?.ancienne_fin && <div style={{ color: 'var(--text-muted)' }}>{dateFr(h.details.ancienne_fin)} → {dateFr(h.details.nouvelle_fin)}</div>}
-                        {h.details?.erreur && <div style={{ color: '#b91c1c' }}>{h.details.erreur}</div>}</td>
+                        {h.details?.erreur && <div style={{ color: '#b91c1c' }}>{h.details.erreur}</div>}
+                        {h.details?.montant && <div style={{ color: 'var(--text-muted)' }}>{Number(h.details.montant).toLocaleString('fr-FR')} {h.details.devise || ''} {METHODES[h.details.methode] || ''} {h.details.reference || ''}</div>}
+                        {h.details?.message && <div style={{ color: 'var(--text-muted)' }}>« {h.details.message} »</div>}
+                        {h.action === 'CONVERSION' && <div style={{ color: 'var(--text-muted)' }}>{h.details.client} · {h.details.forfait} · {dateFr(h.details.debut)} → {dateFr(h.details.fin)}</div>}</td>
                       <td style={{ fontSize: 12 }}>{h.auteur || 'système'}</td>
                     </tr>))}</tbody>
                 </table></div>
               )}
+              {onglet === 'paiements' && <PaiementsProspect prospect={d} onChange={() => { charger(); onChange(); }} setErreur={setErreur} />}
+              {conversion && <ConversionProspect prospect={d} onClose={() => setConversion(false)} setErreur={setErreur}
+                onFait={() => { setConversion(false); setErreur(''); charger(); onChange(); }} />}
               {onglet === 'acces' && (
                 <>
                   {d.espace && (
@@ -344,6 +358,10 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
                 <button className="btn-secondary" onClick={() => setProl({ fin: versInput(new Date(Math.max(Date.now(), new Date(d.demo_fin)) + 7 * 864e5)), motif: '' })}>⏱ Prolonger</button>
               )}
               {choix.length > 0 && !chg && <button className="btn-secondary" onClick={() => setChg({ statut: '', motif: '' })}>Changer le statut</button>}
+              {!ferme && !conversion && (
+                <button className="btn-secondary" style={{ borderColor: '#15803d', color: '#15803d', fontWeight: 700 }}
+                  onClick={() => { setConversion(true); setOnglet('paiements'); }}>✓ Convertir en client</button>
+              )}
             </div>
             {onglet === 'infos' && !ferme && <button className="btn-add" onClick={enregistrer}>Enregistrer</button>}
           </div>
@@ -355,9 +373,11 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
 
 // ── Page ───────────────────────────────────────────────────────────────────
 export default function ProspectsPage() {
+  const { user } = useApp();
+  const [forfaitsOuverts, setForfaitsOuverts] = useState(false);
   const [data, setData] = useState(null);
   const [erreur, setErreur] = useState('');
-  const [filtres, setFiltres] = useState({ recherche: '', statut: '', tri: 'created_at', ordre: 'desc', page: 1 });
+  const [filtres, setFiltres] = useState({ recherche: '', statut: '', aTraiter: '', tri: 'created_at', ordre: 'desc', page: 1 });
   const [recherche, setRecherche] = useState('');
   const [nouveau, setNouveau] = useState(false);
   const [detail, setDetail] = useState(null);   // { id, envoi }
@@ -388,15 +408,23 @@ export default function ProspectsPage() {
           <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px' }}>Prospects et démonstrations</h2>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 0 }}>
             Chaque prospect reçoit un espace de test isolé et vide, accessible par un lien d'activation personnel. L'accès se ferme automatiquement à la fin de la période ; rien n'est supprimé sans votre décision.
+            <br />Page publique de demande à diffuser : <code>{window.location.origin}/demande-demo</code>
           </p>
         </div>
-        <button className="btn-add" onClick={() => setNouveau(true)}>+ Nouveau prospect</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-secondary" onClick={() => setForfaitsOuverts(true)}>📦 Forfaits</button>
+          <button className="btn-add" onClick={() => setNouveau(true)}>+ Nouveau prospect</button>
+        </div>
       </div>
 
       {erreur && <div className="alert-err" style={{ marginBottom: 10 }}>{erreur}</div>}
       {data && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-          <button onClick={() => filtrer('statut', '')} className="btn-secondary" style={{ fontWeight: filtres.statut === '' ? 800 : 400 }}>Tous ({totalTous})</button>
+          <button onClick={() => setFiltres((x) => ({ ...x, statut: '', aTraiter: '', page: 1 }))} className="btn-secondary" style={{ fontWeight: filtres.statut === '' && !filtres.aTraiter ? 800 : 400 }}>Tous ({totalTous})</button>
+          <button onClick={() => filtrer('aTraiter', filtres.aTraiter ? '' : '1')} className="btn-secondary"
+            style={{ color: '#1d4ed8', background: filtres.aTraiter ? '#eff6ff' : undefined, fontWeight: filtres.aTraiter || data.a_traiter ? 800 : 400 }}>
+            🌐 Demandes web à traiter ({data.a_traiter || 0})
+          </button>
           {Object.entries(STATUTS).map(([k, s]) => (
             <button key={k} onClick={() => filtrer('statut', filtres.statut === k ? '' : k)} className="btn-secondary"
               style={{ color: s.couleur, background: filtres.statut === k ? s.fond : undefined, fontWeight: filtres.statut === k ? 800 : 400 }}>
@@ -424,7 +452,9 @@ export default function ProspectsPage() {
                 {data.items.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>Aucun prospect.</td></tr>}
                 {data.items.map((p) => (
                   <tr key={p.id} onClick={() => setDetail({ id: p.id })} style={{ cursor: 'pointer' }} title="Voir le détail">
-                    <td style={{ fontWeight: 700 }}>{p.entreprise || p.nom_complet}{p.entreprise && p.nom_complet && <div style={{ fontWeight: 400, fontSize: 12 }}>{p.nom_complet}</div>}</td>
+                    <td style={{ fontWeight: 700 }}>{p.entreprise || p.nom_complet}
+                      {!p.demande_traitee && <span style={{ marginLeft: 6, background: '#eff6ff', color: '#1d4ed8', fontSize: 10, padding: '2px 6px', borderRadius: 10 }}>🌐 À TRAITER</span>}
+                      {p.entreprise && p.nom_complet && <div style={{ fontWeight: 400, fontSize: 12 }}>{p.nom_complet}</div>}</td>
                     <td style={{ fontSize: 12 }}>{p.email}<div style={{ color: 'var(--text-muted)' }}>{p.telephone}</div></td>
                     <td style={{ fontSize: 12 }}>{[p.ville, p.pays].filter(Boolean).join(', ') || '—'}</td>
                     <td><BadgeStatut statut={p.statut} /></td>
@@ -447,6 +477,7 @@ export default function ProspectsPage() {
           )}
         </>
       )}
+      {forfaitsOuverts && <ForfaitsModal modifiable={user?.role === 'super_admin'} onClose={() => setForfaitsOuverts(false)} />}
       {nouveau && <NouveauProspect onClose={() => setNouveau(false)} onCree={(id, envoi) => { setNouveau(false); charger(); setDetail({ id, envoi }); }} />}
       {detail && <DetailProspect key={detail.id} id={detail.id} envoiInitial={detail.envoi} onClose={() => setDetail(null)} onChange={charger} />}
     </>
