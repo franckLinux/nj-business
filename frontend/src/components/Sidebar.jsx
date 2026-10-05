@@ -10,7 +10,9 @@ const navClass = ({ isActive }) => 'nav-item' + (isActive ? ' active' : '');
 const subClass = ({ isActive }) => 'nav-item nav-sub' + (isActive ? ' active' : '');
 
 export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
-  const { user, isAdmin, peutVoirAttente, journauxGrouped, logout, can } = useApp();
+  const { user, isAdmin, peutVoirAttente, journauxGrouped, logout, can, activeTenantId } = useApp();
+  // super_admin sans client choisi : uniquement l'administration plateforme.
+  const sansClient = user?.role === 'super_admin' && !activeTenantId;
   const voit = (path) => peut(can, PAGE_PERMS[path]);
   const navigate = useNavigate();
   const location = useLocation();
@@ -34,10 +36,12 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
       </div>
 
       <nav className="sidebar-nav" id="sidebar-nav">
+{user?.role !== 'super_admin' && (
         <NavLink to="/" end className={navClass}>
           <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
           Tableau de bord
         </NavLink>
+        )}
 
         {voitConfiguration(user, can) && (
         <NavLink to="/config" className={navClass}>
@@ -46,7 +50,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
         </NavLink>
         )}
 
-        {peutVoirAttente && (
+        {peutVoirAttente && !sansClient && (
           <NavLink to="/attente" className={navClass}>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg>
             <span style={{ flex: 1 }}>Dépenses en attente</span>
@@ -56,6 +60,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
           </NavLink>
         )}
 
+        {!sansClient && (<>
         <div className="nav-sep" />
         <div className="nav-label">Activités</div>
 
@@ -137,6 +142,8 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0 }) {
           )}
         </NavGroup>
         )}
+
+        </>)}
 
         {isAdmin && (
           <>

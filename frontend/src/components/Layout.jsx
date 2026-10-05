@@ -40,9 +40,12 @@ export default function Layout() {
   // Les écrans d'administration plateforme ne dépendent d'aucun client : on
   // n'y impose pas le choix d'un client.
   const pageSansClient = ['/plan-modele', '/tenants', '/permissions', '/plateforme'].includes(location.pathname);
+  // Le super_admin administre la plateforme : il n'est plus forcé à choisir
+  // un client (il en choisit un via le badge du haut ou la fiche client).
+  // Le comptable cabinet, lui, travaille toujours DANS un client.
   useEffect(() => {
-    if (isAdmin && !user?.tenantId && !activeTenantId && !pageSansClient) openTenantSelector();
-  }, [isAdmin, user, activeTenantId, openTenantSelector, pageSansClient]);
+    if (user?.role === 'comptable_cabinet' && !user?.tenantId && !activeTenantId && !pageSansClient) openTenantSelector();
+  }, [user, activeTenantId, openTenantSelector, pageSansClient]);
 
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
   let title = TITLES[location.pathname] || 'Tableau de bord';

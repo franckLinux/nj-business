@@ -43,11 +43,16 @@ function Autorise({ code, ok, children }) {
 }
 
 function AuthenticatedApp() {
-  const { user, can } = useApp();
+  const { user, can, activeTenantId } = useApp();
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<DashboardPage />} />
+        {/* Accueil du super_admin : l'administration (plateforme, ou configuration
+            du client choisi) — jamais directement les données de caisse, qui
+            demandent un accès support (voir middleware/tenant.js). */}
+        <Route index element={user?.role === 'super_admin'
+          ? <Navigate to={activeTenantId ? '/config' : '/plateforme'} replace />
+          : <DashboardPage />} />
         <Route path="journal/:id"    element={<Autorise code="journal.view"><JournalPage /></Autorise>} />
         <Route path="journaux-recap" element={<Autorise code={PAGE_PERMS['/journaux-recap']}><JournauxRecapPage /></Autorise>} />
         <Route path="budget"         element={<Autorise code={PAGE_PERMS['/budget']}><BudgetPage /></Autorise>} />
