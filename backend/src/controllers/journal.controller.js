@@ -294,7 +294,9 @@ const setRan = async (req, res) => {
       // ICI, pas par le frontend.
       const journal = await Journal.findOne({ where: { id: journalId, tenant_id: req.tenantId }, attributes: ['id', 'type'], raw: true });
       if (!journal) return res.status(404).json({ error: 'Journal introuvable pour ce client.' });
-      if (journal.type === 'banque') return res.status(400).json({ error: 'Le RAN d\'un journal banque se gère dans le rapprochement bancaire.' });
+      // Journal banque : RAN saisi comme pour les autres journaux (solde
+      // d'ouverture du compte). Il n'existe pas d'écran de rapprochement
+      // bancaire : l'ancien blocage renvoyait vers une fonction inexistante.
       typeCaisse = typeCaisseDuJournal(journal.type);
 
       // Un solde d'ouverture ne se modifie plus après l'arrêt de caisse.
