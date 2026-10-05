@@ -76,7 +76,12 @@ self.addEventListener('fetch', (event) => {
 
 const networkFirstPage = async (request) => {
   try {
-    const networkResponse = await fetch(request);
+    let networkResponse = await fetch(request);
+    // Route React (/demande-demo, /activation/…, /prospects…) inconnue du
+    // serveur statique : on sert l'application (index.html), qui affiche la page.
+    if (request.mode === 'navigate' && networkResponse.status === 404) {
+      networkResponse = await fetch('/', { cache: 'no-store' });
+    }
     if (networkResponse.ok) {
       const cache = await caches.open(CACHE_STATIC);
       cache.put(request.mode === 'navigate' ? '/' : request, networkResponse.clone());
