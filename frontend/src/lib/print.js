@@ -510,53 +510,17 @@ export function htmlBonCaisse(m) {
   const coord = [m.tenant_adresse, m.tenant_bp && `BP ${m.tenant_bp}`, m.tenant_nui && `NUI ${m.tenant_nui}`, m.tenant_rc && `RC ${m.tenant_rc}`]
     .filter(Boolean).map(esc).join(' · ');
 
-  return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Bon ${num}</title>
-<style>
-@page{size:A5 portrait;margin:8mm}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;font-size:10.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f1f5f9}
-.bon{position:relative;width:132mm;min-height:190mm;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
-@media screen{body{padding:18px}.bon{box-shadow:0 10px 30px rgba(15,23,42,.15)}}
-@media print{body{background:#fff}.bon{border:none;border-radius:0;width:auto;min-height:180mm;box-shadow:none}.noprint{display:none}}
-.top{height:6px;background:${accent}}
-.head{display:flex;justify-content:space-between;align-items:flex-start;padding:12px 16px 10px;border-bottom:1px dashed #cbd5e1;gap:10px}
-.org b{display:block;font-size:13px;font-weight:800;letter-spacing:.2px}
-.org small{display:block;color:#64748b;font-size:8.5px;margin-top:2px;line-height:1.4}
-.org img{max-height:34px;max-width:90px;margin-bottom:4px}
-.stamp{text-align:right;white-space:nowrap}
-.stamp .no{font-size:15px;font-weight:900;color:${accent};font-family:'Consolas',monospace;letter-spacing:.5px}
-.stamp .tag{display:inline-block;margin-top:4px;padding:2px 8px;border-radius:20px;font-size:8.5px;font-weight:800;letter-spacing:1px;
-  ${duplicata ? 'background:#fff7ed;color:#c2410c;border:1px solid #fdba74' : `background:${accentClair};color:${accent};border:1px solid ${accent}55`}}
-.title{padding:12px 16px 4px}
-.title h1{font-size:17px;font-weight:900;letter-spacing:1.2px;color:${accent}}
-.title p{color:#64748b;font-size:9.5px;margin-top:2px}
-.meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;padding:8px 16px 4px}
-.meta div span{display:block;color:#94a3b8;font-size:8px;text-transform:uppercase;letter-spacing:.8px}
-.meta div b{font-size:10.5px}
-.amount{margin:10px 16px;border-radius:10px;background:${accentClair};border:1.5px solid ${accent}40;padding:12px 14px}
-.amount .lbl{font-size:8px;text-transform:uppercase;letter-spacing:1px;color:${accent};font-weight:800}
-.amount .val{font-size:26px;font-weight:900;color:${accent};font-family:'Consolas',monospace;margin-top:2px}
-.amount .val small{font-size:12px;font-weight:700;margin-left:4px}
-.amount .words{margin-top:6px;padding-top:6px;border-top:1px dashed ${accent}55;font-style:italic;font-size:10px;color:#334155}
-.fields{padding:2px 16px}
-.f{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #f1f5f9}
-.f span{width:34%;flex-shrink:0;color:#64748b;font-size:9.5px}
-.f b{font-weight:600;font-size:10.5px;word-break:break-word}
-.sign{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 16px 6px;margin-top:auto}
-.sign div{border:1px solid #e2e8f0;border-radius:8px;height:64px;padding:5px 7px;font-size:8.5px;color:#64748b;display:flex;flex-direction:column;justify-content:space-between}
-.sign div b{color:#0f172a;font-size:9px}
-.sign div i{font-style:normal;font-size:8px;color:#94a3b8;border-top:1px dotted #cbd5e1;padding-top:2px}
-.foot{display:flex;justify-content:space-between;padding:7px 16px 10px;color:#94a3b8;font-size:7.5px;border-top:1px solid #f1f5f9}
-.wm{position:absolute;top:44%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:58px;font-weight:900;letter-spacing:6px;color:rgba(185,28,28,.12);border:6px solid rgba(185,28,28,.12);padding:4px 18px;border-radius:12px;pointer-events:none}
-.wm2{position:absolute;top:44%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:46px;font-weight:900;letter-spacing:6px;color:rgba(194,65,12,.08);pointer-events:none}
-.bar{max-width:132mm;margin:0 auto 12px;display:flex;gap:8px;justify-content:flex-end}
-@media print{.bar{display:none!important}}
-.bar button{border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:12px}
-</style></head><body>
-<div class="bar noprint"><button style="background:#e2e8f0" onclick="window.close()">Fermer</button><button style="background:${accent};color:#fff" onclick="window.print()">🖨️ Imprimer</button></div>
-<div class="bon">
+  // Deux exemplaires identiques sur une feuille A4 paysage, à signer tous
+  // les deux : l'un reste à la caisse (pièce justificative), l'autre est remis
+  // au tiers (déposant pour une entrée, bénéficiaire pour une sortie).
+  const EXEMPLAIRES = [
+    { n: 1, dest: estAnnulation ? 'CAISSE — pièce à classer' : 'CAISSE — pièce justificative à classer' },
+    { n: 2, dest: estAnnulation ? 'DIRECTION / CONTRÔLE' : estEntree ? 'DÉPOSANT — à conserver' : 'BÉNÉFICIAIRE — à conserver' },
+  ];
+  const bon = (ex) => `<div class="bon">
   ${m.annule ? '<div class="wm">ANNULÉ</div>' : duplicata ? '<div class="wm2">DUPLICATA</div>' : ''}
   <div class="top"></div>
+  <div class="ex"><span>EXEMPLAIRE ${ex.n}/2</span><b>${ex.dest}</b></div>
   <div class="head">
     <div class="org">${m.tenant_logo ? `<img src="${esc(m.tenant_logo)}" alt="">` : ''}<b>${esc(m.tenant_nom || '')}${m.tenant_sigle ? ` <span style="color:#64748b;font-weight:600">(${esc(m.tenant_sigle)})</span>` : ''}</b>${coord ? `<small>${coord}</small>` : ''}</div>
     <div class="stamp"><div style="font-size:8px;color:#94a3b8;letter-spacing:1px">N° DE PIÈCE</div><div class="no">${num}</div>
@@ -588,7 +552,58 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;font-size:10.5px;-web
     <div><b>Directeur / Visa</b><i>${esc(m.directeur_nom || '')}</i></div>
   </div>
   <div class="foot"><span>Saisi par ${esc(m.saisi_par || '—')} · écriture n°${esc(m.numero)}</span><span>Imprimé le ${imprimeLe} par ${esc(m.imprime_par || '')}</span></div>
-</div>
+</div>`;
+  return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Bon ${num}</title>
+<style>
+@page{size:A4 landscape;margin:6mm}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;font-size:10.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f1f5f9}
+.sheet{display:flex;justify-content:center;align-items:stretch;gap:0;margin:0 auto}
+.cut{width:9mm;flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center}
+.cut:before{content:'';position:absolute;top:0;bottom:0;left:50%;border-left:1.5px dashed #94a3b8}
+.cut span{position:relative;background:#f1f5f9;color:#64748b;font-size:14px;padding:4px 0;transform:rotate(90deg)}
+.ex{display:flex;justify-content:space-between;align-items:center;padding:4px 16px;background:#0f172a;color:#fff;font-size:8px;letter-spacing:1.2px}
+.ex span{opacity:.7;font-weight:700}.ex b{font-size:8.5px;letter-spacing:1px}
+.bon{position:relative;width:138mm;min-height:190mm;margin:0;background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+@media screen{body{padding:18px}.bon{box-shadow:0 10px 30px rgba(15,23,42,.15)}}
+@media print{body{background:#fff}.bon{border:1px solid #cbd5e1;border-radius:6px;width:138mm;min-height:192mm;box-shadow:none}.cut span{background:#fff}.noprint{display:none}}
+.top{height:6px;background:${accent}}
+.head{display:flex;justify-content:space-between;align-items:flex-start;padding:12px 16px 10px;border-bottom:1px dashed #cbd5e1;gap:10px}
+.org b{display:block;font-size:13px;font-weight:800;letter-spacing:.2px}
+.org small{display:block;color:#64748b;font-size:8.5px;margin-top:2px;line-height:1.4}
+.org img{max-height:34px;max-width:90px;margin-bottom:4px}
+.stamp{text-align:right;white-space:nowrap}
+.stamp .no{font-size:15px;font-weight:900;color:${accent};font-family:'Consolas',monospace;letter-spacing:.5px}
+.stamp .tag{display:inline-block;margin-top:4px;padding:2px 8px;border-radius:20px;font-size:8.5px;font-weight:800;letter-spacing:1px;
+  ${duplicata ? 'background:#fff7ed;color:#c2410c;border:1px solid #fdba74' : `background:${accentClair};color:${accent};border:1px solid ${accent}55`}}
+.title{padding:12px 16px 4px}
+.title h1{font-size:17px;font-weight:900;letter-spacing:1.2px;color:${accent}}
+.title p{color:#64748b;font-size:9.5px;margin-top:2px}
+.meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;padding:8px 16px 4px}
+.meta div span{display:block;color:#94a3b8;font-size:8px;text-transform:uppercase;letter-spacing:.8px}
+.meta div b{font-size:10.5px}
+.amount{margin:10px 16px;border-radius:10px;background:${accentClair};border:1.5px solid ${accent}40;padding:12px 14px}
+.amount .lbl{font-size:8px;text-transform:uppercase;letter-spacing:1px;color:${accent};font-weight:800}
+.amount .val{font-size:26px;font-weight:900;color:${accent};font-family:'Consolas',monospace;margin-top:2px}
+.amount .val small{font-size:12px;font-weight:700;margin-left:4px}
+.amount .words{margin-top:6px;padding-top:6px;border-top:1px dashed ${accent}55;font-style:italic;font-size:10px;color:#334155}
+.fields{padding:2px 16px}
+.f{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #f1f5f9}
+.f span{width:34%;flex-shrink:0;color:#64748b;font-size:9.5px}
+.f b{font-weight:600;font-size:10.5px;word-break:break-word}
+.sign{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 16px 6px;margin-top:auto}
+.sign div{border:1px solid #e2e8f0;border-radius:8px;height:64px;padding:5px 7px;font-size:8.5px;color:#64748b;display:flex;flex-direction:column;justify-content:space-between}
+.sign div b{color:#0f172a;font-size:9px}
+.sign div i{font-style:normal;font-size:8px;color:#94a3b8;border-top:1px dotted #cbd5e1;padding-top:2px}
+.foot{display:flex;justify-content:space-between;padding:7px 16px 10px;color:#94a3b8;font-size:7.5px;border-top:1px solid #f1f5f9}
+.wm{position:absolute;top:44%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:58px;font-weight:900;letter-spacing:6px;color:rgba(185,28,28,.12);border:6px solid rgba(185,28,28,.12);padding:4px 18px;border-radius:12px;pointer-events:none}
+.wm2{position:absolute;top:44%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:46px;font-weight:900;letter-spacing:6px;color:rgba(194,65,12,.08);pointer-events:none}
+.bar{max-width:285mm;margin:0 auto 12px;display:flex;gap:8px;justify-content:flex-end}
+@media print{.bar{display:none!important}}
+.bar button{border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:12px}
+</style></head><body>
+<div class="bar noprint"><button style="background:#e2e8f0" onclick="window.close()">Fermer</button><button style="background:${accent};color:#fff" onclick="window.print()">🖨️ Imprimer</button></div>
+<div class="sheet">${bon(EXEMPLAIRES[0])}<div class="cut" aria-hidden="true"><span>✂</span></div>${bon(EXEMPLAIRES[1])}</div>
 <script>window.onload=function(){setTimeout(function(){window.print()},350)}</script>
 </body></html>`;
 }

@@ -26,7 +26,7 @@ export function BoutonBon({ m, toast, onDone }) {
     <button
       className="btn-bon"
       disabled={busy}
-      title={deja ? `Réimprimer le bon (duplicata — déjà imprimé ${m.nb_impressions} fois)` : 'Imprimer le bon de caisse (original)'}
+      title={deja ? `Réimprimer le bon (duplicata — déjà imprimé ${m.nb_impressions} fois)` : 'Imprimer le bon de caisse (original, 2 exemplaires)'}
       onClick={async () => { setBusy(true); const ok = await imprimerBon(m.id, toast); setBusy(false); if (ok) onDone?.(); }}
     >
       <span aria-hidden>🖨️</span>{deja && <i>{m.nb_impressions}</i>}
@@ -56,7 +56,7 @@ export function BonPretModal({ m, devise, onClose, onNouvelle, onDone, toast }) 
         <div className="bonpret-lib">{m.intitule}</div>
         {m.beneficiaire && <div className="bonpret-ben">{entree ? 'Versé par' : 'Bénéficiaire'} : {m.beneficiaire}</div>}
         <button className="bonpret-print" onClick={imprimer} disabled={busy} autoFocus>
-          <span>🖨️</span>{busy ? 'Préparation…' : `Imprimer le bon ${entree ? "d'entrée" : 'de sortie'}`}
+          <span>🖨️</span>{busy ? 'Préparation…' : `Imprimer le bon ${entree ? "d'entrée" : 'de sortie'} · 2 exemplaires`}
         </button>
         <div className="bonpret-actions">
           <button onClick={onNouvelle}>＋ Nouvelle saisie</button>
