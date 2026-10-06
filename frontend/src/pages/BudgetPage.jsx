@@ -74,9 +74,10 @@ export default function BudgetPage() {
 
   const onValider = async (statut) => {
     const commentaire = window.prompt(`Commentaire (optionnel) pour : ${statut}`) || '';
-    const res = await api.post('/budget/validation', { mois, annee, statut, commentaire });
+    // Clé = mois de SAISIE du budget applicable affiché (et non le mois consulté).
+    const res = await api.post('/budget/validation', { mois: budgetData?.mois_saisie || mois, annee: budgetData?.annee_saisie || annee, statut, commentaire });
     if (res.error) { toast(res.error, 'error'); return; }
-    toast(`Budget ${statut} ✓`, 'success');
+    toast(res.message || `Budget ${statut} ✓`, 'success');
     charger();
   };
 

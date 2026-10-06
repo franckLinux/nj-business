@@ -289,6 +289,41 @@ const mettreEnAttente = async ({ tenantId, userId, username }, m, motif, snap) =
   return row;
 };
 
+// ── Budget APPROUVÉ d'un mois de dépense (source unique) ──────────────────
+// La demande de fonds du mois M-1 porte les prévisions (table budget,
+// mois_applic = M) ; le directeur la valide (budget_validation sur le mois de
+// SAISIE). Le budget approuvé du mois M = ces prévisions, et UNIQUEMENT pour
+// le mois M (mois_applic), dès que leur mois de saisie est « valide ».
+// Repli : anciennes demandes de fonds (table appel_fonds) approuvées.
+// Renvoie { valide, source, parRubrique: Map(code → montant), saisie: {mois, annee} | null }.
+const budgetApprouve = async (tenantId, mois, annee) => {
+  const seq = Mouvement.sequelize;
+  const rows = await seq.query(`
+    SELECT b.rubrique_code, SUM(b.montant) AS montant, MIN(b.mois) AS mois_saisie, MIN(b.annee) AS annee_saisie
+      FROM budget b
+      JOIN budget_validation v ON v.tenant_id = b.tenant_id AND v.mois = b.mois AND v.annee = b.annee AND v.statut = 'valide'
+     WHERE b.tenant_id = :t AND b.mois_applic = :m AND b.annee_applic = :a
+     GROUP BY b.rubrique_code`,
+  { replacements: { t: tenantId, m: mois, a: Number(annee) }, type: QueryTypes.SELECT });
+  if (rows.length) {
+    return {
+      valide: true, source: 'demande_de_fonds',
+      parRubrique: new Map(rows.map((r) => [r.rubrique_code, parseFloat(r.montant) || 0])),
+      saisie: { mois: rows[0].mois_saisie, annee: Number(rows[0].annee_saisie) },
+    };
+  }
+  const anciens = await AppelFonds.findAll({
+    where: { tenant_id: tenantId, mois_cible: mois, annee_cible: Number(annee), statut: { [Op.in]: ['approuve', 'partiellement_approuve'] } },
+    attributes: ['rubrique_code', [seq.fn('COALESCE', seq.fn('SUM', seq.col('montant_approuve')), 0), 'v']],
+    group: ['rubrique_code'], raw: true,
+  });
+  return {
+    valide: anciens.length > 0, source: anciens.length ? 'appel_fonds' : null,
+    parRubrique: new Map(anciens.map((r) => [r.rubrique_code, parseFloat(r.v) || 0])),
+    saisie: null,
+  };
+};
+
 // ── Contrôle budgétaire d'une SORTIE (RG-03 / RG-06 / RG-04) ──────────────
 // Priorité : mois non validé → plafond journal → montant prévu rubrique.
 // Retourne { bloque, motif, message, plafond, montant_prevu, cumul, warning }.
@@ -308,16 +343,20 @@ const controleBudgetSortie = async (tenantId, p) => {
   const sortiesRubriqueWhere = { tenant_id: tenantId, mois: p.mois, annee: an, rubrique_code: p.rubrique_code };
   if (hasExcl) sortiesRubriqueWhere.id = { [Op.ne]: exclId };
 
-  const [approuveVal, srVal] = await Promise.all([
-    AppelFonds.sum('montant_approuve', {
-      where: {
-        tenant_id: tenantId, rubrique_code: p.rubrique_code,
-        mois_cible: p.mois, annee_cible: an,
-        statut: { [Op.in]: ['approuve', 'partiellement_approuve'] },
-      },
-    }),
+  // Virement interne entre caisses (rubrique marquée « virement interne ») :
+  // ce n'est pas une dépense, il n'entre pas dans le budget.
+  const [rub] = await Mouvement.sequelize.query(
+    'SELECT est_virement_interne FROM rubriques WHERE tenant_id = :t AND code = :c LIMIT 1',
+    { replacements: { t: tenantId, c: p.rubrique_code }, type: QueryTypes.SELECT });
+  if (rub && rub.est_virement_interne) {
+    return { bloque: false, motif: null, montant_prevu: 0, cumul: 0, plafond: 0, warning: null };
+  }
+
+  const [budget, srVal] = await Promise.all([
+    budgetApprouve(tenantId, p.mois, an),
     Mouvement.sum('sortie', { where: sortiesRubriqueWhere }),
   ]);
+  const approuveVal = budget.parRubrique.get(p.rubrique_code) || 0;
 
   // Plafond du journal (budget_caisse) — requête SÉPARÉE et tolérante :
   // un souci sur cette table (ex. schéma) ne doit pas faire tomber tout le contrôle.
@@ -343,6 +382,10 @@ const controleBudgetSortie = async (tenantId, p) => {
 
   // ── CŒUR · Budget de la rubrique = montant approuvé (demande de fonds) ────
   // 1. Rubrique sans budget approuvé → dépense non prévue → blocage.
+  if (!budget.valide) {
+    return { bloque: true, motif: 'mois_non_valide', montant_prevu: 0, cumul: sr, plafond,
+      message: `la demande de fonds pour ${p.mois} ${an} n'est pas encore validée par le directeur. Sortie mise en attente : le directeur doit l'autoriser.` };
+  }
   if (approuve <= 0) {
     return { bloque: true, motif: 'rubrique_non_approuvee', montant_prevu: 0, cumul: sr, plafond,
       message: `la rubrique "${p.rubrique_code}" n'a pas de budget approuvé dans la demande de fonds de ${p.mois} ${an}. Sortie mise en attente : le directeur doit l'autoriser.` };
@@ -410,6 +453,7 @@ const situationJournaux = async (tenantId, mois, annee, journaux) => {
 };
 
 module.exports = {
+  budgetApprouve,
   situationJournaux, soldesJournaux, soldeJournal, verifierPeriodeOuverte, verifierSoldeNonNegatif,
   ErreurComptable, cle, SQL_CLE, filtreOuverture,
   MOIS, moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,

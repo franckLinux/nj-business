@@ -8,7 +8,7 @@ const { sequelize, Mouvement, Journal, Rubrique, ArretCaisse, User, BudgetCaisse
 const {
   moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
   typeCaisseDuJournal, enregistrerRan, situationJournaux, MOIS: MOIS_VALIDES,
-  mettreEnAttente, controleBudgetSortie,
+  mettreEnAttente, controleBudgetSortie, budgetApprouve,
   verifierPeriodeOuverte, verifierSoldeNonNegatif, soldeJournal, ErreurComptable, cle, SQL_CLE, filtreOuverture,
 } = require('../services/journal.service');
 
@@ -482,11 +482,7 @@ const getControleContext = async (req, res) => {
     const [plafondVal, sjVal, apprRows, srRows] = await Promise.all([
       plafondPromise,
       sjPromise,
-      AppelFonds.findAll({
-        where: { tenant_id: req.tenantId, mois_cible: mois, annee_cible: an, statut: { [Op.in]: ['approuve', 'partiellement_approuve'] } },
-        attributes: ['rubrique_code', [fn('COALESCE', fn('SUM', col('montant_approuve')), 0), 'v']],
-        group: ['rubrique_code'], raw: true,
-      }),
+      budgetApprouve(req.tenantId, mois, an),
       Mouvement.findAll({
         where: { tenant_id: req.tenantId, mois, annee: an },
         attributes: ['rubrique_code', [fn('COALESCE', fn('SUM', col('sortie')), 0), 'v']],
@@ -494,8 +490,8 @@ const getControleContext = async (req, res) => {
       }),
     ]);
 
-    const approuve_by_rubrique = {};
-    apprRows.forEach(r => { approuve_by_rubrique[r.rubrique_code] = parseFloat(r.v) || 0; });
+    // Même source que le contrôle serveur (demande de fonds validée du mois).
+    const approuve_by_rubrique = Object.fromEntries(apprRows.parRubrique);
     const sorties_by_rubrique  = {};
     srRows.forEach(r  => { sorties_by_rubrique[r.rubrique_code] = parseFloat(r.v) || 0; });
 
@@ -504,6 +500,7 @@ const getControleContext = async (req, res) => {
       plafond:            parseFloat(plafondVal) || 0,
       sorties_journal:    parseFloat(sjVal) || 0,
       approuve_by_rubrique,
+      budget_valide: apprRows.valide,
       sorties_by_rubrique,
       cached_at: new Date().toISOString(),
     });

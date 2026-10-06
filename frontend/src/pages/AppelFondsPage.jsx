@@ -82,9 +82,11 @@ export default function AppelFondsPage() {
 
   const onStatut = async (statut) => {
     const commentaire = statut === 'valide' ? '' : (window.prompt('Commentaire (optionnel) :') || '');
-    const res = await api.post('/budget/validation', { mois, annee, statut, commentaire });
+    // La validation porte sur le mois de SAISIE de la demande ; le budget
+    // s'applique au mois cible (affiché), et à lui seul.
+    const res = await api.post('/budget/validation', { mois: s.mois_saisie || mois, annee: s.annee_saisie || annee, statut, commentaire });
     if (res.error) { toast(res.error, 'error'); return; }
-    toast(`Demande ${statut === 'valide' ? 'approuvée' : statut} ✓`, 'success');
+    toast(res.message || `Demande ${statut === 'valide' ? 'approuvée' : statut} ✓`, 'success');
     charger();
   };
 

@@ -116,6 +116,8 @@ const getSynthese = async (req, res) => {
       prevision:          prevRows,
       total_prevision,
       validation,
+      // Clé de la validation : mois de SAISIE de la demande (à renvoyer tel quel).
+      mois_saisie: moisSaisie, annee_saisie: anneeSaisie,
       tresorerie_disponible,
       besoin,
       excedent,

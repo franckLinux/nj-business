@@ -55,6 +55,16 @@ const getBudget = async (req, res) => {
   }
 };
 
+// Une demande de fonds VALIDÉE est figée : ses montants sont le budget de la
+// caisse pour le mois d'application. Pour la modifier, le directeur la remet
+// « en attente » (réouverture tracée), puis la revalide.
+const demandeFigee = async (tenantId, mois, annee) => {
+  const v = await BudgetValidation.findOne({ where: { tenant_id: tenantId, mois, annee: parseInt(annee, 10) }, attributes: ['statut'], raw: true });
+  return v?.statut === 'valide';
+};
+const MSG_FIGEE = (mois, annee) => `La demande de fonds de ${mois} ${annee} est validée par le directeur : elle ne peut plus être modifiée. `
+  + 'Le directeur doit d\'abord la remettre « en attente ».';
+
 // ── PUT /api/budget ───────────────────────────────────────────────────────
 const setBudgetLine = async (req, res) => {
   const { mois, annee, rubrique_code, intitule, montant, mois_applic, annee_applic } = req.body;
@@ -62,6 +72,7 @@ const setBudgetLine = async (req, res) => {
     return res.status(400).json({ error: 'Champs obligatoires manquants.' });
   }
   try {
+    if (await demandeFigee(req.tenantId, mois, annee)) return res.status(409).json({ error: MSG_FIGEE(mois, annee) });
     await sequelize.transaction(async (t) => {
       const [row] = await Budget.findOrCreate({
         where: { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), rubrique_code },
@@ -84,6 +95,15 @@ const setBudgetLine = async (req, res) => {
 const setValidation = async (req, res) => {
   const { mois, annee, statut, commentaire } = req.body;
   try {
+    // Valider = approuver les prévisions saisies ce mois-ci pour le mois
+    // suivant : il faut qu'il y en ait (sinon la caisse resterait bloquée
+    // alors que la notification annonce une validation).
+    if (statut === 'valide') {
+      const n = await Budget.count({ where: { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), mois_applic: { [Op.ne]: '' } } });
+      if (n === 0) {
+        return res.status(409).json({ error: `Aucune prévision de dépenses n'est saisie dans la demande de fonds de ${mois} ${annee} : rien à valider.` });
+      }
+    }
     await sequelize.transaction(async (t) => {
       const [row] = await BudgetValidation.findOrCreate({
         where: { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10) },
@@ -95,8 +115,24 @@ const setValidation = async (req, res) => {
       row.validated_by = req.user.id;
       row.validated_at = new Date();
       await row.save({ transaction: t });
+      await sequelize.query(
+        `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+         VALUES (:t, :u, :a, 'budget_validation', :id, CAST(:v AS jsonb))`,
+        { replacements: { t: req.tenantId, u: req.user.id, a: `DEMANDE_FONDS_${String(statut).toUpperCase()}`, id: `${mois}-${annee}`,
+          v: JSON.stringify({ mois, annee, statut, commentaire: commentaire || '' }) }, transaction: t });
     });
-    res.json({ message: `Budget ${statut}.` });
+    // Mois sur lequel ce budget s'applique (et seulement celui-là).
+    const cible = await Budget.findOne({
+      where: { tenant_id: req.tenantId, mois, annee: parseInt(annee, 10), mois_applic: { [Op.ne]: '' } },
+      attributes: ['mois_applic', 'annee_applic'], raw: true,
+    });
+    const pour = cible ? `${cible.mois_applic} ${cible.annee_applic}` : '';
+    const messages = {
+      valide: `Demande de fonds validée : le budget s'applique à la caisse pour ${pour}.`,
+      rejete: `Demande de fonds rejetée : aucun budget ouvert pour ${pour}.`,
+      en_attente: `Demande de fonds remise en attente : le budget de ${pour} est suspendu et les prévisions sont de nouveau modifiables.`,
+    };
+    res.json({ message: messages[statut] || `Budget ${statut}.`, mois_applic: cible?.mois_applic || null, annee_applic: cible?.annee_applic || null });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
@@ -118,6 +154,8 @@ const addDepenseAttente = async (req, res) => {
 // ── DELETE /api/budget/:id ────────────────────────────────────────────────
 const deleteBudgetLine = async (req, res) => {
   try {
+    const ligne = await Budget.findOne({ where: { id: req.params.id, tenant_id: req.tenantId }, attributes: ['mois', 'annee'], raw: true });
+    if (ligne && await demandeFigee(req.tenantId, ligne.mois, ligne.annee)) return res.status(409).json({ error: MSG_FIGEE(ligne.mois, ligne.annee) });
     await Budget.destroy({ where: { id: req.params.id, tenant_id: req.tenantId } });
     res.json({ message: 'Ligne budget supprimée.' });
   } catch (err) {

@@ -81,34 +81,11 @@ const updateStatut = async (req, res) => {
     if (count === 0) return res.status(404).json({ error: 'Appel de fonds introuvable.' });
     const af = rows[0];
 
-    // ── Lien automatique vers budget_validation (RG-03) ───────────────────
-    // Seule une demande de fonds "approuve" valide le mois de DÉPENSE (mois_cible),
-    // ce qui ouvre la saisie caisse pour toutes les rubriques de ce mois.
-    // "partiellement_approuve" ne valide PAS le mois ; "rejete" le marque rejeté.
-    // La clé pointe sur (mois_cible, annee_cible) — le mois de la dépense —
-    // afin que le contrôle caisse (journal.mois) retrouve la bonne ligne.
-    // Best-effort et ISOLÉ de la mise à jour principale : un souci sur cette
-    // liaison ne doit jamais faire échouer/annuler l'approbation elle-même.
-    if (statut === 'approuve' || statut === 'rejete') {
-      try {
-        await sequelize.transaction(async (t) => {
-          const valStatut = statut === 'rejete' ? 'rejete' : 'valide';
-          const [bv] = await BudgetValidation.findOrCreate({
-            where: { tenant_id: req.tenantId, mois: af.mois_cible, annee: af.annee_cible },
-            defaults: {}, transaction: t, lock: t.LOCK.UPDATE,
-          });
-          bv.statut = valStatut;
-          bv.commentaire = `Validation automatique — demande de fonds ${af.mois_cible} ${af.annee_cible} (réf. #${af.id})`;
-          bv.validated_by = req.user.id;
-          bv.validated_at = new Date();
-          await bv.save({ transaction: t });
-        });
-      } catch (bvErr) {
-        console.warn('[AppelFonds] budget_validation auto :', bvErr.message);
-      }
-    }
-
-    res.json({ ...af.toJSON(), budget_validation_liee: true });
+    // Ancien circuit « appel de fonds » : l'approbation suffit (lue en repli par
+    // budgetApprouve). Elle n'écrit PLUS dans budget_validation, dont la clé est
+    // le mois de SAISIE de la demande de fonds : y écrire le mois cible
+    // validait par erreur le budget du mois suivant.
+    res.json(af.toJSON());
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
