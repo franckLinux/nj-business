@@ -112,6 +112,16 @@ export default function AppelFondsPage() {
         <table>
           <thead><tr><th>Désignation</th><th style={{ textAlign: 'right' }}>Montant</th></tr></thead>
           <tbody>
+            {!tr.journaux && (
+              <tr><td colSpan={2} style={{ background: '#fef2f2', color: '#b91c1c', fontSize: 12 }}>
+                Le serveur (backendcaisse) n'est pas à jour : remplacez <code>src/controllers/appel_fonds_synthese.controller.js</code> puis redémarrez l'application pour voir le détail par caisse.
+              </td></tr>
+            )}
+            {!tr.journaux && (<>
+              <tr><td>Solde caisse espèces</td><td style={{ textAlign: 'right' }}>{fmt(tr.solde_espece, devise)}</td></tr>
+              <tr><td>Solde caisse OM</td><td style={{ textAlign: 'right' }}>{fmt(tr.solde_om, devise)}</td></tr>
+              <tr><td>Solde final en banque</td><td style={{ textAlign: 'right' }}>{fmt(tr.solde_banque, devise)}</td></tr>
+            </>)}
             {(tr.journaux || []).map((j) => (
               <tr key={j.id}>
                 <td>
