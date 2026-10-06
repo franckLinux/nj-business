@@ -165,6 +165,23 @@ const verifierPeriodeOuverte = async (tenantId, journalId, mois, annee) => {
   }
 };
 
+// Ordre chronologique : une nouvelle écriture ne peut pas être datée avant la
+// dernière écriture du même journal. Numéro (ordre d'enregistrement) et date
+// progressent ainsi ensemble, sans antidatage.
+const verifierOrdreChronologique = async (tenantId, journalId, date) => {
+  if (!journalId || !date) return;
+  const [der] = await Ran.sequelize.query(
+    `SELECT numero, date FROM journal WHERE tenant_id = :t AND journal_id = :j
+      ORDER BY date DESC, numero DESC NULLS LAST LIMIT 1`,
+    { replacements: { t: tenantId, j: journalId }, type: QueryTypes.SELECT });
+  if (der && String(date).slice(0, 10) < String(der.date).slice(0, 10)) {
+    const fr = (d) => new Date(`${String(d).slice(0, 10)}T00:00:00`).toLocaleDateString('fr-FR');
+    throw new ErreurComptable(409, `Date antérieure à la dernière écriture de ce journal (n°${der.numero} du ${fr(der.date)}) : `
+      + 'les écritures se saisissent dans l\'ordre chronologique. Datez l\'opération au '
+      + `${fr(der.date)} ou après, en précisant la date réelle dans l'objet si besoin.`);
+  }
+};
+
 // Espèces, mobile money, carte : le solde ne peut jamais devenir négatif, ni
 // sur le mois de l'écriture ni sur les mois suivants (qui en héritent).
 // La banque est exclue (découvert possible).
@@ -454,7 +471,7 @@ const situationJournaux = async (tenantId, mois, annee, journaux) => {
 
 module.exports = {
   budgetApprouve,
-  situationJournaux, soldesJournaux, soldeJournal, verifierPeriodeOuverte, verifierSoldeNonNegatif,
+  situationJournaux, soldesJournaux, soldeJournal, verifierPeriodeOuverte, verifierSoldeNonNegatif, verifierOrdreChronologique,
   ErreurComptable, cle, SQL_CLE, filtreOuverture,
   MOIS, moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
   typeCaisseDuJournal, enregistrerRan,

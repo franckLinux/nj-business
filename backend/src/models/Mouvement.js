@@ -18,6 +18,12 @@ module.exports = (sequelize, DataTypes) => {
     entree: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
     sortie: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
     exporte_sage: { type: DataTypes.BOOLEAN, defaultValue: false },
+    // Migration 027 : numéro de séquence (attribué par la base) et annulation.
+    numero: DataTypes.INTEGER,
+    annule: { type: DataTypes.BOOLEAN, defaultValue: false },
+    annule_par_id: DataTypes.BIGINT,
+    annulation_de_id: DataTypes.BIGINT,
+    motif_annulation: { type: DataTypes.TEXT, defaultValue: '' },
     created_by: DataTypes.UUID,
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated_at: DataTypes.DATE,

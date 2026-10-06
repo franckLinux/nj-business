@@ -9,7 +9,7 @@ const {
   moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
   typeCaisseDuJournal, enregistrerRan, situationJournaux, MOIS: MOIS_VALIDES,
   mettreEnAttente, controleBudgetSortie, budgetApprouve,
-  verifierPeriodeOuverte, verifierSoldeNonNegatif, soldeJournal, ErreurComptable, cle, SQL_CLE, filtreOuverture,
+  verifierPeriodeOuverte, verifierSoldeNonNegatif, verifierOrdreChronologique, soldeJournal, ErreurComptable, cle, SQL_CLE, filtreOuverture,
 } = require('../services/journal.service');
 
 // Refus comptable (mois arrêté, solde insuffisant) → 409 avec le message clair.
@@ -43,7 +43,7 @@ const getJournal = async (req, res) => {
     // plutôt que de fabriquer une association qui prétendrait à une intégrité
     // qui n'existe pas dans le schéma.
     const [mouvements, rubriques, journaux] = await Promise.all([
-      Mouvement.findAll({ where, order: [['date', 'ASC'], ['id', 'ASC']], raw: true }),
+      Mouvement.findAll({ where, order: [['numero', 'ASC'], ['id', 'ASC']], raw: true }),  // ordre d'enregistrement
       Rubrique.findAll({ where: { tenant_id: req.tenantId }, attributes: ['code', 'intitule'], raw: true }),
       Journal.findAll({ where: { tenant_id: req.tenantId }, attributes: ['id', 'nom', 'code'], raw: true }),
     ]);
@@ -124,6 +124,7 @@ const createMouvement = async (req, res) => {
   // Contrôles comptables : mois ouvert, et caisse jamais négative.
   try {
     await verifierPeriodeOuverte(req.tenantId, jid, mois, an);
+    await verifierOrdreChronologique(req.tenantId, jid, date);
     await verifierSoldeNonNegatif(req.tenantId, jid, mois, an, (parseFloat(entree) || 0) - montantSortie);
   } catch (err) {
     if (refusComptable(res, err)) return;
@@ -192,85 +193,92 @@ const createMouvement = async (req, res) => {
 };
 
 // ── PUT /api/journal/:id ──────────────────────────────────────────────────
+// Écriture intangible (migration 027) : seuls les champs DESCRIPTIFS se
+// corrigent (libellé, objet, bénéficiaire, pièce d'identité, téléphone).
+// Montant, date, rubrique ou caisse erronés → annulation puis nouvelle saisie.
+const CHAMPS_DESCRIPTIFS = ['intitule', 'objet', 'beneficiaire', 'piece_identite', 'telephone'];
 const updateMouvement = async (req, res) => {
-  const { date, rubrique_code, intitule, objet, beneficiaire,
-          piece_identite, telephone, entree, sortie } = req.body;
-  const id = req.params.id;   // texte : Postgres caste vers le type réel (bigint)
-  const montantSortie = parseFloat(sortie) || 0;
+  const id = req.params.id;
   try {
-    // Mouvement existant (pour retrouver mois/annee/journal et exclure sa propre sortie du cumul)
-    const old = await Mouvement.findOne({
-      where: { id, tenant_id: req.tenantId },
-      attributes: ['mois', 'annee', 'journal_id', 'entree', 'sortie'],
-    });
+    const old = await Mouvement.findOne({ where: { id, tenant_id: req.tenantId }, raw: true });
     if (!old) return res.status(404).json({ error: 'Mouvement introuvable.' });
-    try {
-      await verifierPeriodeOuverte(req.tenantId, old.journal_id, old.mois, old.annee);
-      const delta = ((parseFloat(entree) || 0) - montantSortie)
-                  - ((parseFloat(old.entree) || 0) - (parseFloat(old.sortie) || 0));
-      await verifierSoldeNonNegatif(req.tenantId, old.journal_id, old.mois, old.annee, delta);
-    } catch (err) {
-      if (refusComptable(res, err)) return;
-      throw err;
+    if (old.annule || old.annulation_de_id) {
+      return res.status(409).json({ error: 'Écriture annulée ou d\'annulation : elle ne se modifie plus.' });
     }
-
-    // Contrôle budgétaire sur la NOUVELLE valeur (RG-03 / RG-06 / RG-04) — refus sec.
-    // On ferme ainsi le contournement : impossible de gonfler une sortie par édition.
-    if (montantSortie > 0) {
-      let ctrl;
-      try {
-        ctrl = await controleBudgetSortie(req.tenantId, {
-          mois: old.mois, annee: old.annee, journal_id: old.journal_id,
-          rubrique_code, sortie: montantSortie, excludeId: id,
-        });
-      } catch (budgetErr) {
-        console.error('[Journal] contrôle budgétaire (edit) indisponible :', budgetErr.message);
-        return res.status(503).json({
-          error: `Contrôle budgétaire indisponible (${budgetErr.message}) — modification refusée par sécurité.`,
-        });
-      }
-      if (ctrl.bloque) {
-        // La sortie d'origine reste inchangée ; la modification est refusée.
-        return res.status(200).json({
-          refus_modification: true,
-          motif:   ctrl.motif,
-          message: `Modification refusée : ${ctrl.message}`,
-        });
-      }
+    const b = req.body || {};
+    const num = (v) => parseFloat(v) || 0;
+    const changeMontant = (b.entree !== undefined && num(b.entree) !== num(old.entree))
+      || (b.sortie !== undefined && num(b.sortie) !== num(old.sortie))
+      || (b.rubrique_code !== undefined && b.rubrique_code !== old.rubrique_code)
+      || (b.date !== undefined && String(b.date).slice(0, 10) !== String(old.date).slice(0, 10));
+    if (changeMontant) {
+      return res.status(409).json({
+        error: `Le montant, la date ou la rubrique de l'écriture n°${old.numero} ne se modifient pas : demandez son annulation (contre-passation) puis ressaisissez l'écriture correcte.`,
+        code: 'ANNULATION_REQUISE',
+      });
     }
-
-    const [count, rows] = await Mouvement.update(
-      {
-        date, rubrique_code, intitule, objet: objet || '', beneficiaire: beneficiaire || '',
-        piece_identite: piece_identite || '', telephone: telephone || '',
-        entree: parseFloat(entree) || 0, sortie: montantSortie,
-      },
-      { where: { id, tenant_id: req.tenantId }, returning: true },
-    );
-    if (count === 0) return res.status(404).json({ error: 'Mouvement introuvable.' });
+    await verifierPeriodeOuverte(req.tenantId, old.journal_id, old.mois, old.annee);
+    const maj = {};
+    for (const c of CHAMPS_DESCRIPTIFS) if (b[c] !== undefined) maj[c] = String(b[c] ?? '').slice(0, c === 'intitule' ? 250 : 200);
+    if (maj.intitule !== undefined && !maj.intitule.trim()) return res.status(400).json({ error: 'Le libellé est obligatoire.' });
+    const [, rows] = await Mouvement.update(maj, { where: { id, tenant_id: req.tenantId }, returning: true });
+    const avant = Object.fromEntries(Object.keys(maj).map((k) => [k, old[k]]));
+    await sequelize.query(
+      `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur, nouvelle_valeur)
+       VALUES (:t, :u, 'MODIF_DESCRIPTIF_ECRITURE', 'journal', :id, CAST(:av AS jsonb), CAST(:ap AS jsonb))`,
+      { replacements: { t: req.tenantId, u: req.user.id, id: String(id), av: JSON.stringify(avant), ap: JSON.stringify(maj) } });
     res.json(rows[0]);
   } catch (err) {
+    if (refusComptable(res, err)) return;
     console.error('[Journal] updateMouvement :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
   }
 };
 
-// ── DELETE /api/journal/:id ────────────────────────────────────────────────
+// ── DELETE /api/journal/:id — interdit (intégrité) ──────────────────────────
 const deleteMouvement = async (req, res) => {
+  res.status(409).json({
+    error: 'Une écriture de caisse ne se supprime pas : utilisez « Annuler » (contre-passation), qui garde la trace et la numérotation.',
+    code: 'ANNULATION_REQUISE',
+  });
+};
+
+// ── Annulation (contre-passation) ──────────────────────────────────────────
+const annulation = require('../services/annulation.service');
+const { userHasPermission } = require('../services/permission.service');
+const peut = (req, code) => userHasPermission({ tenantId: req.tenantId, userId: req.user.id, role: req.user.role }, code);
+
+// POST /api/journal/:id/annulation { motif } — annule (directeur) ou demande (caissière)
+const annulerMouvement = async (req, res) => {
   try {
-    const old = await Mouvement.findOne({
-      where: { id: req.params.id, tenant_id: req.tenantId },
-      attributes: ['mois', 'annee', 'journal_id', 'entree', 'sortie'], raw: true,
+    const peutAnnuler = await peut(req, 'journal.annuler');
+    if (!peutAnnuler && !(await peut(req, 'journal.annulation_demander'))) {
+      return res.status(403).json({ error: 'Permission requise : demander l\'annulation d\'une écriture.' });
+    }
+    const r = await annulation.demanderOuAnnuler({
+      tenantId: req.tenantId, user: req.user, mouvementId: req.params.id, motif: req.body?.motif, peutAnnuler,
     });
-    if (!old) return res.status(404).json({ error: 'Mouvement introuvable.' });
-    await verifierPeriodeOuverte(req.tenantId, old.journal_id, old.mois, old.annee);
-    // Supprimer une ENTRÉE retire de l'argent de la caisse : même contrôle.
-    await verifierSoldeNonNegatif(req.tenantId, old.journal_id, old.mois, old.annee,
-      (parseFloat(old.sortie) || 0) - (parseFloat(old.entree) || 0));
-    await Mouvement.destroy({ where: { id: req.params.id, tenant_id: req.tenantId } });
-    res.json({ message: 'Mouvement supprimé.' });
+    res.status(r.annule ? 201 : 202).json(r);
   } catch (err) {
     if (refusComptable(res, err)) return;
+    console.error('[Journal] annulation :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+// GET /api/journal/annulations?statut=en_attente|approuvee|refusee|toutes
+const listerAnnulations = async (req, res) => {
+  try { res.json(await annulation.lister({ tenantId: req.tenantId, statut: String(req.query.statut || 'en_attente') })); }
+  catch (err) { console.error('[Journal] annulations :', err.message); res.status(500).json({ error: 'Erreur serveur.' }); }
+};
+// PATCH /api/journal/annulations/:id { decision: approuver|refuser, commentaire }
+const deciderAnnulation = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!(id > 0)) return res.status(400).json({ error: 'Identifiant invalide.' });
+    res.json(await annulation.decider({ tenantId: req.tenantId, user: req.user, demandeId: id, decision: req.body?.decision, commentaire: req.body?.commentaire }));
+  } catch (err) {
+    if (refusComptable(res, err)) return;
+    console.error('[Journal] décision annulation :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
@@ -511,6 +519,6 @@ const getControleContext = async (req, res) => {
 };
 
 module.exports = {
-  getJournal, createMouvement, updateMouvement, deleteMouvement,
+  getJournal, createMouvement, updateMouvement, deleteMouvement, annulerMouvement, listerAnnulations, deciderAnnulation,
   getSoldes, getRan, setRan, getCumuls, getJournauxRecap, getControleContext,
 };

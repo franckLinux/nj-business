@@ -52,6 +52,11 @@ router.get   ('/journal',         authGuard, tenantGuard, requirePermission('jou
 router.post  ('/journal',         authGuard, tenantGuard, requirePermission('journal.create'), createMouvementRules, validate, jCtrl.createMouvement);
 router.put   ('/journal/:id',     authGuard, tenantGuard, requirePermission('journal.edit'), jCtrl.updateMouvement);
 router.delete('/journal/:id',     authGuard, tenantGuard, requirePermission('journal.delete'), jCtrl.deleteMouvement);
+// Annulation (contre-passation) — droits vérifiés dans le contrôleur
+// (journal.annuler : annule directement / journal.annulation_demander : demande).
+router.get   ('/journal/annulations',     authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.listerAnnulations);
+router.patch ('/journal/annulations/:id', authGuard, tenantGuard, requirePermission('journal.annuler'), jCtrl.deciderAnnulation);
+router.post  ('/journal/:id/annulation',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.annulerMouvement);
 router.get   ('/journal/soldes',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getSoldes);
 router.get   ('/journal/cumuls',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getCumuls);
 router.get   ('/journal/ran',     authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getRan);

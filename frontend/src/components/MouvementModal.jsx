@@ -168,18 +168,24 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
     <div className="modal-overlay" style={{ display: 'flex' }}>
       <div className="modal-box">
         <div className="modal-head">
-          <h3>{mouvement ? 'Modifier mouvement' : 'Nouveau mouvement'}</h3>
+          <h3>{mouvement ? `Corriger l'écriture n°${mouvement.numero ?? ''}` : 'Nouveau mouvement'}</h3>
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
+          {mouvement && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e3a8a', borderRadius: 8, padding: '8px 12px', fontSize: 12, marginBottom: 12 }}>
+              Seuls le libellé, l'objet et le bénéficiaire se corrigent. Un montant, une date ou une rubrique erronés :
+              annulez l'écriture (bouton ↩) puis ressaisissez-la.
+            </div>
+          )}
           <div className="form-section">Informations principales</div>
           <div>
             <label>Date <span className="req">*</span></label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={!!mouvement} />
           </div>
           <div>
             <label>Type <span className="req">*</span></label>
-            <select value={type} onChange={onTypeChange}>
+            <select value={type} onChange={onTypeChange} disabled={!!mouvement}>
               <option value="">— choisir —</option>
               <option value="entree">Entrée</option>
               <option value="sortie">Sortie</option>
@@ -187,7 +193,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
           </div>
           <div className="span-2">
             <label>Rubrique <span className="req">*</span></label>
-            <select value={rubrique} onChange={(e) => setRubrique(e.target.value)}>
+            <select value={rubrique} onChange={(e) => setRubrique(e.target.value)} disabled={!!mouvement}>
               <option value="">— choisir —</option>
               {(listeRubriques || []).map((r) => (
                 <option key={r.code} value={r.code}>[{r.code}] {r.intitule}</option>
@@ -212,7 +218,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
           <div>
             <label>Montant <span className="req">*</span></label>
             <div className="input-group">
-              <input type="number" min="0" step="1" placeholder="0" className="has-suffix" value={montant} onChange={(e) => setMontant(e.target.value)} />
+              <input type="number" min="0" step="1" placeholder="0" className="has-suffix" value={montant} onChange={(e) => setMontant(e.target.value)} disabled={!!mouvement} />
               <span className="input-suffix">FCFA</span>
             </div>
           </div>

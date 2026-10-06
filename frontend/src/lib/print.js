@@ -82,19 +82,21 @@ export function printJournalView({ j, data, mois, annee, tenantNom }) {
 
   let cumul = ranAuto;
   const rows = mouvements.length === 0
-    ? `<tr><td colspan="7" style="text-align:center;padding:20px;color:#9ca3af;font-style:italic">Aucun mouvement pour cette période</td></tr>`
+    ? `<tr><td colspan="8" style="text-align:center;padding:20px;color:#9ca3af;font-style:italic">Aucun mouvement pour cette période</td></tr>`
     : mouvements.map((m) => {
         const e = parseFloat(m.entree) || 0;
         const so = parseFloat(m.sortie) || 0;
         cumul += e - so;
         const cc = cumul >= 0 ? '#15803d' : '#b91c1c';
-        return `<tr>
-          <td style="color:#6b7280;white-space:nowrap">${new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
+        const barre = m.annule ? 'text-decoration:line-through;opacity:.6;' : '';
+        return `<tr${m.annulation_de_id ? ' style="background:#fef2f2"' : ''}>
+          <td style="font-weight:700;color:#475569">${m.numero ?? ''}</td>
+          <td style="color:#6b7280;white-space:nowrap;${barre}">${new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
           <td><span style="background:#f1f5f9;border:1px solid #cbd5e1;padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px;color:#475569;white-space:nowrap">${m.rubrique_code}</span></td>
-          <td>${m.intitule}${m.objet ? `<br><span style="font-size:9px;color:#9ca3af">${m.objet}</span>` : ''}</td>
+          <td><span style="${barre}">${m.intitule}</span>${m.objet ? `<br><span style="font-size:9px;color:#9ca3af">${m.annulation_de_id ? 'Motif : ' : ''}${m.objet}</span>` : ''}${m.annule ? '<br><span style="font-size:9px;color:#b91c1c;font-weight:700">ANNULÉE</span>' : ''}</td>
           <td style="color:#6b7280">${m.beneficiaire || '—'}</td>
-          <td style="text-align:right;color:#15803d;font-weight:700">${e > 0 ? fmtN(e) : ''}</td>
-          <td style="text-align:right;color:#b91c1c;font-weight:700">${so > 0 ? fmtN(so) : ''}</td>
+          <td style="text-align:right;color:${e < 0 ? '#b91c1c' : '#15803d'};font-weight:700;${barre}">${e !== 0 ? fmtN(e) : ''}</td>
+          <td style="text-align:right;color:#b91c1c;font-weight:700;${barre}">${so !== 0 ? fmtN(so) : ''}</td>
           <td style="text-align:right;font-weight:800;color:${cc}">${fmtN(cumul)}</td>
         </tr>`;
       }).join('');
@@ -144,6 +146,7 @@ export function printJournalView({ j, data, mois, annee, tenantNom }) {
   <table>
     <thead>
       <tr>
+        <th style="width:36px">N°</th>
         <th style="width:78px">Date</th>
         <th style="width:68px">Rubrique</th>
         <th>Intitulé / Objet</th>
@@ -157,7 +160,7 @@ export function printJournalView({ j, data, mois, annee, tenantNom }) {
     ${mouvements.length > 0 ? `
     <tfoot>
       <tr>
-        <td colspan="4">TOTAL DU MOIS — ${mois} ${annee}</td>
+        <td colspan="5">TOTAL DU MOIS — ${mois} ${annee}</td>
         <td class="tfoot-ent">${fmtN(s.entrees)}</td>
         <td class="tfoot-sor">${fmtN(s.sorties)}</td>
         <td class="tfoot-sol">${fmtN(s.solde)}</td>

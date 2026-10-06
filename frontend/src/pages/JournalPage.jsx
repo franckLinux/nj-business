@@ -58,11 +58,18 @@ export default function JournalPage() {
 
   useEffect(() => { setData(null); charger(); }, [charger]);
 
-  const onDelete = async (mouvementId) => {
-    if (!window.confirm('Supprimer ce mouvement ?')) return;
-    const res = await api.delete(`/journal/${mouvementId}`);
+  // Annulation = contre-passation (écriture négative) ; jamais de suppression.
+  // Directeur (journal.annuler) : annule directement. Caissière : demande.
+  const peutAnnuler = can('journal.annuler');
+  const peutDemander = peutAnnuler || can('journal.annulation_demander');
+  const onAnnuler = async (m) => {
+    const motif = window.prompt(
+      `${peutAnnuler ? 'Annuler' : 'Demander l\'annulation de'} l'écriture n°${m.numero} « ${m.intitule} » ?\n`
+      + 'Une écriture identique en négatif sera passée ; l\'écriture d\'origine reste visible.\n\nMotif (obligatoire) :');
+    if (motif === null) return;
+    const res = await api.post(`/journal/${m.id}/annulation`, { motif });
     if (res.error) { toast(res.error, 'error'); return; }
-    toast('Supprimé.', 'success');
+    toast(res.message, 'success');
     charger();
   };
 
@@ -301,6 +308,7 @@ export default function JournalPage() {
           <table>
             <thead>
               <tr>
+                <th style={{ width: 52 }}>N°</th>
                 <th style={{ width: 90 }}>Date</th>
                 <th style={{ width: 90 }}>Rubrique</th>
                 <th>Intitulé</th>
@@ -313,42 +321,49 @@ export default function JournalPage() {
             </thead>
             <tbody>
               {lignes.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 50, color: '#94a3b8' }}>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 50, color: '#94a3b8' }}>
                   <div style={{ fontSize: 32, marginBottom: 10 }}>📭</div>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>Aucun mouvement</div>
                   <div style={{ fontSize: 12, marginTop: 4 }}>Aucune opération enregistrée pour {mois} {annee}</div>
                 </td></tr>
               ) : lignes.map(({ m, e, so, cumul: c }) => {
                 const cumulColor = c >= 0 ? '#15803d' : '#dc2626';
+                const barree = m.annule ? { textDecoration: 'line-through', opacity: 0.55 } : {};
                 return (
-                  <tr key={m.id}>
-                    <td style={{ color: '#64748b', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  <tr key={m.id} style={m.annulation_de_id ? { background: '#fef2f2' } : undefined}>
+                    <td style={{ color: '#475569', fontSize: 12, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{m.numero ?? '—'}</td>
+                    <td style={{ color: '#64748b', fontSize: 12, whiteSpace: 'nowrap', ...barree }}>
                       {new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
                     </td>
                     <td>
                       <span style={{ background: '#f1f5f9', color: '#475569', fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 5, whiteSpace: 'nowrap' }}>{m.rubrique_code}</span>
                     </td>
                     <td>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: '#0f172a' }}>{m.intitule}</div>
-                      {m.objet && <div style={{ fontSize: 11, color: '#94a3b8' }}>{m.objet}</div>}
+                      <div style={{ fontSize: 13, fontWeight: 500, color: m.annulation_de_id ? '#b91c1c' : '#0f172a', ...barree }}>{m.intitule}</div>
+                      {m.objet && <div style={{ fontSize: 11, color: '#94a3b8' }}>{m.annulation_de_id ? `Motif : ${m.objet}` : m.objet}</div>}
+                      {m.annule && <span style={{ fontSize: 10, fontWeight: 700, color: '#b91c1c', background: '#fee2e2', borderRadius: 5, padding: '1px 6px' }}>ANNULÉE{m.motif_annulation ? ` — ${m.motif_annulation}` : ''}</span>}
                     </td>
                     <td style={{ fontSize: 12, color: '#64748b' }}>{m.beneficiaire || '—'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#16a34a', fontSize: 13 }}>{e > 0 ? fmt(e, devise) : ''}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#dc2626', fontSize: 13 }}>{so > 0 ? fmt(so, devise) : ''}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: e < 0 ? '#b91c1c' : '#16a34a', fontSize: 13, ...barree }}>{e !== 0 ? fmt(e, devise) : ''}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 700, color: '#dc2626', fontSize: 13, ...barree }}>{so !== 0 ? fmt(so, devise) : ''}</td>
                     <td style={{ textAlign: 'right', fontWeight: 800, fontSize: 13, color: cumulColor }}>{fmt(c, devise)}</td>
                     <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                      {!isArrete ? (
+                      {!isArrete && !m.annule && !m.annulation_de_id ? (
                         <>
+                          {can('journal.edit') && (
                           <button
-                            title="Modifier"
+                            title="Corriger le libellé, l'objet ou le bénéficiaire"
                             onClick={() => setModal(m)}
                             style={{ padding: '4px 8px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#0369a1', marginRight: 3 }}
                           >✏️</button>
+                          )}
+                          {peutDemander && (
                           <button
-                            title="Supprimer"
-                            onClick={() => onDelete(m.id)}
+                            title={peutAnnuler ? 'Annuler (contre-passation)' : 'Demander l\'annulation'}
+                            onClick={() => onAnnuler(m)}
                             style={{ padding: '4px 8px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer', fontSize: 12, color: '#dc2626' }}
-                          >✕</button>
+                          >↩</button>
+                          )}
                         </>
                       ) : <span style={{ color: '#94a3b8', fontSize: 11 }}>—</span>}
                     </td>
@@ -359,7 +374,7 @@ export default function JournalPage() {
             {lignes.length > 0 && (
               <tfoot>
                 <tr style={{ background: 'linear-gradient(90deg,#0f172a,#1e293b)', color: 'white', fontWeight: 800 }}>
-                  <td colSpan={4} style={{ color: 'rgba(255,255,255,.7)', fontSize: 12 }}>TOTAL DU MOIS</td>
+                  <td colSpan={5} style={{ color: 'rgba(255,255,255,.7)', fontSize: 12 }}>TOTAL DU MOIS</td>
                   <td style={{ textAlign: 'right', color: '#86efac', fontSize: 14 }}>{fmt(s.entrees, devise)}</td>
                   <td style={{ textAlign: 'right', color: '#fca5a5', fontSize: 14 }}>{fmt(s.sorties, devise)}</td>
                   <td style={{ textAlign: 'right', color: 'white', fontSize: 15 }}>{fmt(s.solde, devise)}</td>

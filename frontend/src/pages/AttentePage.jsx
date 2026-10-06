@@ -4,12 +4,23 @@ import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import { fmt } from '@/lib/format';
 import MouvementAttenteCard from '@/components/MouvementAttenteCard';
+import DemandesAnnulation from '@/components/DemandesAnnulation';
 
 // Reprend loadMouvementsAttentePage() de legacy/js/app.js (l. 2552-2593) —
 // vue directeur de toutes les dépenses bloquées (RG-03/04/06), tous mois
 // confondus, avec approbation/rejet.
 
 export default function AttentePage() {
+  const { can } = useApp();
+  return (
+    <>
+      {can('journal.annuler') && <DemandesAnnulation />}
+      <DepensesEnAttente />
+    </>
+  );
+}
+
+function DepensesEnAttente() {
   const { devise } = useApp();
   const toast = useToast();
   const [list, setList] = useState(null);
