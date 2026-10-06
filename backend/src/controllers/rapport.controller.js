@@ -1,5 +1,5 @@
 const { Op, fn, col } = require('sequelize');
-const { Journal, Ran, Banque, Mouvement, Tenant } = require('../models');
+const { Journal, Ran, Banque, Mouvement, Tenant, Rubrique } = require('../models');
 const { soldesJournaux } = require('../services/journal.service');
 
 const MOIS = ['Janvier','Fevrier','Mars','Avril','Mai','Juin',
@@ -29,7 +29,7 @@ const getCompteEmploi = async (req, res) => {
     // ── 1. Journaux actifs (toutes caisses — hors type banque) ───────────────
     // ── 2. RAN du mois (par journal_id ou par type_caisse) ───────────────────
     // ── 3. Banque + 4. Mouvements du mois groupés par journal + rubrique ─────
-    const [journaux, ranRows, bqPrev, bqCourant, mvtRows, tenant] = await Promise.all([
+    const [journaux, ranRows, bqPrev, bqCourant, mvtRows, tenant, rubriquesRows] = await Promise.all([
       Journal.findAll({
         // Tous les journaux, BANQUE comprise : ses mouvements étaient déjà
         // comptés dans les emplois alors que son RAN et son solde ne l'étaient pas.
@@ -48,16 +48,21 @@ const getCompteEmploi = async (req, res) => {
       Mouvement.findAll({
         where: { tenant_id: tenantId, mois, annee: yr },
         attributes: [
-          'journal_id', 'type_caisse', 'rubrique_code', 'intitule',
+          'journal_id', 'type_caisse', 'rubrique_code',
           [fn('COALESCE', fn('SUM', col('entree')), 0), 'total_entree'],
           [fn('COALESCE', fn('SUM', col('sortie')), 0), 'total_sortie'],
         ],
-        group: ['journal_id', 'type_caisse', 'rubrique_code', 'intitule'],
+        // Regroupement par RUBRIQUE (et non par libellé) : une contre-passation
+        // « ANNULATION n°X — … » porte un autre libellé mais la même rubrique,
+        // ses montants négatifs doivent s'imputer sur la même ligne.
+        group: ['journal_id', 'type_caisse', 'rubrique_code'],
         order: [['rubrique_code', 'ASC']],
         raw: true,
       }),
       Tenant.findOne({ where: { id: tenantId }, attributes: ['nom', 'devise', 'directeur_nom', 'caissier_nom'] }),
+      Rubrique.findAll({ where: { tenant_id: tenantId }, attributes: ['code', 'intitule'], raw: true }),
     ]);
+    const libRubrique = Object.fromEntries(rubriquesRows.map((r) => [r.code, r.intitule]));
 
     // RAN de chaque journal = solde final du mois précédent (ou solde
     // d'ouverture), calculé comme partout ailleurs — plus la ligne ran brute.
@@ -91,10 +96,10 @@ const getCompteEmploi = async (req, res) => {
       mvtByJournal[jid].total_sortie += s;
       if (!isNeutre) mvtByJournal[jid].fonds_recus += e; // entrées hors virements = fonds reçus
 
-      // Section II — emplois par rubrique
-      if (!isNeutre && s > 0) {
+      // Section II — emplois par rubrique : montant NET (sorties − annulations).
+      if (!isNeutre && s !== 0) {
         if (!pivotRubrique[r.rubrique_code]) {
-          pivotRubrique[r.rubrique_code] = { intitule: r.intitule, esp_s: 0, om_s: 0 };
+          pivotRubrique[r.rubrique_code] = { intitule: libRubrique[r.rubrique_code] || r.rubrique_code, esp_s: 0, om_s: 0 };
         }
         if (r.type_caisse === 'especes') pivotRubrique[r.rubrique_code].esp_s += s;
         else                             pivotRubrique[r.rubrique_code].om_s  += s;
@@ -135,6 +140,8 @@ const getCompteEmploi = async (req, res) => {
         om:            p.om_s,
         total:         p.esp_s + p.om_s,
       }))
+      // Rubrique entièrement annulée : plus aucun emploi à présenter.
+      .filter((e) => Math.abs(e.total) > 0.004)
       .sort((a, b) => a.rubrique_code.localeCompare(b.rubrique_code));
 
     const totalEmplois = emplois.reduce((s, e) => s + e.total, 0);

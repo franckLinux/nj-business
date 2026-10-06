@@ -77,16 +77,21 @@ export default function RubriqueDetailModal({ code, intitule, dotation, realise,
                   <tbody>
                     {mouvements.map((m) => {
                       const montant = parseFloat(m.sortie || 0) || parseFloat(m.entree || 0);
-                      const isSortie = parseFloat(m.sortie || 0) > 0;
+                      const isSortie = parseFloat(m.sortie || 0) !== 0;
                       const dateStr = m.date ? new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
                       return (
                         <tr key={m.id}>
                           <td style={{ whiteSpace: 'nowrap' }}>{dateStr}</td>
                           <td><span style={{ fontSize: 11, background: '#eff6ff', color: '#1d4ed8', padding: '2px 7px', borderRadius: 4, fontWeight: 600 }}>{m.journal_nom || m.journal_code || '—'}</span></td>
-                          <td>{m.intitule || '—'}</td>
+                          <td>
+                            <span style={m.annule ? { textDecoration: 'line-through', opacity: .6 } : undefined}>{m.intitule || '—'}</span>
+                            {m.annule && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#b91c1c', background: '#fee2e2', borderRadius: 4, padding: '1px 5px' }}>ANNULÉE</span>}
+                            {m.annulation_de_id && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#9a3412', background: '#ffedd5', borderRadius: 4, padding: '1px 5px' }}>CONTRE-PASSATION</span>}
+                          </td>
                           <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.beneficiaire || m.objet || ''}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: isSortie ? 'var(--accent-red)' : 'var(--accent-green)' }}>
-                            {isSortie ? '-' : '+'} {fmt(montant, devise)}
+                          <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: m.annulation_de_id ? '#c2410c' : isSortie ? 'var(--accent-red)' : 'var(--accent-green)', ...(m.annule ? { textDecoration: 'line-through', opacity: .6 } : {}) }}>
+                            {/* Contre-passation : restitue le montant annulé, en déduction du total dépensé. */}
+                            {m.annulation_de_id ? `+ ${fmt(Math.abs(montant), devise)}` : `${isSortie ? '-' : '+'} ${fmt(montant, devise)}`}
                           </td>
                         </tr>
                       );
@@ -94,7 +99,7 @@ export default function RubriqueDetailModal({ code, intitule, dotation, realise,
                   </tbody>
                   <tfoot>
                     <tr style={{ background: '#f8fafc', fontWeight: 700 }}>
-                      <td colSpan={4}>TOTAL ({mouvements.length} mouvement{mouvements.length > 1 ? 's' : ''})</td>
+                      <td colSpan={4}>TOTAL NET ({mouvements.length} mouvement{mouvements.length > 1 ? 's' : ''})</td>
                       <td style={{ textAlign: 'right', color: 'var(--accent-red)' }}>{fmt(totalMvt, devise)}</td>
                     </tr>
                   </tfoot>

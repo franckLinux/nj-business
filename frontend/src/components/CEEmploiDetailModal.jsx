@@ -65,7 +65,7 @@ export default function CEEmploiDetailModal({ code, intitule, esp, om, total, on
                       const sortie = parseFloat(m.sortie || 0);
                       const entree = parseFloat(m.entree || 0);
                       const montant = sortie || entree;
-                      const isSortie = sortie > 0;
+                      const isSortie = sortie !== 0;
                       const dateStr = m.date ? new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
                       return (
                         <tr key={m.id}>
@@ -76,10 +76,15 @@ export default function CEEmploiDetailModal({ code, intitule, esp, om, total, on
                               ? <span style={{ fontSize: 10, background: '#dcfce7', color: '#166534', padding: '2px 6px', borderRadius: 3 }}>Espèces</span>
                               : <span style={{ fontSize: 10, background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: 3 }}>Mobile Money</span>}
                           </td>
-                          <td>{m.intitule || '—'}</td>
+                          <td>
+                            <span style={m.annule ? { textDecoration: 'line-through', opacity: .6 } : undefined}>{m.intitule || '—'}</span>
+                            {m.annule && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#b91c1c', background: '#fee2e2', borderRadius: 4, padding: '1px 5px' }}>ANNULÉE</span>}
+                            {m.annulation_de_id && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#9a3412', background: '#ffedd5', borderRadius: 4, padding: '1px 5px' }}>CONTRE-PASSATION</span>}
+                          </td>
                           <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.beneficiaire || m.objet || ''}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600, color: isSortie ? 'var(--accent-red)' : 'var(--accent-green)' }}>
-                            {isSortie ? '-' : '+'} {fmt(montant, devise)}
+                          <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: m.annulation_de_id ? '#c2410c' : isSortie ? 'var(--accent-red)' : 'var(--accent-green)', ...(m.annule ? { textDecoration: 'line-through', opacity: .6 } : {}) }}>
+                            {/* Contre-passation : restitue le montant annulé, en déduction du total dépensé. */}
+                            {m.annulation_de_id ? `+ ${fmt(Math.abs(montant), devise)}` : `${isSortie ? '-' : '+'} ${fmt(montant, devise)}`}
                           </td>
                         </tr>
                       );
@@ -87,7 +92,7 @@ export default function CEEmploiDetailModal({ code, intitule, esp, om, total, on
                   </tbody>
                   <tfoot>
                     <tr style={{ background: '#f8fafc', fontWeight: 700 }}>
-                      <td colSpan={5}>TOTAL ({mouvements.length} mouvement{mouvements.length > 1 ? 's' : ''})</td>
+                      <td colSpan={5}>TOTAL NET ({mouvements.length} mouvement{mouvements.length > 1 ? 's' : ''})</td>
                       <td style={{ textAlign: 'right', color: 'var(--accent-red)' }}>{fmt(totalSorties, devise)}</td>
                     </tr>
                   </tfoot>
