@@ -4,6 +4,7 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import TenantSelectorModal from './TenantSelectorModal';
 import SupportAcces from './SupportAcces';
+import InitialisationCompte from './InitialisationCompte';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 
@@ -32,7 +33,19 @@ export default function Layout() {
   const {
     journaux, peutVoirAttente, isAdmin, user, activeTenantId,
     tenantSelectorOpen, openTenantSelector, closeTenantSelector, selectTenant,
+    logout, loadJournaux, devise, setMois, setAnnee,
   } = useApp();
+
+  // Initialisation guidée (espace de démonstration tout juste activé) : tant
+  // que les caisses et leurs soldes d'ouverture ne sont pas définis, l'assistant
+  // occupe tout l'écran. Uniquement pour les utilisateurs DU client (pas le cabinet).
+  const [init, setInit] = useState(null);
+  useEffect(() => {
+    if (!user?.tenantId || isAdmin) { setInit(null); return; }
+    let annule = false;
+    api.get('/initialisation').then((r) => { if (!annule && r && !r.error) setInit(r); });
+    return () => { annule = true; };
+  }, [user?.tenantId, isAdmin]);
   const [badgeAttente, setBadgeAttente] = useState(0);
   const [badgeDepassements, setBadgeDepassements] = useState(0);
 
@@ -70,6 +83,17 @@ export default function Layout() {
       if (!r.error && typeof r.count === 'number') setBadgeDepassements(r.count);
     });
   }, [peutVoirAttente, location.pathname]);
+
+  if (init?.requise) {
+    return (
+      <InitialisationCompte
+        etat={init}
+        devise={devise}
+        onLogout={logout}
+        onTermine={(r) => { if (r?.mois) { setMois(r.mois); setAnnee(r.annee); } setInit(null); loadJournaux(); navigate('/'); }}
+      />
+    );
+  }
 
   return (
     <div id="screen-app" className="screen" style={{ display: 'flex' }}>

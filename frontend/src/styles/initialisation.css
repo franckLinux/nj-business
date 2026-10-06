@@ -1,0 +1,55 @@
+/* Initialisation guidée du compte */
+.init-wrap{position:fixed;inset:0;z-index:2000;overflow:auto;background:radial-gradient(1200px 600px at 10% -10%,#1e3a8a 0%,transparent 60%),radial-gradient(900px 500px at 110% 110%,#065f46 0%,transparent 55%),#0f172a;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px}
+.init-card{width:min(860px,100%);background:#fff;border-radius:22px;box-shadow:0 30px 80px rgba(0,0,0,.45);overflow:hidden;animation:init-in .35s cubic-bezier(.2,.9,.3,1.1)}
+@keyframes init-in{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.init-head{padding:28px 32px 18px;background:linear-gradient(135deg,#eff6ff,#f0fdf4)}
+.init-kicker{font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:#2563eb;font-weight:800}
+.init-head h1{font-size:26px;font-weight:900;color:#0f172a;margin:4px 0 6px;letter-spacing:-.4px}
+.init-head p{color:#475569;font-size:13.5px}
+.init-steps{list-style:none;display:flex;gap:6px;padding:14px 32px;margin:0;border-bottom:1px solid #e2e8f0;flex-wrap:wrap}
+.init-steps li{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#94a3b8;padding:6px 12px 6px 6px;border-radius:30px}
+.init-steps li span{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e2e8f0;color:#64748b;font-size:12px}
+.init-steps li.on{color:#1d4ed8;background:#eff6ff}.init-steps li.on span{background:#2563eb;color:#fff}
+.init-steps li.done{color:#047857}.init-steps li.done span{background:#10b981;color:#fff}
+.init-body{padding:22px 32px 8px}
+.init-lead{font-size:14px;color:#334155;margin-bottom:16px}
+.init-types{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
+.init-type{border:1.5px solid #e2e8f0;border-radius:14px;padding:12px 14px;transition:border-color .15s,box-shadow .15s;background:#fff}
+.init-type.actif{border-color:#93c5fd;box-shadow:0 6px 18px rgba(37,99,235,.08)}
+.init-type-head{display:flex;align-items:center;gap:12px}
+.init-type .ico{font-size:24px;width:42px;height:42px;border-radius:12px;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.init-type .txt{flex:1;min-width:0}.init-type .txt b{display:block;font-size:14px;color:#0f172a}.init-type .txt small{display:block;font-size:11.5px;color:#64748b;margin-top:1px}
+.init-count{display:flex;align-items:center;gap:4px;background:#f1f5f9;border-radius:10px;padding:3px}
+.init-count button{width:30px;height:30px;border:none;border-radius:8px;background:#fff;font-size:17px;font-weight:800;color:#1e293b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.init-count button:disabled{opacity:.35;cursor:default}
+.init-count span{min-width:22px;text-align:center;font-weight:900;font-size:15px}
+.init-noms{display:grid;gap:6px;margin-top:10px}
+.init-noms input,.init-periode select,.init-ran input{width:100%;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;font-size:14px;background:#f8fafc;color:#0f172a}
+.init-noms input:focus,.init-periode select:focus,.init-ran input:focus{outline:none;border-color:#3b82f6;background:#fff;box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.init-periode{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.init-periode label{font-size:12px;font-weight:700;color:#475569;display:grid;gap:6px}
+.init-rans{display:grid;gap:8px}
+.init-ran{display:grid;grid-template-columns:34px 1fr 220px;align-items:center;gap:10px;padding:8px 12px;border:1px solid #e2e8f0;border-radius:12px}
+.init-ran .ico{font-size:20px}.init-ran .nom{font-weight:700;font-size:14px;color:#0f172a}
+.init-ran .champ{position:relative}.init-ran .champ input{text-align:right;padding-right:58px;font-weight:800;font-size:15px;font-family:ui-monospace,Consolas,monospace}
+.init-ran .champ em{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-style:normal;font-size:11px;font-weight:800;color:#94a3b8}
+.init-total{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:14px 16px;border-radius:12px;background:linear-gradient(135deg,#0f172a,#1e293b);color:#fff}
+.init-total span{font-size:12px;letter-spacing:1px;text-transform:uppercase;opacity:.75;font-weight:700}.init-total b{font-size:20px;font-weight:900}
+.init-note{margin-top:12px;font-size:12px;color:#64748b;background:#f8fafc;border-left:3px solid #93c5fd;padding:8px 12px;border-radius:6px}
+.init-recap{border:1px solid #e2e8f0;border-radius:14px;overflow:hidden}
+.init-recap>div{display:flex;justify-content:space-between;gap:10px;padding:11px 16px;border-bottom:1px solid #f1f5f9;font-size:14px}
+.init-recap>div i{font-style:normal;font-size:11px;color:#94a3b8;font-family:ui-monospace,Consolas,monospace;margin-left:4px}
+.init-recap>div b{font-family:ui-monospace,Consolas,monospace}
+.init-recap .tot{background:#f0fdf4;font-weight:800;color:#065f46;border-bottom:none}
+.init-err{margin-top:14px;padding:10px 14px;border-radius:10px;background:#fef2f2;color:#b91c1c;font-size:13px;font-weight:600;border:1px solid #fecaca}
+.init-foot{display:flex;justify-content:space-between;gap:10px;padding:18px 32px 24px}
+.init-btn{border:none;border-radius:12px;padding:13px 22px;font-size:14px;font-weight:800;cursor:pointer;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 10px 22px rgba(37,99,235,.3);transition:transform .12s}
+.init-btn:hover{transform:translateY(-1px)}.init-btn:disabled{opacity:.6;cursor:wait;transform:none}
+.init-btn.ghost{background:#f1f5f9;color:#334155;box-shadow:none}
+.init-attente,.init-fini{padding:40px 36px;text-align:center}
+.init-attente h1,.init-fini h1{font-size:24px;font-weight:900;margin:8px 0}
+.init-attente p,.init-fini p{color:#475569;margin-bottom:20px}
+.init-logo{font-size:44px}
+.init-check{width:72px;height:72px;margin:0 auto;border-radius:50%;background:#ecfdf5;color:#059669;font-size:38px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 10px #f0fdf4}
+.init-fini .init-recap{text-align:left;margin-bottom:22px}
+@media (max-width:640px){.init-head,.init-body,.init-foot,.init-steps{padding-left:18px;padding-right:18px}.init-types{grid-template-columns:1fr}.init-ran{grid-template-columns:28px 1fr}.init-ran .champ{grid-column:1/-1}.init-head h1{font-size:21px}}

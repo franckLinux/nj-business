@@ -123,6 +123,7 @@ const createMouvement = async (req, res) => {
 
   // Contrôles comptables : mois ouvert, et caisse jamais négative.
   try {
+    await initialisation.verifierInitialise(req.tenantId);
     await verifierPeriodeOuverte(req.tenantId, jid, mois, an);
     await verifierOrdreChronologique(req.tenantId, jid, date);
     await verifierSoldeNonNegatif(req.tenantId, jid, mois, an, (parseFloat(entree) || 0) - montantSortie);
@@ -303,6 +304,33 @@ const imprimerBon = async (req, res) => {
     res.json({ ...m, imprime_par: req.user.username });
   } catch (err) {
     console.error('[Journal] impression bon :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+// ── Initialisation guidée du compte (migration 029) ───────────────────────
+const initialisation = require('../services/initialisation.service');
+// GET /api/initialisation — l'espace doit-il encore être initialisé ?
+const getInitialisation = async (req, res) => {
+  try {
+    const e = await initialisation.etat({ tenantId: req.tenantId });
+    const peutInitialiser = e.requise
+      ? (req.user.role === 'directeur' || ((await peut(req, 'journaux.edit')) && (await peut(req, 'journal.ran'))))
+      : false;
+    res.json({ ...e, peut_initialiser: peutInitialiser });
+  } catch (err) {
+    console.error('[Initialisation] état :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+// POST /api/initialisation { mois, annee, caisses: [{ type, nom, ran }] }
+const postInitialisation = async (req, res) => {
+  try {
+    const autorise = req.user.role === 'directeur' || ((await peut(req, 'journaux.edit')) && (await peut(req, 'journal.ran')));
+    if (!autorise) return res.status(403).json({ error: 'Seul le directeur de l\'espace peut initialiser le compte.' });
+    res.status(201).json(await initialisation.initialiser({ tenantId: req.tenantId, user: req.user, body: req.body }));
+  } catch (err) {
+    if (refusComptable(res, err)) return;
+    console.error('[Initialisation] :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
@@ -560,6 +588,6 @@ const getControleContext = async (req, res) => {
 };
 
 module.exports = {
-  getJournal, createMouvement, updateMouvement, deleteMouvement, annulerMouvement, listerAnnulations, deciderAnnulation, imprimerBon,
+  getJournal, createMouvement, updateMouvement, deleteMouvement, annulerMouvement, listerAnnulations, deciderAnnulation, imprimerBon, getInitialisation, postInitialisation,
   getSoldes, getRan, setRan, getCumuls, getJournauxRecap, getControleContext,
 };

@@ -56,6 +56,8 @@ router.delete('/journal/:id',     authGuard, tenantGuard, requirePermission('jou
 // (journal.annuler : annule directement / journal.annulation_demander : demande).
 router.get   ('/journal/annulations',     authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.listerAnnulations);
 router.patch ('/journal/annulations/:id', authGuard, tenantGuard, requirePermission('journal.annuler'), jCtrl.deciderAnnulation);
+router.get   ('/initialisation', authGuard, tenantGuard, jCtrl.getInitialisation);
+router.post  ('/initialisation', authGuard, tenantGuard, jCtrl.postInitialisation);
 router.post  ('/journal/:id/impression',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.imprimerBon);
 router.post  ('/journal/:id/annulation',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.annulerMouvement);
 router.get   ('/journal/soldes',  authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getSoldes);
