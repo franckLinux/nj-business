@@ -517,90 +517,104 @@ export function htmlBonCaisse(m) {
     { n: 1, dest: estAnnulation ? 'CAISSE — pièce à classer' : 'CAISSE — pièce justificative à classer' },
     { n: 2, dest: estAnnulation ? 'DIRECTION / CONTRÔLE' : estEntree ? 'DÉPOSANT — à conserver' : 'BÉNÉFICIAIRE — à conserver' },
   ];
+  const tiersLbl = estAnnulation ? 'Contrôle' : estEntree ? 'Déposant' : 'Bénéficiaire';
+  const tiersNom = estAnnulation ? '' : (m.beneficiaire || '');
   const bon = (ex) => `<div class="bon">
   ${m.annule ? '<div class="wm">ANNULÉ</div>' : duplicata ? '<div class="wm2">DUPLICATA</div>' : ''}
-  <div class="top"></div>
   <div class="ex"><span>EXEMPLAIRE ${ex.n}/2</span><b>${ex.dest}</b></div>
   <div class="head">
-    <div class="org">${m.tenant_logo ? `<img src="${esc(m.tenant_logo)}" alt="">` : ''}<b>${esc(m.tenant_nom || '')}${m.tenant_sigle ? ` <span style="color:#64748b;font-weight:600">(${esc(m.tenant_sigle)})</span>` : ''}</b>${coord ? `<small>${coord}</small>` : ''}</div>
-    <div class="stamp"><div style="font-size:8px;color:#94a3b8;letter-spacing:1px">N° DE PIÈCE</div><div class="no">${num}</div>
+    <div class="org">${m.tenant_logo ? `<img src="${esc(m.tenant_logo)}" alt="">` : ''}<div><b>${esc(m.tenant_nom || '')}${m.tenant_sigle ? ` <span class="sig">(${esc(m.tenant_sigle)})</span>` : ''}</b>${coord ? `<small>${coord}</small>` : ''}</div></div>
+    <div class="ttl"><h1>${titre}</h1><p>${sousTitre}</p></div>
+    <div class="stamp"><small>N° DE PIÈCE</small><div class="no">${num}</div>
       <span class="tag">${duplicata ? `DUPLICATA N°${(m.nb_impressions || 1) - 1}` : 'ORIGINAL'}</span></div>
   </div>
-  <div class="title"><h1>${titre}</h1><p>${sousTitre}</p></div>
-  <div class="meta">
-    <div><span>Date</span><b>${esc(dateTxt)}</b></div>
-    <div><span>Caisse</span><b>${esc(m.journal_nom || '')}</b></div>
-    <div><span>Période</span><b>${esc(m.mois)} ${esc(m.annee)}</b></div>
-    <div><span>Rubrique</span><b>${esc(m.rubrique_code)}${m.rubrique_libelle ? ` — ${esc(m.rubrique_libelle)}` : ''}</b></div>
-  </div>
-  <div class="amount">
-    <div class="lbl">${estAnnulation ? 'Montant annulé' : estEntree ? 'Montant reçu' : 'Montant versé'}</div>
-    <div class="val">${estAnnulation ? '−' : ''}${fmtN(montant)}<small>${esc(devise)}</small></div>
-    <div class="words">Arrêté le présent bon à la somme de : <b>${enLettres}</b>.</div>
-  </div>
-  <div class="fields">
-    ${ligne('Libellé', esc(m.intitule))}
-    ${ligne(estAnnulation ? "Motif d'annulation" : 'Objet', esc(estAnnulation ? (m.motif_annulation || m.objet) : m.objet))}
-    ${ligne(tiers, esc(m.beneficiaire))}
-    ${ligne("Pièce d'identité", esc(m.piece_identite))}
-    ${ligne('Téléphone', esc(m.telephone))}
-    ${m.annule ? ligne('Statut', `<span style="color:#b91c1c">Écriture annulée${m.numero_annulation ? ` par la contre-passation n°${esc(m.numero_annulation)}` : ''}${m.motif_annulation ? ` — ${esc(m.motif_annulation)}` : ''}</span>`) : ''}
+  <div class="body">
+    <div class="left">
+      <div class="meta">
+        <div><span>Date</span><b>${esc(dateTxt)}</b></div>
+        <div><span>Caisse</span><b>${esc(m.journal_nom || '')}</b></div>
+        <div><span>Période</span><b>${esc(m.mois)} ${esc(m.annee)}</b></div>
+        <div><span>Rubrique</span><b>${esc(m.rubrique_code)}${m.rubrique_libelle ? ` — ${esc(m.rubrique_libelle)}` : ''}</b></div>
+      </div>
+      <div class="fields">
+        ${ligne('Libellé', esc(m.intitule))}
+        ${ligne(estAnnulation ? "Motif d'annulation" : 'Objet', esc(estAnnulation ? (m.motif_annulation || m.objet) : m.objet))}
+        ${ligne(tiers, esc(m.beneficiaire))}
+        ${ligne("Pièce d'identité", esc(m.piece_identite))}
+        ${ligne('Téléphone', esc(m.telephone))}
+        ${m.annule ? ligne('Statut', `<span style="color:#b91c1c">Annulée${m.numero_annulation ? ` (contre-passation n°${esc(m.numero_annulation)})` : ''}${m.motif_annulation ? ` — ${esc(m.motif_annulation)}` : ''}</span>`) : ''}
+      </div>
+    </div>
+    <div class="right"><div class="amount">
+      <div class="lbl">${estAnnulation ? 'Montant annulé' : estEntree ? 'Montant reçu' : 'Montant versé'}</div>
+      <div class="val">${estAnnulation ? '−' : ''}${fmtN(montant)}<small>${esc(devise)}</small></div>
+      <div class="words">Arrêté le présent bon à la somme de :<br><b>${enLettres}</b>.</div>
+    </div>
+    ${estAnnulation ? '' : `<div class="acquit">${estEntree
+      ? `La caisse reconnaît avoir reçu de <b>${esc(m.beneficiaire || '……………………………')}</b> la somme ci-dessus.`
+      : `Je soussigné(e) <b>${esc(m.beneficiaire || '……………………………')}</b> reconnais avoir reçu la somme ci-dessus.`}
+      <span>« Pour acquit » — Fait à ……………………, le ${esc(new Date(m.date).toLocaleDateString('fr-FR'))}</span></div>`}</div>
   </div>
   <div class="sign">
     <div><b>Caissier(ère)</b><i>${esc(m.caissier_nom || m.saisi_par || '')}</i></div>
-    <div><b>${estAnnulation ? 'Contrôle' : estEntree ? 'Déposant' : 'Bénéficiaire'}</b><i>${esc(estAnnulation ? 'Nom & signature' : (m.beneficiaire || 'Nom & signature'))}</i></div>
+    <div><b>${tiersLbl}</b><i>${esc(tiersNom || 'Nom & signature')}</i></div>
     <div><b>Directeur / Visa</b><i>${esc(m.directeur_nom || '')}</i></div>
   </div>
   <div class="foot"><span>Saisi par ${esc(m.saisi_par || '—')} · écriture n°${esc(m.numero)}</span><span>Imprimé le ${imprimeLe} par ${esc(m.imprime_par || '')}</span></div>
 </div>`;
+
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Bon ${num}</title>
 <style>
-@page{size:A4 landscape;margin:6mm}
+@page{size:A4 portrait;margin:6mm}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;font-size:10.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f1f5f9}
-.sheet{display:flex;justify-content:center;align-items:stretch;gap:0;margin:0 auto}
-.cut{width:9mm;flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center}
-.cut:before{content:'';position:absolute;top:0;bottom:0;left:50%;border-left:1.5px dashed #94a3b8}
-.cut span{position:relative;background:#f1f5f9;color:#64748b;font-size:14px;padding:4px 0;transform:rotate(90deg)}
-.ex{display:flex;justify-content:space-between;align-items:center;padding:4px 16px;background:#0f172a;color:#fff;font-size:8px;letter-spacing:1.2px}
-.ex span{opacity:.7;font-weight:700}.ex b{font-size:8.5px;letter-spacing:1px}
-.bon{position:relative;width:138mm;min-height:190mm;margin:0;background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
-@media screen{body{padding:18px}.bon{box-shadow:0 10px 30px rgba(15,23,42,.15)}}
-@media print{body{background:#fff}.bon{border:1px solid #cbd5e1;border-radius:6px;width:138mm;min-height:192mm;box-shadow:none}.cut span{background:#fff}.noprint{display:none}}
-.top{height:6px;background:${accent}}
-.head{display:flex;justify-content:space-between;align-items:flex-start;padding:12px 16px 10px;border-bottom:1px dashed #cbd5e1;gap:10px}
-.org b{display:block;font-size:13px;font-weight:800;letter-spacing:.2px}
-.org small{display:block;color:#64748b;font-size:8.5px;margin-top:2px;line-height:1.4}
-.org img{max-height:34px;max-width:90px;margin-bottom:4px}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;font-size:10px;-webkit-print-color-adjust:exact;print-color-adjust:exact;background:#f1f5f9}
+@media screen{body{padding:18px}}
+.sheet{width:198mm;margin:0 auto;display:flex;flex-direction:column}
+.bon{position:relative;height:136mm;background:#fff;border:1px solid #cbd5e1;border-top:5px solid ${accent};border-radius:8px;overflow:hidden;display:flex;flex-direction:column}
+@media screen{.bon{box-shadow:0 8px 24px rgba(15,23,42,.12)}}
+.cut{height:8mm;position:relative;display:flex;align-items:center;justify-content:center}
+.cut:before{content:'';position:absolute;left:0;right:0;top:50%;border-top:1.5px dashed #94a3b8}
+.cut span{position:relative;background:#f1f5f9;color:#64748b;font-size:13px;padding:0 6px}
+.ex{display:flex;justify-content:space-between;align-items:center;padding:3px 14px;background:#0f172a;color:#fff;font-size:8.5px;letter-spacing:1.2px}
+.ex span{opacity:.7;font-weight:700}.ex b{font-size:9px;letter-spacing:1px}
+.head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px dashed #cbd5e1}
+.org{display:flex;align-items:center;gap:8px;min-width:0}
+.org img{max-height:30px;max-width:70px}
+.org b{display:block;font-size:15px;font-weight:800}.org .sig{color:#64748b;font-weight:600}
+.org small{display:block;color:#64748b;font-size:8.5px;margin-top:1px;line-height:1.35}
+.ttl{text-align:center}
+.ttl h1{font-size:19px;font-weight:900;letter-spacing:1.1px;color:${accent};white-space:nowrap}
+.ttl p{color:#64748b;font-size:10px;margin-top:1px}
 .stamp{text-align:right;white-space:nowrap}
-.stamp .no{font-size:15px;font-weight:900;color:${accent};font-family:'Consolas',monospace;letter-spacing:.5px}
-.stamp .tag{display:inline-block;margin-top:4px;padding:2px 8px;border-radius:20px;font-size:8.5px;font-weight:800;letter-spacing:1px;
+.stamp small{font-size:8px;color:#94a3b8;letter-spacing:1px}
+.stamp .no{font-size:16px;font-weight:900;color:${accent};font-family:Consolas,monospace;letter-spacing:.5px}
+.stamp .tag{display:inline-block;margin-top:2px;padding:1px 7px;border-radius:20px;font-size:8.5px;font-weight:800;letter-spacing:1px;
   ${duplicata ? 'background:#fff7ed;color:#c2410c;border:1px solid #fdba74' : `background:${accentClair};color:${accent};border:1px solid ${accent}55`}}
-.title{padding:12px 16px 4px}
-.title h1{font-size:17px;font-weight:900;letter-spacing:1.2px;color:${accent}}
-.title p{color:#64748b;font-size:9.5px;margin-top:2px}
-.meta{display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;padding:8px 16px 4px}
-.meta div span{display:block;color:#94a3b8;font-size:8px;text-transform:uppercase;letter-spacing:.8px}
-.meta div b{font-size:10.5px}
-.amount{margin:10px 16px;border-radius:10px;background:${accentClair};border:1.5px solid ${accent}40;padding:12px 14px}
-.amount .lbl{font-size:8px;text-transform:uppercase;letter-spacing:1px;color:${accent};font-weight:800}
-.amount .val{font-size:26px;font-weight:900;color:${accent};font-family:'Consolas',monospace;margin-top:2px}
-.amount .val small{font-size:12px;font-weight:700;margin-left:4px}
-.amount .words{margin-top:6px;padding-top:6px;border-top:1px dashed ${accent}55;font-style:italic;font-size:10px;color:#334155}
-.fields{padding:2px 16px}
+.body{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;padding:12px 14px 6px;flex:1}
+.meta{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e2e8f0}
+.meta span{display:block;color:#94a3b8;font-size:8.5px;text-transform:uppercase;letter-spacing:.8px}
+.meta b{font-size:12.5px}
 .f{display:flex;gap:8px;padding:5px 0;border-bottom:1px solid #f1f5f9}
-.f span{width:34%;flex-shrink:0;color:#64748b;font-size:9.5px}
-.f b{font-weight:600;font-size:10.5px;word-break:break-word}
-.sign{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px 16px 6px;margin-top:auto}
-.sign div{border:1px solid #e2e8f0;border-radius:8px;height:64px;padding:5px 7px;font-size:8.5px;color:#64748b;display:flex;flex-direction:column;justify-content:space-between}
-.sign div b{color:#0f172a;font-size:9px}
-.sign div i{font-style:normal;font-size:8px;color:#94a3b8;border-top:1px dotted #cbd5e1;padding-top:2px}
-.foot{display:flex;justify-content:space-between;padding:7px 16px 10px;color:#94a3b8;font-size:7.5px;border-top:1px solid #f1f5f9}
-.wm{position:absolute;top:44%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:58px;font-weight:900;letter-spacing:6px;color:rgba(185,28,28,.12);border:6px solid rgba(185,28,28,.12);padding:4px 18px;border-radius:12px;pointer-events:none}
-.wm2{position:absolute;top:44%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:46px;font-weight:900;letter-spacing:6px;color:rgba(194,65,12,.08);pointer-events:none}
-.bar{max-width:285mm;margin:0 auto 12px;display:flex;gap:8px;justify-content:flex-end}
-@media print{.bar{display:none!important}}
+.f span{width:32%;flex-shrink:0;color:#64748b;font-size:11px}
+.f b{font-weight:600;font-size:12.5px;word-break:break-word}
+.right{display:flex;flex-direction:column;gap:8px}
+.acquit{border:1px dashed #cbd5e1;border-radius:10px;padding:8px 12px;font-size:11px;line-height:1.45;color:#334155}
+.acquit span{display:block;margin-top:5px;font-size:9.5px;color:#64748b;font-style:italic}
+.amount{border-radius:12px;background:${accentClair};border:1.5px solid ${accent}40;padding:14px 14px}
+.amount .lbl{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:${accent};font-weight:800}
+.amount .val{font-size:30px;font-weight:900;color:${accent};font-family:Consolas,monospace;margin-top:2px;white-space:nowrap}
+.amount .val small{font-size:12px;font-weight:700;margin-left:3px}
+.amount .words{margin-top:8px;padding-top:8px;border-top:1px dashed ${accent}55;font-style:italic;font-size:11px;color:#334155;line-height:1.4}
+.sign{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:6px 14px 4px}
+.sign div{border:1px solid #e2e8f0;border-radius:7px;height:25mm;padding:4px 8px;font-size:9px;color:#64748b;display:flex;flex-direction:column;justify-content:space-between}
+.sign div b{color:#0f172a;font-size:11px}
+.sign div i{font-style:normal;font-size:9px;color:#94a3b8;border-top:1px dotted #cbd5e1;padding-top:2px}
+.foot{display:flex;justify-content:space-between;padding:3px 14px 5px;color:#94a3b8;font-size:8px}
+.wm{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-14deg);font-size:64px;font-weight:900;letter-spacing:8px;color:rgba(185,28,28,.12);border:6px solid rgba(185,28,28,.12);padding:2px 20px;border-radius:12px;pointer-events:none}
+.wm2{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-14deg);font-size:56px;font-weight:900;letter-spacing:8px;color:rgba(194,65,12,.08);pointer-events:none}
+.bar{width:198mm;margin:0 auto 12px;display:flex;gap:8px;justify-content:flex-end}
 .bar button{border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;font-size:12px}
+@media print{body{background:#fff}.bon{box-shadow:none}.cut span{background:#fff}.noprint,.bar{display:none!important}}
 </style></head><body>
 <div class="bar noprint"><button style="background:#e2e8f0" onclick="window.close()">Fermer</button><button style="background:${accent};color:#fff" onclick="window.print()">🖨️ Imprimer</button></div>
 <div class="sheet">${bon(EXEMPLAIRES[0])}<div class="cut" aria-hidden="true"><span>✂</span></div>${bon(EXEMPLAIRES[1])}</div>
