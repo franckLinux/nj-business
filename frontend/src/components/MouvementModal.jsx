@@ -160,8 +160,9 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       try { await uploadFichiers(res.id); } catch (e) { console.warn('Upload PJ:', e); }
     }
 
-    onSaved();
-    toast(mouvement ? 'Mouvement modifié ✓' : 'Mouvement enregistré ✓', 'success');
+    // Nouvelle écriture : JournalPage propose aussitôt l'impression du bon.
+    onSaved(mouvement ? undefined : res);
+    if (mouvement) toast('Mouvement modifié ✓', 'success');
   };
 
   return (

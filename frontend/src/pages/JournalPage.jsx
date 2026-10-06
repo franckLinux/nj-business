@@ -9,6 +9,7 @@ import RanModal from '@/components/RanModal';
 import BudgetCaisseModal from '@/components/BudgetCaisseModal';
 import ArretCaisseModal from '@/components/ArretCaisseModal';
 import { printJournalView } from '@/lib/print';
+import { BonPretModal, BoutonBon } from '@/components/BonCaisse';
 import { syncManager } from '@/lib/syncManager';
 
 // Reprend loadJournalPage() de legacy/js/app.js (l. 295) — même structure DOM,
@@ -72,6 +73,8 @@ export default function JournalPage() {
     toast(res.message, 'success');
     charger();
   };
+
+  const [bonPret, setBonPret] = useState(null);
 
   const onImprimer = () => {
     printJournalView({ j, data, mois, annee, tenantNom: activeTenantNom || user?.tenantNom });
@@ -348,6 +351,7 @@ export default function JournalPage() {
                     <td style={{ textAlign: 'right', fontWeight: 700, color: '#dc2626', fontSize: 13, ...barree }}>{so !== 0 ? fmt(so, devise) : ''}</td>
                     <td style={{ textAlign: 'right', fontWeight: 800, fontSize: 13, color: cumulColor }}>{fmt(c, devise)}</td>
                     <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
+                      {m.id && m.numero != null && <BoutonBon m={m} toast={toast} onDone={charger} />}
                       {!isArrete && !m.annule && !m.annulation_de_id ? (
                         <>
                           {can('journal.edit') && (
@@ -365,7 +369,7 @@ export default function JournalPage() {
                           >↩</button>
                           )}
                         </>
-                      ) : <span style={{ color: '#94a3b8', fontSize: 11 }}>—</span>}
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -391,7 +395,18 @@ export default function JournalPage() {
           journal={j}
           mouvement={modal}
           onClose={() => setModal(undefined)}
-          onSaved={() => { setModal(undefined); charger(); }}
+          onSaved={(cree) => { setModal(undefined); charger(); if (cree?.id && cree?.numero) setBonPret(cree); else if (cree) toast('Mouvement enregistré ✓', 'success'); }}
+        />
+      )}
+
+      {bonPret && (
+        <BonPretModal
+          m={bonPret}
+          devise={devise}
+          toast={toast}
+          onDone={charger}
+          onClose={() => setBonPret(null)}
+          onNouvelle={() => { setBonPret(null); setModal(null); }}
         />
       )}
 

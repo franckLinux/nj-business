@@ -21,6 +21,8 @@ module.exports = (sequelize, DataTypes) => {
     // Migration 027 : numéro de séquence (attribué par la base) et annulation.
     numero: DataTypes.INTEGER,
     annule: { type: DataTypes.BOOLEAN, defaultValue: false },
+    nb_impressions: { type: DataTypes.INTEGER, defaultValue: 0 },
+    derniere_impression_le: DataTypes.DATE,
     annule_par_id: DataTypes.BIGINT,
     annulation_de_id: DataTypes.BIGINT,
     motif_annulation: { type: DataTypes.TEXT, defaultValue: '' },

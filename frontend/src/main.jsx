@@ -7,6 +7,7 @@ import { ToastProvider } from '@/context/ToastContext';
 
 import '@/styles/app.css';
 import '@/styles/sidebar.css';
+import '@/styles/boncaisse.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

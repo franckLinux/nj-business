@@ -265,6 +265,47 @@ const annulerMouvement = async (req, res) => {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
+// POST /api/journal/:id/impression — enregistre l'impression du bon de caisse
+// et renvoie tout ce qu'il faut pour l'imprimer (données serveur, pas d'écran).
+// 1re impression = ORIGINAL, les suivantes = DUPLICATA n°x.
+const imprimerBon = async (req, res) => {
+  try {
+    const [row] = await sequelize.query(
+      `UPDATE journal SET nb_impressions = nb_impressions + 1, derniere_impression_le = NOW()
+        WHERE id = :id AND tenant_id = :t RETURNING id`,
+      { replacements: { id: req.params.id, t: req.tenantId }, type: sequelize.QueryTypes.SELECT });
+    if (!row) return res.status(404).json({ error: 'Écriture introuvable.' });
+    const [m] = await sequelize.query(
+      `SELECT j.id, j.numero, j.date, j.mois, j.annee, j.type_caisse, j.rubrique_code, j.intitule, j.objet,
+              j.beneficiaire, j.piece_identite, j.telephone, j.entree, j.sortie, j.annule, j.annulation_de_id,
+              j.motif_annulation, j.nb_impressions, j.created_at,
+              jx.nom AS journal_nom, jx.code AS journal_code, jx.type AS journal_type,
+              r.intitule AS rubrique_libelle, u.username AS saisi_par,
+              o.numero AS numero_origine, a.numero AS numero_annulation, t.nom AS tenant_nom, t.sigle AS tenant_sigle, t.adresse AS tenant_adresse, t.boite_postale AS tenant_bp,
+              t.nui AS tenant_nui, t.registre_commerce AS tenant_rc, t.logo_url AS tenant_logo, t.devise,
+              t.caissier_nom, t.directeur_nom
+         FROM journal j
+         LEFT JOIN journaux jx ON jx.id = j.journal_id
+         LEFT JOIN rubriques r ON r.code = j.rubrique_code AND r.tenant_id = j.tenant_id
+         LEFT JOIN users u ON u.id = j.created_by
+         LEFT JOIN journal o ON o.id = j.annulation_de_id
+         LEFT JOIN journal a ON a.id = j.annule_par_id
+         LEFT JOIN tenants t ON t.id = j.tenant_id
+        WHERE j.id = :id`,
+      { replacements: { id: row.id }, type: sequelize.QueryTypes.SELECT });
+    if (m.nb_impressions > 1) {
+      sequelize.query(
+        `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+         VALUES (:t, :u, 'REIMPRESSION_BON', 'journal', :id, CAST(:v AS jsonb))`,
+        { replacements: { t: req.tenantId, u: req.user.id, id: String(m.id),
+          v: JSON.stringify({ numero: m.numero, duplicata: m.nb_impressions - 1 }) } }).catch(() => {});
+    }
+    res.json({ ...m, imprime_par: req.user.username });
+  } catch (err) {
+    console.error('[Journal] impression bon :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
 // GET /api/journal/annulations?statut=en_attente|approuvee|refusee|toutes
 const listerAnnulations = async (req, res) => {
   try { res.json(await annulation.lister({ tenantId: req.tenantId, statut: String(req.query.statut || 'en_attente') })); }
@@ -519,6 +560,6 @@ const getControleContext = async (req, res) => {
 };
 
 module.exports = {
-  getJournal, createMouvement, updateMouvement, deleteMouvement, annulerMouvement, listerAnnulations, deciderAnnulation,
+  getJournal, createMouvement, updateMouvement, deleteMouvement, annulerMouvement, listerAnnulations, deciderAnnulation, imprimerBon,
   getSoldes, getRan, setRan, getCumuls, getJournauxRecap, getControleContext,
 };

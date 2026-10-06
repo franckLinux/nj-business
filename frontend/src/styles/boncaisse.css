@@ -1,0 +1,24 @@
+/* Bon de caisse — bouton ligne + fenêtre « écriture enregistrée » */
+.btn-bon{position:relative;padding:4px 8px;margin-right:3px;background:linear-gradient(180deg,#fff,#f8fafc);border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;font-size:12px;transition:transform .12s,box-shadow .12s,border-color .12s}
+.btn-bon:hover{transform:translateY(-1px);border-color:#6366f1;box-shadow:0 3px 10px rgba(99,102,241,.25)}
+.btn-bon:disabled{opacity:.5;cursor:wait}
+.btn-bon i{position:absolute;top:-6px;right:-6px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:#f97316;color:#fff;font:700 9px/15px system-ui;font-style:normal;text-align:center}
+
+.bonpret-overlay{background:rgba(15,23,42,.55);backdrop-filter:blur(4px);align-items:center;justify-content:center;z-index:1200}
+.bonpret{--ac:#1d4ed8;--acl:#eff6ff;width:min(400px,calc(100vw - 32px));background:#fff;border-radius:20px;padding:28px 24px 18px;text-align:center;box-shadow:0 25px 60px rgba(15,23,42,.35);animation:bonpret-in .28s cubic-bezier(.2,.9,.3,1.2)}
+.bonpret.is-in{--ac:#047857;--acl:#ecfdf5}
+@keyframes bonpret-in{from{opacity:0;transform:translateY(14px) scale(.96)}to{opacity:1;transform:none}}
+.bonpret-check{width:58px;height:58px;margin:0 auto 10px;border-radius:50%;background:var(--acl);color:var(--ac);font-size:30px;font-weight:900;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 8px color-mix(in srgb,var(--acl) 60%,transparent)}
+.bonpret-kicker{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:#64748b;font-weight:700}
+.bonpret-num{font:800 13px ui-monospace,Consolas,monospace;color:var(--ac);margin-top:4px}
+.bonpret-amount{font-size:30px;font-weight:900;color:var(--ac);margin:8px 0 2px;letter-spacing:-.5px}
+.bonpret-lib{font-size:14px;color:#0f172a;font-weight:600}
+.bonpret-ben{font-size:12px;color:#64748b;margin-top:2px}
+.bonpret-print{width:100%;margin-top:20px;padding:15px 16px;border:none;border-radius:14px;cursor:pointer;background:linear-gradient(135deg,var(--ac),color-mix(in srgb,var(--ac) 70%,#000));color:#fff;font-size:15px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 10px 24px color-mix(in srgb,var(--ac) 35%,transparent);transition:transform .12s,box-shadow .12s}
+.bonpret-print span{font-size:20px}
+.bonpret-print:hover{transform:translateY(-2px);box-shadow:0 14px 30px color-mix(in srgb,var(--ac) 45%,transparent)}
+.bonpret-print:disabled{opacity:.7;cursor:wait;transform:none}
+.bonpret-actions{display:flex;gap:8px;margin-top:10px}
+.bonpret-actions button{flex:1;padding:10px;border-radius:10px;border:1px solid #e2e8f0;background:#f8fafc;color:#334155;font-weight:700;font-size:13px;cursor:pointer}
+.bonpret-actions button:hover{background:#f1f5f9;border-color:#cbd5e1}
+.bonpret-hint{margin-top:12px;font-size:11px;color:#94a3b8}
