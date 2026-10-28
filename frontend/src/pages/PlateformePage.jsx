@@ -10,7 +10,7 @@ import SuppressionClient from '@/components/SuppressionClient';
 // L'accès aux écrans de caisse d'un client passe par un accès support
 // temporaire et tracé (composant SupportAcces).
 const dateFr = (d, h = false) => (d ? (h ? new Date(d).toLocaleString('fr-FR') : new Date(d).toLocaleDateString('fr-FR')) : '—');
-const ROLES = { directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', comptable_cabinet: 'Comptable cabinet' };
+const ROLES = { directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', collaborateur: 'Collaborateur', comptable_cabinet: 'Comptable cabinet' };
 const ACTIONS = {
   CREATION_CLIENT: 'Création du client', MODIF_CLIENT: 'Modification des informations',
   SUSPENSION_CLIENT: 'Suspension', REACTIVATION_CLIENT: 'Réactivation',
@@ -60,6 +60,7 @@ const ROLES_CLIENT = [
   ['directeur', 'Directeur', 'Encadrement : validation, paramétrage, utilisateurs'],
   ['caissier', 'Caissier(ère)', 'Saisie quotidienne des mouvements'],
   ['auditeur', 'Comptable', 'Contrôle comptable : imputations et observations'],
+  ['collaborateur', 'Collaborateur', 'Modules de gestion (achats…), sans accès à la caisse'],
 ];
 
 function RolesClient({ id, utilisateurs }) {

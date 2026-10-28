@@ -147,6 +147,8 @@ const DONNEES_METIER = [
   ['registre_tiers', 'tiers'], ['pieces_jointes', 'pièce(s) jointe(s)'], ['exports_sage', 'export(s) Sage'],
   ['controles_pieces', 'contrôle(s) de pièces'], ['controles_anomalies', 'anomalie(s) de contrôle'],
   ['controles_arrets', 'contrôle(s) d\'arrêté'],
+  // NJ COMMERCIAL (050) : un client qui a commencé à travailler ne se supprime plus.
+  ['com_articles', 'article(s)'], ['com_stock_mouvements', 'mouvement(s) de stock'],
 ];
 const LIENS_COMMERCIAUX = [
   ['prospects', 'fiche prospect / espace de démonstration'], ['abonnements', 'abonnement(s)'],

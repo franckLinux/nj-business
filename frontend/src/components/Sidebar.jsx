@@ -17,7 +17,7 @@ const subClass = ({ isActive }) => 'nav-item nav-sub' + (isActive ? ' active' : 
 // Libellé affiché du rôle (044 : le code technique « auditeur » = profil « Comptable »).
 const LIBELLE_ROLE = {
   super_admin: 'Super admin', comptable_cabinet: 'Comptable cabinet', commercial: 'Commercial',
-  directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable',
+  directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', collaborateur: 'Collaborateur',
 };
 
 export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open = false, onClose }) {
@@ -233,6 +233,12 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         {isAdmin && (
           <>
             <div className="nav-sep" />
+            {activeTenantId && (
+              <NavLink to="/commercial" className={navClass} title="Module NJ COMMERCIAL du client choisi (s'il est activé)">
+                <svg viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>
+                NJ COMMERCIAL
+              </NavLink>
+            )}
             <NavLink to="/tenants" className={navClass}>
               <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
               Clients (Tenants)

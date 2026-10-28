@@ -31,6 +31,15 @@ import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
 import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
 import AccueilPage from '@/pages/AccueilPage';
+import CommercialLayout, { peutUn } from '@/components/commercial/CommercialLayout';
+import DemarragePage from '@/pages/commercial/DemarragePage';
+import SocietePage from '@/pages/commercial/SocietePage';
+import MagasinsPage from '@/pages/commercial/MagasinsPage';
+import FamillesPage from '@/pages/commercial/FamillesPage';
+import ArticlesPage from '@/pages/commercial/ArticlesPage';
+import TiersPage from '@/pages/commercial/TiersPage';
+import TaxesPage from '@/pages/commercial/TaxesPage';
+import UtilisateursPage from '@/pages/commercial/UtilisateursPage';
 import { consommerEntree, moduleActif, routeApresConnexion, systemeInstalle, utiliseAccueil } from '@/lib/modules';
 
 // Toutes les pages listées dans MIGRATION.md sont désormais portées.
@@ -76,6 +85,23 @@ function GardeCaisse({ children }) {
   return children;
 }
 
+// NJ COMMERCIAL (050) — même principe que GardeCaisse ; le cabinet passe (le
+// serveur répond 403 MODULE_INACTIF si le module n'est pas activé chez le client).
+function GardeCommercial({ children }) {
+  const { user } = useApp();
+  if (utiliseAccueil(user) && systemeInstalle(user) && !moduleActif(user, 'commercial')) {
+    return <Navigate to="/accueil" replace />;
+  }
+  return children;
+}
+
+// Garde d'un écran du module : une permission parmi plusieurs suffit.
+function AutoriseCm({ codes, children }) {
+  const { user, can } = useApp();
+  if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
+  return peutUn(can, codes) ? children : <Navigate to="/commercial" replace />;
+}
+
 function AuthenticatedApp() {
   const { user, can, activeTenantId } = useApp();
   const navigate = useNavigate();
@@ -102,6 +128,18 @@ function AuthenticatedApp() {
     <Routes>
       {/* Accueil NJ BUSINESS : hors du menu de la caisse, réservé aux utilisateurs d'un client. */}
       <Route path="accueil" element={utiliseAccueil(user) ? <AccueilPage /> : <Navigate to="/" replace />} />
+      <Route path="commercial" element={<GardeCommercial><CommercialLayout /></GardeCommercial>}>
+        <Route index element={<DemarragePage />} />
+        <Route path="societe"      element={<AutoriseCm codes={['com.parametrage.voir']}><SocietePage /></AutoriseCm>} />
+        <Route path="magasins"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><MagasinsPage /></AutoriseCm>} />
+        <Route path="familles"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><FamillesPage /></AutoriseCm>} />
+        <Route path="articles"     element={<AutoriseCm codes={['com.articles.voir', 'com.da.creer']}><ArticlesPage /></AutoriseCm>} />
+        <Route path="fournisseurs" element={<AutoriseCm codes={['com.tiers.voir']}><TiersPage key="f" type="fournisseur" /></AutoriseCm>} />
+        <Route path="clients"      element={<AutoriseCm codes={['com.tiers.voir']}><TiersPage key="c" type="client" /></AutoriseCm>} />
+        <Route path="taxes"        element={<AutoriseCm codes={['com.parametrage.voir']}><TaxesPage /></AutoriseCm>} />
+        <Route path="utilisateurs" element={<AutoriseCm codes={['com.parametrage.modifier']}><UtilisateursPage /></AutoriseCm>} />
+        <Route path="*"            element={<Navigate to="/commercial" replace />} />
+      </Route>
       <Route element={<GardeCaisse><Layout /></GardeCaisse>}>
         {/* Accueil du super_admin : l'administration (plateforme, ou configuration
             du client choisi) — jamais directement les données de caisse, qui

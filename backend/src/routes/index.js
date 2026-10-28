@@ -420,4 +420,7 @@ router.post  ('/activation/:token',          prCtrl.activer);
 // Tâche quotidienne (cron cPanel) : rappels, expirations, notification interne.
 router.all   ('/taches/quotidiennes',        prCtrl.requireTacheToken, prCtrl.taches);
 
+// ── NJ COMMERCIAL (migration 050) : /api/commercial/* ─────────────────────
+router.use('/commercial', require('./commercial.routes'));
+
 module.exports = router;

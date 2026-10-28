@@ -374,7 +374,7 @@ test('Démo : rôles Directeur et Caissier par défaut, utilisateurs illimités 
   assert.equal(r.data.compte_transfere, true);
   const [u] = await sql('SELECT tenant_id FROM users WHERE id = $1', [p.user_id]);
   U.dir.token = jwt.sign({ sub: p.user_id, username: f.email, role: 'directeur', tenantId: u.tenant_id }, SECRET, { expiresIn: '1h' });
-  assert.deepEqual((await appel('GET', '/users/roles-attribuables', 'dir')).data.roles, ['directeur', 'caissier', 'auditeur']);
+  assert.deepEqual((await appel('GET', '/users/roles-attribuables', 'dir')).data.roles, ['directeur', 'caissier', 'auditeur', 'collaborateur']);   // collaborateur : 050
   for (const [role, n] of [['caissier', 7], ['caissier', 8], ['auditeur', 7], ['directeur', 7]]) {
     const x = await nouvel(role, n);
     assert.equal(x.status, 201, `${role} après conversion : ${x.message}`);

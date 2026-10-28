@@ -9,9 +9,9 @@
 const { sequelize } = require('../models');
 
 const T = sequelize.QueryTypes;
-const ROLES_TENANT = ['directeur', 'caissier', 'auditeur'];
+const ROLES_TENANT = ['directeur', 'caissier', 'auditeur', 'collaborateur'];   // collaborateur : 050
 const ROLES_DEMO_DEFAUT = ['directeur', 'caissier'];
-const LIBELLES = { directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable' };   // code technique « auditeur » (044)
+const LIBELLES = { directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', collaborateur: 'Collaborateur' };   // code technique « auditeur » (044)
 
 class ErreurMetier extends Error {
   constructor(status, message) { super(message); this.status = status; }

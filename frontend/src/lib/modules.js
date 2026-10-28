@@ -9,9 +9,22 @@
 
 export const systemeInstalle = (user) => Array.isArray(user?.modules);
 
-/** Modules activés et opérationnels pour l'espace de l'utilisateur. */
+/**
+ * La PERSONNE a-t-elle de quoi travailler dans ce module ? (050)
+ *   • NJ CAISSE PRO : tous les rôles sauf « collaborateur » (aucun droit de caisse) ;
+ *   • NJ COMMERCIAL : au moins une permission com.* ;
+ * Le serveur reste seul juge : chaque route exige sa permission.
+ */
+export const accesModule = (user, code) => {
+  if (user?.role === 'super_admin') return true;
+  if (code === 'caisse') return user?.role !== 'collaborateur';
+  if (code === 'commercial') return Array.isArray(user?.permissions) && user.permissions.some((p) => p.startsWith('com.'));
+  return true;
+};
+
+/** Modules activés et opérationnels pour l'espace de l'utilisateur, et ouverts à cette personne. */
 export const modulesActifs = (user) => (systemeInstalle(user)
-  ? user.modules.filter((m) => m.actif && m.statut === 'operationnel')
+  ? user.modules.filter((m) => m.actif && m.statut === 'operationnel' && accesModule(user, m.code))
   : []);
 
 /** Le module est-il utilisable ? Sans système installé : NJ CAISSE PRO seul. */

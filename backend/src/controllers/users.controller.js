@@ -11,7 +11,7 @@ const { getEffectivePermissions, getBasePermissions, verifierCodesAccordables } 
 // super_admin n'est JAMAIS attribuable via l'API : auparavant, un directeur
 // disposant de users.edit pouvait promouvoir un compte de son client en
 // super_admin et prendre le contrôle de toute la plateforme.
-const ROLES_TENANT = ['directeur', 'caissier', 'auditeur'];
+const ROLES_TENANT = ['directeur', 'caissier', 'auditeur', 'collaborateur'];   // collaborateur : 050
 const ROLES_CABINET_CREABLES = ['comptable_cabinet', 'commercial'];
 const TOUS_ROLES = ['super_admin', 'comptable_cabinet', 'commercial', ...ROLES_TENANT];
 const ROLES_VALIDES = [...ROLES_TENANT, ...ROLES_CABINET_CREABLES]; // compat (validators)
@@ -21,9 +21,10 @@ const ROLES_LABELS = {
   auditeur: 'Comptable',   // ex-« Auditeur » (044) : profil de contrôle comptable
   comptable_cabinet: 'Comptable Cabinet',
   commercial: 'Commercial',
+  collaborateur: 'Collaborateur',   // 050 : modules de gestion, sans caisse
   super_admin: 'Super Admin',
 };
-const PRIORITE_ROLE = { directeur: 1, comptable_cabinet: 2, caissier: 3, auditeur: 4 };
+const PRIORITE_ROLE = { directeur: 1, comptable_cabinet: 2, caissier: 3, auditeur: 4, collaborateur: 5 };
 
 // Rôles que l'appelant peut attribuer dans le contexte courant.
 const rolesAttribuables = (req) => {

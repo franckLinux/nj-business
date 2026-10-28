@@ -9,7 +9,7 @@ import { CONTACT_CABINET, modulesActifs, systemeInstalle } from '@/lib/modules';
 // Présente seulement : l'accès réel est contrôlé par le serveur (403 MODULE_INACTIF).
 // Aucun chiffre ni indicateur ici tant qu'il n'est pas calculé par le serveur.
 const LIBELLE_ROLE = {
-  directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', comptable_cabinet: 'Comptable cabinet',
+  directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', collaborateur: 'Collaborateur', comptable_cabinet: 'Comptable cabinet',
 };
 
 const INITIALES = { commercial: 'CM', comptabilite: 'CT', cg: 'CG', dsf: 'DSF', revis: 'RV', rh: 'RH' };

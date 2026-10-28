@@ -127,8 +127,9 @@ test('T1/T3/T4 — tous les clients ont NJ CAISSE PRO ; déclencheur à la créa
     await client.query('COMMIT');
   } finally { client.release(); }
   assert.deepEqual(await sql('SELECT COUNT(*)::int AS n FROM tenant_modules'), avant, 'rejouée : aucune ligne en plus');
+  // Rejouer la 048 ne réécrit pas le catalogue : NJ COMMERCIAL reste opérationnel (050).
   const [{ statut }] = await sql("SELECT statut FROM modules WHERE code = 'commercial'");
-  assert.equal(statut, 'en_preparation');
+  assert.equal(statut, 'operationnel');
 });
 
 test('T5 — la connexion renvoie les modules de l\'espace', async () => {
@@ -153,7 +154,7 @@ test('T9/T10 — seul le super_admin modifie ; motif exigé ; module en prépara
   let r = await appel('PUT', `/plateforme/clients/${A}/modules/caisse`, 'adm', { actif: false });
   assert.equal(r.status, 400);
   assert.match(r.message, /Motif/);
-  r = await appel('PUT', `/plateforme/clients/${A}/modules/commercial`, 'adm', { actif: true });
+  r = await appel('PUT', `/plateforme/clients/${A}/modules/dsf`, 'adm', { actif: true });   // NJ DSF : en préparation (049)
   assert.equal(r.status, 400);
   assert.match(r.message, /préparation/);
   assert.equal((await appel('PUT', `/plateforme/clients/${A}/modules/inexistant`, 'adm', { actif: true })).status, 404);

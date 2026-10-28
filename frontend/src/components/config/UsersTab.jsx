@@ -10,15 +10,16 @@ import AffectationsModal from '@/components/AffectationsModal';
 const ROLES_LABELS = {
   directeur: '👔 Directeur', caissier: '🧾 Caissier(ère)', auditeur: '📘 Comptable',
   comptable_cabinet: '📊 Comptable Cabinet', super_admin: '⚙️ Super Admin', commercial: '💼 Commercial',
+  collaborateur: '🧩 Collaborateur',   // 050 : modules de gestion, sans caisse
 };
 const ROLES_COLORS = {
   directeur: '#dbeafe', caissier: '#fce7f3', auditeur: '#fef3c7',
-  comptable_cabinet: '#dcfce7', super_admin: '#ede9fe', commercial: '#ffedd5',
+  comptable_cabinet: '#dcfce7', super_admin: '#ede9fe', commercial: '#ffedd5', collaborateur: '#ccfbf1',
 };
 // Même règle que le serveur (users.controller.js → rolesAttribuables) :
 // dans un client → rôles du client ; hors client (super_admin) → comptable_cabinet.
 // super_admin n'est jamais proposé.
-const ROLES_CLIENT = ['directeur', 'caissier', 'auditeur'];
+const ROLES_CLIENT = ['directeur', 'caissier', 'auditeur', 'collaborateur'];
 const ROLES_CABINET = ['comptable_cabinet', 'commercial'];
 
 // Exporté : réutilisé par JournauxTab pour la création rapide d'un responsable

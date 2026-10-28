@@ -167,6 +167,7 @@ const definir = async ({ tenantId, code, actif, motif, userId }) => {
        DO UPDATE SET actif = EXCLUDED.actif, modifie_par = EXCLUDED.modifie_par,
                      modifie_le = NOW(), motif = EXCLUDED.motif`,
       [tenantId, code, actif, userId, raison]);
+    if (actif && PREPARATIONS[code]) await PREPARATIONS[code](client, tenantId);
     await client.query(
       `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur, nouvelle_valeur)
        VALUES ($1, $2, $3, 'tenant_modules', $4, $5, $6)`,
@@ -181,6 +182,47 @@ const definir = async ({ tenantId, code, actif, motif, userId }) => {
   } finally {
     client.release();
   }
+};
+
+// ── Préparation d'un client à l'activation d'un module ─────────────────────
+// NJ COMMERCIAL (050) :
+//   • profils métier « achats » prêts à attribuer (créés une seule fois, jamais
+//     écrasés : le directeur peut les adapter ensuite) ;
+//   • si le client a un plafond de permissions, les permissions com.* y sont
+//     ajoutées — activer le module, c'est l'ouvrir ; les droits de chaque
+//     personne restent fixés par son rôle et son profil.
+const PROFILS_COMMERCIAL = [
+  ['achats_demandeur', 'Demandeur achats', 'Exprime ses besoins d\'achat et suit ses demandes', '#0ea5e9',
+    ['com.parametrage.voir', 'com.articles.voir', 'com.tiers.voir', 'com.da.creer', 'com.documents.ajouter']],
+  ['achats_gestionnaire', 'Gestionnaire des achats (GAS)', 'Vérifie stocks et fournisseurs, prépare les bons de commande', '#6366f1',
+    ['com.parametrage.voir', 'com.articles.voir', 'com.articles.modifier', 'com.tiers.voir', 'com.tiers.modifier', 'com.stock.initial',
+      'com.da.creer', 'com.da.voir_tout', 'com.bc.preparer', 'com.documents.ajouter', 'com.tableau_bord.voir']],
+  ['achats_responsable', 'Responsable des achats', 'Approuve ou rejette les demandes, émet et annule les bons', '#7c3aed',
+    ['com.parametrage.voir', 'com.parametrage.modifier', 'com.articles.voir', 'com.articles.modifier', 'com.tiers.voir',
+      'com.tiers.modifier', 'com.tiers.banque', 'com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.bc.preparer',
+      'com.bc.emettre', 'com.bc.annuler', 'com.documents.ajouter', 'com.tableau_bord.voir']],
+];
+const PREPARATIONS = {
+  commercial: async (client, tenantId) => {
+    const { rows: cat } = await client.query("SELECT code FROM permissions WHERE module = 'commercial'");
+    const connus = new Set(cat.map((r) => r.code));
+    for (const [code, nom, description, couleur, perms] of PROFILS_COMMERCIAL) {
+      const { rows: existe } = await client.query('SELECT id FROM roles WHERE tenant_id = $1 AND code = $2', [tenantId, code]);
+      if (existe[0]) continue;
+      const { rows: r } = await client.query(
+        'INSERT INTO roles (nom, code, description, couleur, tenant_id, is_system) VALUES ($1, $2, $3, $4, $5, false) RETURNING id',
+        [nom, code, description, couleur, tenantId]);
+      for (const p of perms.filter((c) => connus.has(c))) {
+        await client.query('INSERT INTO role_permissions (role_id, permission_code) VALUES ($1, $2) ON CONFLICT DO NOTHING', [r[0].id, p]);
+      }
+    }
+    const { rows: plafond } = await client.query('SELECT 1 FROM tenant_permissions WHERE tenant_id = $1 LIMIT 1', [tenantId]);
+    if (plafond[0]) {
+      await client.query(
+        `INSERT INTO tenant_permissions (tenant_id, permission_code)
+         SELECT $1, code FROM permissions WHERE module = 'commercial' ON CONFLICT DO NOTHING`, [tenantId]);
+    }
+  },
 };
 
 module.exports = {
