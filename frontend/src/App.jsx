@@ -31,7 +31,10 @@ import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
 import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
 import AccueilPage from '@/pages/AccueilPage';
-import CommercialLayout, { peutUn } from '@/components/commercial/CommercialLayout';
+import CommercialLayout, { peutUn, DROITS_DEMANDES, DROITS_AUTORISATIONS } from '@/components/commercial/CommercialLayout';
+import DemandesPage from '@/pages/commercial/DemandesPage';
+import DemandeFormPage from '@/pages/commercial/DemandeFormPage';
+import DemandePage from '@/pages/commercial/DemandePage';
 import DemarragePage from '@/pages/commercial/DemarragePage';
 import SocietePage from '@/pages/commercial/SocietePage';
 import MagasinsPage from '@/pages/commercial/MagasinsPage';
@@ -138,6 +141,11 @@ function AuthenticatedApp() {
         <Route path="clients"      element={<AutoriseCm codes={['com.tiers.voir']}><TiersPage key="c" type="client" /></AutoriseCm>} />
         <Route path="taxes"        element={<AutoriseCm codes={['com.parametrage.voir']}><TaxesPage /></AutoriseCm>} />
         <Route path="utilisateurs" element={<AutoriseCm codes={['com.parametrage.modifier']}><UtilisateursPage /></AutoriseCm>} />
+        <Route path="demandes"              element={<AutoriseCm codes={DROITS_DEMANDES}><DemandesPage key="d" /></AutoriseCm>} />
+        <Route path="demandes/nouvelle"     element={<AutoriseCm codes={['com.da.creer']}><DemandeFormPage key="n" /></AutoriseCm>} />
+        <Route path="demandes/:id"          element={<AutoriseCm codes={DROITS_DEMANDES}><DemandePage /></AutoriseCm>} />
+        <Route path="demandes/:id/modifier" element={<AutoriseCm codes={['com.da.creer']}><DemandeFormPage key="m" /></AutoriseCm>} />
+        <Route path="autorisations"         element={<AutoriseCm codes={DROITS_AUTORISATIONS}><DemandesPage key="a" autorisations /></AutoriseCm>} />
         <Route path="*"            element={<Navigate to="/commercial" replace />} />
       </Route>
       <Route element={<GardeCaisse><Layout /></GardeCaisse>}>

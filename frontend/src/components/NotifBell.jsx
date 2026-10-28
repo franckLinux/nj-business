@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 // Reprend la cloche de notifications de legacy/js/app.js (l. 2637-2716) :
 // updateNotifBadge/loadNotifications/toggleNotifications/ouvrirNotification/
 // marquerToutesLues, avec le polling 45s de launchApp() (l. 6246-6249).
-const NOTIF_ICONS = { attente_creee: '📤', attente_approuvee: '✅', attente_rejetee: '❌' };
+const NOTIF_ICONS = { attente_creee: '📤', attente_approuvee: '✅', attente_rejetee: '❌', com_demande: '🛒' };
 
 const tempsRelatif = (iso) => {
   const d = new Date(iso);
@@ -73,6 +73,10 @@ export default function NotifBell() {
     if (n.type === 'attente_creee' && peutVoirAttente) {
       setOpen(false);
       navigate('/attente');
+    } else if (n.type === 'com_demande' && n.ref_id) {
+      // NJ COMMERCIAL (051) : la notification ouvre directement la demande d'achat.
+      setOpen(false);
+      navigate(`/commercial/demandes/${n.ref_id}`);
     } else {
       loadList();
     }

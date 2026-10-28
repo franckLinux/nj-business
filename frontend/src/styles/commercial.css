@@ -144,3 +144,71 @@
   .cm-tiroir-corps { padding: 12px 14px 20px; }
   .cm-compteur { margin-left: 0; width: 100%; }
 }
+
+/* ── Achats (livraison B) ─────────────────────────────────────────────── */
+.cm-rouge { background: #fee2e2; color: #991b1b; }
+.cm-onglets { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; flex-wrap: wrap; }
+.cm-onglets button { background: none; border: 0; border-bottom: 2.5px solid transparent; padding: 9px 14px; font-size: 13.5px; font-weight: 700; color: var(--text-muted); cursor: pointer; font-family: inherit; display: inline-flex; gap: 6px; align-items: center; }
+.cm-onglets button[aria-selected='true'] { color: var(--accent); border-bottom-color: var(--accent); }
+.cm-onglets .cm-compte { font-size: 11px; background: #fee2e2; color: #b91c1c; border-radius: 999px; padding: 0 7px; line-height: 18px; }
+.cm-badge-menu { margin-left: auto; font-size: 11px; font-weight: 800; background: #dc2626; color: #fff; border-radius: 999px; padding: 0 7px; line-height: 18px; }
+
+.cm-stock-ligne { display: inline-block; font-size: 12px; font-weight: 600; border-radius: 7px; padding: 3px 8px; line-height: 1.4; }
+.cm-vert { background: #dcfce7; color: #166534; }
+.cm-orange { background: #ffedd5; color: #9a3412; }
+.cm-gris { background: #f1f5f9; color: #475569; }
+
+.cm-lignes { width: 100%; border-collapse: separate; border-spacing: 0; }
+.cm-lignes th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.cm-lignes td { padding: 9px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; font-size: 13px; }
+.cm-lignes input, .cm-lignes select { height: 36px; border: 1.5px solid var(--border); border-radius: 8px; padding: 0 9px; font-size: 13px; font-family: inherit; width: 100%; background: #fff; }
+.cm-lignes input:focus, .cm-lignes select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, .15); }
+.cm-lignes .cm-qte-input { width: 110px; text-align: right; }
+.cm-lignes select { min-width: 0; max-width: 100%; }
+.cm-lignes td.cm-l-fournisseur { min-width: 200px; }
+.cm-ajout { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.cm-ajout select { flex: 1 1 280px; min-width: 0; max-width: 100%; height: 38px; border: 1.5px dashed #93c5fd; border-radius: 9px; padding: 0 10px; font-size: 13px; font-family: inherit; background: #f8fbff; }
+.cm-x { background: none; border: 0; color: #94a3b8; font-size: 18px; cursor: pointer; width: 32px; height: 32px; border-radius: 7px; }
+.cm-x:hover { background: #fef2f2; color: #b91c1c; }
+
+.cm-fiche-tete { display: flex; gap: 14px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin-bottom: 14px; }
+.cm-fiche-tete h2 { margin: 0; font-size: 20px; font-weight: 800; color: var(--brand); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.cm-retour { font-size: 13px; color: var(--text-muted); text-decoration: none; display: inline-block; margin-bottom: 6px; }
+.cm-retour:hover { color: var(--accent); }
+.cm-infos { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px 16px; font-size: 13px; }
+.cm-infos dt { color: var(--text-muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.cm-infos dd { margin: 2px 0 0; font-weight: 600; word-break: break-word; }
+.cm-deux { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; align-items: start; }
+
+.cm-decision { border: 2px solid #c7d2fe; background: #eef2ff; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+.cm-decision h4 { margin: 0 0 6px; font-size: 14px; color: #312e81; }
+.cm-decision textarea { width: 100%; min-height: 64px; border: 1.5px solid #c7d2fe; border-radius: 9px; padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; background: #fff; margin: 6px 0 10px; }
+.cm-decision .cm-actions { justify-content: flex-end; }
+
+.cm-fil { list-style: none; margin: 0; padding: 0; position: relative; }
+.cm-fil::before { content: ''; position: absolute; left: 7px; top: 6px; bottom: 6px; width: 2px; background: #e2e8f0; }
+.cm-fil li { position: relative; padding: 0 0 14px 24px; font-size: 13px; }
+.cm-fil li::before { content: ''; position: absolute; left: 1px; top: 4px; width: 14px; height: 14px; border-radius: 50%; background: #fff; border: 2.5px solid #94a3b8; }
+.cm-fil li.cm-f-ok::before { border-color: #16a34a; background: #dcfce7; }
+.cm-fil li.cm-f-ko::before { border-color: #dc2626; background: #fee2e2; }
+.cm-fil li.cm-f-info::before { border-color: #3b82f6; background: #dbeafe; }
+.cm-fil strong { display: block; color: var(--text); }
+.cm-fil .cm-quand { font-size: 11.5px; color: var(--text-muted); }
+.cm-fil .cm-mot { margin-top: 4px; background: #f8fafc; border-radius: 7px; padding: 6px 9px; font-size: 12.5px; }
+
+.cm-pieces { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cm-pieces li { display: flex; gap: 8px; align-items: center; font-size: 13px; border: 1px solid var(--border); border-radius: 9px; padding: 7px 10px; background: #fff; }
+.cm-pieces li.cm-retiree { opacity: .55; text-decoration: line-through; }
+.cm-pieces .cm-nom { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 960px) { .cm-deux { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  /* responsive.css impose 620 px aux tableaux de 5 colonnes : pas à celui-ci, empilé en cartes. */
+  .page table.cm-lignes, .cm-lignes, .cm-lignes tbody { display: block; width: 100%; min-width: 0 !important; }
+  .cm-lignes thead { display: none; }
+  .cm-lignes td { min-width: 0 !important; }
+  .cm-lignes tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .cm-lignes td { border: 0; padding: 0; display: block; }
+  .cm-lignes td.cm-l-article, .cm-lignes td.cm-l-stock, .cm-lignes td.cm-l-fournisseur { flex: 1 1 100%; width: 100%; }
+  .cm-lignes td.cm-l-fournisseur select { width: 100%; }
+}

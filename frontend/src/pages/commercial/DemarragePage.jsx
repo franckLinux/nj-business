@@ -58,8 +58,8 @@ export default function DemarragePage() {
         ))}
       </div>
       <div className="cm-avenir">
-        <strong>À venir dans ce module :</strong> demandes d'achat avec consultation du stock, circuit d'autorisation et notifications,
-        puis bons de commande en PDF avec QR code de vérification. Ces écrans ne sont pas encore disponibles.
+        <strong>Disponible :</strong> demandes d'achat avec consultation du stock, circuit d'autorisation et notifications (menu Achats).
+        <br /><strong>À venir :</strong> bons de commande en PDF avec QR code de vérification, proformas, tableau de bord des achats. Ces écrans ne sont pas encore disponibles.
       </div>
     </div>
   );

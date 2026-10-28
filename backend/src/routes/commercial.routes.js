@@ -44,4 +44,20 @@ router.put ('/stock/initial',      ...P('com.stock.initial'),        c.putStockI
 // Droits de chacun : réservé à qui administre le module.
 router.get ('/utilisateurs',       ...P('com.parametrage.modifier'), c.getUtilisateurs);
 
+// ── Livraison B : demandes d'achat (les droits fins — auteur, étape, auto-validation —
+// sont vérifiés par le service ; ici, l'entrée minimale du module achats).
+const DA = [...base, requireAnyPermission('com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction')];
+router.get   ('/demandes',                      ...DA, c.getDemandes);
+router.get   ('/demandes/compteurs',            ...DA, c.getCompteurs);
+router.get   ('/demandes/:id',                  ...DA, c.getDemande);
+router.post  ('/demandes',                      ...P('com.da.creer'), c.postDemande);
+router.put   ('/demandes/:id',                  ...P('com.da.creer'), c.putDemande);
+router.delete('/demandes/:id',                  ...P('com.da.creer'), c.deleteDemande);
+router.post  ('/demandes/:id/soumission',       ...P('com.da.creer'), c.postSoumission);
+router.post  ('/demandes/:id/decision',         ...DA, c.postDecision);
+router.post  ('/demandes/:id/annulation',       ...DA, c.postAnnulation);
+router.post  ('/demandes/:id/pieces',           ...P('com.documents.ajouter'), c.postPiece);
+router.post  ('/demandes/:id/pieces/:doc/retrait', ...P('com.documents.ajouter'), c.postRetraitPiece);
+router.get   ('/demandes/:id/pieces/:doc',      ...DA, c.getPiece);
+
 module.exports = router;

@@ -291,6 +291,40 @@ const sendMouvementAttenteAlert = async (o) => {
   }
 };
 
+// ── NJ COMMERCIAL (051) : demande d'achat à examiner / décision ───────────
+// o = { to, nom, tenantNom, titre, intro, demande: { numero, date, demandeur, service, magasin,
+//       fournisseur, motif, statut, montant }, lignes: [{ article, quantite, unite }], lien }
+const sendDemandeAchat = async (o) => {
+  const e = (v) => echapper(v);
+  const fmt = (n) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('fr-FR')} FCFA`);
+  const d = o.demande;
+  const lignes = (o.lignes || []).map((l) => `<tr><td style="padding:6px 0;border-bottom:1px solid #f1f5f9">${e(l.article)}</td>`
+    + `<td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right;white-space:nowrap">${e(Number(l.quantite).toLocaleString('fr-FR'))} ${e(l.unite)}</td></tr>`).join('');
+  const ligne = (k, v) => `<tr><td style="padding:5px 0;color:#64748b;width:42%">${k}</td><td style="padding:5px 0;font-weight:600;color:#0f172a">${e(v || '—')}</td></tr>`;
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/></head>
+<body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:0">
+<div style="max-width:600px;margin:30px auto;background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
+  <div style="background:#1a2b4a;padding:22px 30px">
+    <div style="color:#93c5fd;font-size:12px;font-weight:700;letter-spacing:.08em">NJ COMMERCIAL · ${e(o.tenantNom)}</div>
+    <h1 style="color:#fff;margin:6px 0 0;font-size:19px">${e(o.titre)}</h1>
+  </div>
+  <div style="padding:22px 30px;font-size:14px;color:#1e293b;line-height:1.55">
+    <p style="margin:0 0 14px">Bonjour ${e(o.nom || '')},<br/>${e(o.intro)}</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px">
+      ${ligne('Demande', d.numero)}${ligne('Date', d.date)}${ligne('Demandeur', d.demandeur)}${ligne('Service', d.service)}
+      ${ligne('Magasin', d.magasin)}${ligne('Fournisseur proposé', d.fournisseur)}${ligne('Montant estimé', fmt(d.montant))}${ligne('Statut', d.statut)}
+    </table>
+    <p style="margin:0 0 6px;font-weight:700;font-size:13px">Motif</p>
+    <p style="margin:0 0 14px;background:#f8fafc;border-radius:8px;padding:10px 12px;font-size:13px">${e(d.motif)}</p>
+    <p style="margin:0 0 6px;font-weight:700;font-size:13px">Articles demandés</p>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">${lignes}</table>
+    ${o.lien ? `<p style="text-align:center;margin:24px 0 4px"><a href="${e(o.lien)}" style="display:inline-block;background:#3b82f6;color:#fff;text-decoration:none;font-weight:700;padding:12px 28px;border-radius:9px">Ouvrir la demande</a></p>
+    <p style="text-align:center;font-size:11px;color:#94a3b8;margin:0">Connexion requise.</p>` : ''}
+  </div>
+</div></body></html>`;
+  return envoyer({ to: o.to, subject: `${o.titre} — ${d.numero}`, html });
+};
+
 // Diagnostic : la connexion et l'authentification SMTP fonctionnent-elles ?
 const verifierSmtp = async () => {
   const transporter = createTransporter();
@@ -425,7 +459,7 @@ const sendReinitialisationMotDePasse = ({ to, nom, lien }) => {
 };
 
 module.exports = {
-  verifierSmtp,
+  verifierSmtp, sendDemandeAchat,
   sendReinitialisationMotDePasse,
   sendBienvenueClient,
   sendInvitationDemo, sendRappelDemo, sendNotificationAdmin, contenuInvitation, sendDepassementAlert, sendMouvementAttenteAlert };

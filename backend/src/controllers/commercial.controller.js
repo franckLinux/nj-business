@@ -50,3 +50,51 @@ module.exports = {
 
   getUtilisateurs: repondre('utilisateurs', (req) => svc.utilisateurs(req.tenantId)),
 };
+
+// ── Livraison B : demandes d'achat et autorisations (services/commercial/demandes.service.js) ──
+const fs = require('fs');
+const da = require('../services/commercial/demandes.service');
+const { ErreurDocument } = require('../services/commercial/documents.service');
+const repondreDa = (quoi, fn, statut = 200) => async (req, res) => {
+  try {
+    const ctx = await da.contexte(req);
+    res.status(statut).json(await fn(ctx, req));
+  } catch (err) {
+    if (err instanceof da.ErreurDemande || err instanceof ErreurDocument || err instanceof svc.ErreurCom) return res.status(err.status).json({ error: err.message });
+    if (/INTANGIBLE/.test(err.message || '')) return res.status(409).json({ error: err.message.replace(/^.*?: /, '') });
+    if (err?.original?.code === '23514' || err?.parent?.code === '23514') return res.status(400).json({ error: 'Donnée refusée par les règles de la base.' });
+    console.error(`[Commercial] ${quoi} :`, err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+Object.assign(module.exports, {
+  getDemandes:    repondreDa('demandes', (ctx, req) => da.lister(ctx, req.query)),
+  getCompteurs:   repondreDa('compteurs', (ctx) => da.compteurs(ctx)),
+  getDemande:     repondreDa('demande', (ctx, req) => da.lire(ctx, req.params.id)),
+  postDemande:    repondreDa('demande.création', (ctx, req) => da.creer(ctx, req.body || {}), 201),
+  putDemande:     repondreDa('demande.modif', (ctx, req) => da.modifier(ctx, req.params.id, req.body || {})),
+  deleteDemande:  repondreDa('demande.suppression', (ctx, req) => da.supprimer(ctx, req.params.id)),
+  postSoumission: repondreDa('demande.soumission', (ctx, req) => da.soumettre(ctx, req.params.id, req.body || {})),
+  postDecision:   repondreDa('demande.décision', (ctx, req) => da.decider(ctx, req.params.id, req.body || {})),
+  postAnnulation: repondreDa('demande.annulation', (ctx, req) => da.annuler(ctx, req.params.id, req.body || {})),
+  postPiece:      repondreDa('demande.pièce', (ctx, req) => da.joindre(ctx, req.params.id, req.body || {}), 201),
+  postRetraitPiece: repondreDa('demande.pièce.retrait', (ctx, req) => da.retirerPiece(ctx, req.params.id, req.params.doc, req.body || {})),
+  // Téléchargement authentifié (jamais par /uploads).
+  getPiece: async (req, res) => {
+    try {
+      const ctx = await da.contexte(req);
+      const f = await da.lirePiece(ctx, req.params.id, req.params.doc);
+      await fs.promises.access(f.chemin, fs.constants.R_OK).catch(() => { throw new da.ErreurDemande(410, 'Fichier introuvable sur le serveur.'); });
+      res.setHeader('Content-Type', f.mime);
+      res.setHeader('Content-Disposition', `inline; filename="${String(f.nom).replace(/[^\w.\- ()]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(f.nom)}`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Piece-SHA256', f.sha256);
+      fs.createReadStream(f.chemin).on('error', () => { if (!res.headersSent) res.status(500).end(); else res.destroy(); }).pipe(res);
+    } catch (err) {
+      if (err instanceof da.ErreurDemande) return res.status(err.status).json({ error: err.message });
+      console.error('[Commercial] pièce :', err.message);
+      return res.status(500).json({ error: 'Erreur serveur.' });
+    }
+  },
+});

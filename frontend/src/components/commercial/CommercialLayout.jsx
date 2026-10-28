@@ -8,6 +8,7 @@ import NjMarque from '../NjMarque';
 import MonCompteModal from '../MonCompteModal';
 import { useApp } from '@/context/AppContext';
 import { utiliseAccueil } from '@/lib/modules';
+import { api } from '@/lib/api';
 import '@/styles/commercial.css';
 
 const TITRES = {
@@ -20,7 +21,13 @@ const TITRES = {
   '/commercial/clients': 'Paramétrage — Clients',
   '/commercial/taxes': 'Paramétrage — Taxes',
   '/commercial/utilisateurs': 'Paramétrage — Utilisateurs et rôles',
+  '/commercial/demandes': 'Achats — Demandes d\'achat',
+  '/commercial/demandes/nouvelle': 'Achats — Nouvelle demande',
+  '/commercial/autorisations': 'Achats — Autorisations',
 };
+const titre = (chemin) => TITRES[chemin]
+  || (/^\/commercial\/demandes\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier la demande'
+    : /^\/commercial\/demandes\/\d+$/.test(chemin) ? 'Achats — Demande d\'achat' : 'NJ COMMERCIAL');
 
 // Entrées du menu : [chemin, libellé, permission(s) — une suffit, icône]
 const PARAMETRAGE = [
@@ -36,10 +43,20 @@ const PARAMETRAGE = [
 
 export const peutUn = (can, codes) => codes.some((c) => can(c));
 
+// Achats (livraison B). Les bons de commande et documents arrivent avec la livraison C.
+export const DROITS_DEMANDES = ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'];
+export const DROITS_AUTORISATIONS = ['com.da.approuver', 'com.da.approuver_direction'];
+
 const navClass = ({ isActive }) => 'nav-item' + (isActive ? ' active' : '');
 
 function CommercialSidebar({ open, onClose }) {
   const { user, can, logout } = useApp();
+  const location = useLocation();
+  const [badge, setBadge] = useState({ a_examiner: 0, a_corriger: 0 });
+  useEffect(() => {
+    if (!peutUn(can, DROITS_DEMANDES)) return;
+    api.get('/commercial/demandes/compteurs').then((r) => { if (r && !r.error) setBadge(r); });
+  }, [can, location.pathname]);
   const navigate = useNavigate();
   const [monCompte, setMonCompte] = useState(false);
   const onLogout = () => { if (window.confirm('Se déconnecter ?')) { logout(); navigate('/', { replace: true }); } };
@@ -60,6 +77,21 @@ function CommercialSidebar({ open, onClose }) {
           <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
           Démarrage
         </NavLink>
+        {peutUn(can, DROITS_DEMANDES) && (<>
+          <div className="cm-sidebar-label">Achats</div>
+          <NavLink to="/commercial/demandes" className={navClass}>
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="9" y1="13" x2="15" y2="13" /><line x1="9" y1="17" x2="13" y2="17" /></svg>
+            <span style={{ flex: 1 }}>Demandes d'achat</span>
+            {badge.a_corriger > 0 && <span className="cm-badge-menu" title="Vos demandes à corriger">{badge.a_corriger}</span>}
+          </NavLink>
+          {peutUn(can, DROITS_AUTORISATIONS) && (
+            <NavLink to="/commercial/autorisations" className={navClass}>
+              <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><polyline points="9 12 11 14 15 10" /></svg>
+              <span style={{ flex: 1 }}>Autorisations</span>
+              {badge.a_examiner > 0 && <span className="cm-badge-menu" title="Demandes qui attendent votre décision">{badge.a_examiner}</span>}
+            </NavLink>
+          )}
+        </>)}
         <div className="cm-sidebar-label">Paramétrage</div>
         {PARAMETRAGE.filter(([, , codes]) => peutUn(can, codes)).map(([to, libelle, , d]) => (
           <NavLink key={to} to={to} className={navClass}>
@@ -113,7 +145,7 @@ export default function CommercialLayout() {
       <CommercialSidebar open={navOpen} onClose={() => setNavOpen(false)} />
       <div className={'nav-backdrop' + (navOpen ? ' show' : '')} onClick={() => setNavOpen(false)} aria-hidden="true" />
       <main className="main-content">
-        <Topbar title={TITRES[location.pathname] || 'NJ COMMERCIAL'} onMenu={() => setNavOpen(true)} sansPeriode />
+        <Topbar title={titre(location.pathname)} onMenu={() => setNavOpen(true)} sansPeriode />
         <section className="page active">
           {sansClient
             ? <div className="cm-note">Choisissez d'abord un client (badge en haut à droite).</div>
