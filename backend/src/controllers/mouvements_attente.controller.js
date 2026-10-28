@@ -91,7 +91,8 @@ const approuver = async (req, res) => {
         tenant_id: m.tenant_id, date: m.date, mois: m.mois, annee: m.annee,
         journal_id: m.journal_id, type_caisse: m.type_caisse, rubrique_code: m.rubrique_code,
         intitule: m.intitule, objet: m.objet, beneficiaire: m.beneficiaire,
-        piece_identite: m.piece_identite, telephone: m.telephone,
+        piece_identite: m.piece_identite, telephone: m.telephone, nui: m.nui || '',
+        activite_id: m.activite_id || null,
         entree: 0, sortie: m.sortie, created_by: req.user.id,
       }, { transaction: t });
 

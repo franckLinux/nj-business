@@ -43,14 +43,23 @@ const etat = async ({ tenantId }) => {
     types: TYPES.map((k) => ({ type: k, label: TYPES_JOURNAUX[k]?.label || k, icon: TYPES_JOURNAUX[k]?.icon || '' })),
     mois_defaut: MOIS[now.getMonth()],
     annee_defaut: now.getFullYear(),
+    jour_defaut: now.getDate(),
     mois: MOIS,
   };
 };
 
-const valider = ({ mois, annee, caisses }) => {
+const valider = ({ mois, annee, jour, caisses }) => {
   if (!MOIS.includes(mois)) throw new ErreurComptable(400, 'Mois de démarrage invalide.');
   const an = parseInt(annee, 10);
   if (!an || an < 2000 || an > 2100) throw new ErreurComptable(400, 'Année de démarrage invalide.');
+  // Jour d'ouverture (migration 032) : 1er du mois si non précisé (anciens clients).
+  const m = MOIS.indexOf(mois) + 1;
+  const nbJours = new Date(an, m, 0).getDate();
+  const j = jour === undefined || jour === null || jour === '' ? 1 : parseInt(jour, 10);
+  if (!Number.isInteger(j) || j < 1 || j > nbJours) {
+    throw new ErreurComptable(400, `Jour d'ouverture invalide : ${mois} ${an} compte ${nbJours} jours.`);
+  }
+  const dateOuverture = `${an}-${String(m).padStart(2, '0')}-${String(j).padStart(2, '0')}`;
   if (!Array.isArray(caisses) || caisses.length === 0) throw new ErreurComptable(400, 'Définissez au moins une caisse.');
   const noms = new Set();
   const propres = caisses.map((c, i) => {
@@ -70,7 +79,7 @@ const valider = ({ mois, annee, caisses }) => {
       throw new ErreurComptable(400, `${MAX_PAR_TYPE} caisses au plus par type.`);
     }
   }
-  return { mois, annee: an, caisses: propres };
+  return { mois, annee: an, jour: j, date_ouverture: dateOuverture, caisses: propres };
 };
 
 const initialiser = async ({ tenantId, user, body }) => {
@@ -94,7 +103,8 @@ const initialiser = async ({ tenantId, user, body }) => {
       if (i >= 0) {
         ({ id, code } = libres[i]);
         libres.splice(i, 1);
-        await q('UPDATE journaux SET nom = :nom, ordre = :o, actif = true WHERE id = :id RETURNING id', { nom: c.nom, o: ordre, id }, t);
+        await q('UPDATE journaux SET nom = :nom, ordre = :o, actif = true, date_ouverture = :d WHERE id = :id RETURNING id',
+          { nom: c.nom, o: ordre, id, d: d.date_ouverture }, t);
       } else {
         const prefix = PREFIX_BY_TYPE[c.type];
         const [{ n }] = await q(
@@ -102,8 +112,9 @@ const initialiser = async ({ tenantId, user, body }) => {
              FROM journaux WHERE tenant_id = :t`, { t: tenantId }, t);
         code = `${prefix}${n}`;
         [{ id }] = await q(
-          `INSERT INTO journaux (tenant_id, code, nom, type, ordre, actif) VALUES (:t, :code, :nom, :type, :o, true) RETURNING id`,
-          { t: tenantId, code, nom: c.nom, type: c.type, o: ordre }, t);
+          `INSERT INTO journaux (tenant_id, code, nom, type, ordre, actif, date_ouverture)
+           VALUES (:t, :code, :nom, :type, :o, true, :d) RETURNING id`,
+          { t: tenantId, code, nom: c.nom, type: c.type, o: ordre, d: d.date_ouverture }, t);
       }
       // Solde d'ouverture du mois de démarrage (un seul par caisse).
       await q('DELETE FROM ran WHERE tenant_id = :t AND journal_id = :j RETURNING id', { t: tenantId, j: id }, t);
@@ -121,11 +132,12 @@ const initialiser = async ({ tenantId, user, body }) => {
     await sequelize.query(
       `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
        VALUES (:t, :u, 'INITIALISATION_COMPTE', 'tenant', :t, CAST(:v AS jsonb))`,
-      { replacements: { t: tenantId, u: user.id, v: JSON.stringify({ mois: d.mois, annee: d.annee, caisses: retenus, desactivees: libres.map((j) => j.code) }) }, transaction: t });
+      { replacements: { t: tenantId, u: user.id, v: JSON.stringify({ mois: d.mois, annee: d.annee, date_ouverture: d.date_ouverture, caisses: retenus, desactivees: libres.map((j) => j.code) }) }, transaction: t });
     const total = retenus.reduce((s, c) => s + c.ran, 0);
+    const jourTxt = d.jour === 1 ? '1er' : String(d.jour);
     return {
-      message: `Compte initialisé : ${retenus.length} caisse${retenus.length > 1 ? 's' : ''}, démarrage en ${d.mois} ${d.annee}.`,
-      caisses: retenus, mois: d.mois, annee: d.annee, total_ran: total,
+      message: `Compte initialisé : ${retenus.length} caisse${retenus.length > 1 ? 's' : ''}, ouverture le ${jourTxt} ${d.mois.toLowerCase()} ${d.annee}.`,
+      caisses: retenus, mois: d.mois, annee: d.annee, date_ouverture: d.date_ouverture, total_ran: total,
     };
   });
 };

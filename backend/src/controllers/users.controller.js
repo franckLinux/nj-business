@@ -1,7 +1,9 @@
 // src/controllers/users.controller.js
-const { verifierLimiteUtilisateursDemo } = require('../services/prospects.service');
+// Rôles autorisés par client (038) : remplace l'ancienne limite « 2 utilisateurs » des démos.
+const rolesClient = require('../services/roles_client.service');
 const bcrypt = require('bcryptjs');
 const { sequelize, User, Role } = require('../models');
+const { getEffectivePermissions, getBasePermissions, verifierCodesAccordables } = require('../services/permission.service');
 
 // Rôles (« types de compte ») — liste unique côté serveur.
 //  - ROLES_TENANT  : attribuables à l'intérieur d'un client ;
@@ -16,7 +18,7 @@ const ROLES_VALIDES = [...ROLES_TENANT, ...ROLES_CABINET_CREABLES]; // compat (v
 const ROLES_LABELS = {
   directeur: 'Directeur',
   caissier: 'Caissier(ère)',
-  auditeur: 'Auditeur',
+  auditeur: 'Comptable',   // ex-« Auditeur » (044) : profil de contrôle comptable
   comptable_cabinet: 'Comptable Cabinet',
   commercial: 'Commercial',
   super_admin: 'Super Admin',
@@ -68,6 +70,17 @@ const getUsers = async (req, res) => {
         const pb = PRIORITE_ROLE[b.role] || 5;
         return pa !== pb ? pa - pb : a.username.localeCompare(b.username);
       });
+    // Droit de saisie en rattrapage (033), pour l'interrupteur du directeur.
+    await Promise.all(rows.map(async (u) => {
+      const eff = await getEffectivePermissions({ tenantId: req.tenantId, userId: u.id, role: u.role });
+      u.rattrapage = eff === null || eff.includes('journal.rattrapage');
+    }));
+    // Activité / projet obligatoire (039) — to_jsonb : neutre avant la migration.
+    const flags = await sequelize.query(
+      `SELECT id, (to_jsonb(u)->>'activite_obligatoire')::boolean IS TRUE AS ao FROM users u WHERE u.id IN (:ids)`,
+      { replacements: { ids: rows.length ? rows.map((u) => u.id) : ['00000000-0000-0000-0000-000000000000'] }, type: sequelize.QueryTypes.SELECT });
+    const ao = new Map(flags.map((f) => [f.id, f.ao]));
+    for (const u of rows) u.activite_obligatoire = Boolean(ao.get(u.id));
     res.json(rows);
   } catch (err) {
     console.error('[Users] getUsers :', err.message);
@@ -88,9 +101,9 @@ const createUser = async (req, res) => {
   try {
     const errProfil = await verifierProfil(roleId, req.tenantId);
     if (errProfil) return res.status(400).json({ error: errProfil });
-    // Espace de démonstration : nombre d'utilisateurs limité.
-    try { await verifierLimiteUtilisateursDemo(req.tenantId); }
-    catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
+    // Rôles autorisés pour ce client (démo : directeur + caissier par défaut).
+    try { await rolesClient.verifierRole(req.tenantId, role); }
+    catch (e) { if (e instanceof rolesClient.ErreurMetier) return res.status(e.status).json({ error: e.message }); throw e; }
 
     const hash = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS, 10) || 12);
     const user = await User.create({
@@ -137,6 +150,8 @@ const updateUser = async (req, res) => {
         return res.status(400).json({ error: 'Vous ne pouvez pas modifier votre propre rôle.' });
       }
       if (!rolesAttribuables(req).includes(role)) return res.status(400).json({ error: msgRoleRefuse(req) });
+      try { await rolesClient.verifierRole(req.tenantId, role); }
+      catch (e) { if (e instanceof rolesClient.ErreurMetier) return res.status(e.status).json({ error: e.message }); throw e; }
       patch.role = role;
     }
     if (custom_role_id !== undefined) {
@@ -162,6 +177,13 @@ const toggleActif = async (req, res) => {
     return res.status(400).json({ error: 'Impossible de désactiver votre propre compte.' });
   }
   try {
+    // Réactivation : le rôle doit être autorisé pour le client (038).
+    const cible = await User.findOne({ where: { id: req.params.id, tenant_id: req.tenantId }, attributes: ['role', 'actif'], raw: true });
+    if (!cible) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    if (!cible.actif && req.tenantId) {
+      try { await rolesClient.verifierRole(req.tenantId, cible.role); }
+      catch (e) { if (e instanceof rolesClient.ErreurMetier) return res.status(e.status).json({ error: `Réactivation impossible. ${e.message}` }); throw e; }
+    }
     const [count, rows] = await User.update(
       { actif: sequelize.literal('NOT actif') },
       { where: { id: req.params.id, tenant_id: req.tenantId }, returning: true }
@@ -172,6 +194,21 @@ const toggleActif = async (req, res) => {
     res.json({ message: `Compte ${statut} avec succès.`, user: { id: u.id, username: u.username, role: u.role, actif: u.actif } });
   } catch (err) {
     console.error('[Users] toggleActif :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+
+// GET /api/users/roles-attribuables — rôles proposés à la création / modification.
+// Dans un client : rôles autorisés par le cabinet (038). Hors client
+// (super_admin) : comptes du cabinet.
+const getRolesAttribuables = async (req, res) => {
+  try {
+    if (!req.tenantId) return res.json({ roles: rolesAttribuables(req), personnalise: false, type_compte: null });
+    const info = await rolesClient.lire(req.tenantId);
+    res.json({ roles: info.roles, personnalise: info.personnalise, type_compte: info.type_compte });
+  } catch (err) {
+    if (err instanceof rolesClient.ErreurMetier) return res.status(err.status).json({ error: err.message });
+    console.error('[Users] rolesAttribuables :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
@@ -202,6 +239,15 @@ const deleteUser = async (req, res) => {
     return res.status(400).json({ error: 'Impossible de supprimer votre propre compte.' });
   }
   try {
+    // C13 : un compte qui a déjà saisi ou décidé ne se supprime pas (la trace
+    // des écritures, arrêts et validations doit garder son auteur).
+    const [trace] = await User.sequelize.query(
+      `SELECT EXISTS (SELECT 1 FROM journal WHERE created_by = :u)
+           OR EXISTS (SELECT 1 FROM mouvements_attente WHERE created_by = :u) AS a_trace`,
+      { replacements: { u: req.params.id }, type: User.sequelize.QueryTypes.SELECT });
+    if (trace && trace.a_trace) {
+      return res.status(409).json({ error: 'Cet utilisateur a déjà enregistré des opérations : il ne peut pas être supprimé. Désactivez-le (⏸) pour lui retirer l\'accès en gardant la trace de son travail.' });
+    }
     const count = await User.destroy({ where: { id: req.params.id, tenant_id: req.tenantId } });
     if (count === 0) return res.status(404).json({ error: 'Utilisateur introuvable.' });
     res.json({ message: 'Utilisateur supprimé.' });
@@ -211,7 +257,91 @@ const deleteUser = async (req, res) => {
   }
 };
 
+// PUT /api/users/:id/rattrapage { autorise: true|false }
+// Le directeur accorde ou retire à une personne de SON espace le droit de
+// saisir des écritures antidatées (permission journal.rattrapage), sous forme
+// d'exception individuelle : le reste de ses droits est inchangé.
+const setRattrapage = async (req, res) => {
+  const autorise = req.body?.autorise === true || req.body?.autorise === 'true';
+  try {
+    const u = await User.findOne({ where: { id: req.params.id, tenant_id: req.tenantId } });
+    if (!u) return res.status(404).json({ error: 'Utilisateur introuvable dans cet espace.' });
+    if (u.id === req.user.id) return res.status(400).json({ error: 'Vous ne pouvez pas modifier votre propre autorisation.' });
+    if (u.role === 'super_admin') return res.status(400).json({ error: 'Compte non modifiable.' });
+    if (autorise) {
+      const { erreur } = await verifierCodesAccordables(['journal.rattrapage'], req.tenantId);
+      if (erreur) return res.status(400).json({ error: erreur });
+    }
+    const base = await getBasePermissions(u.id);
+    const dansBase = base.includes('journal.rattrapage');
+    await sequelize.transaction(async (t) => {
+      await sequelize.query(
+        `DELETE FROM user_permissions WHERE user_id = :u AND permission_code = 'journal.rattrapage'`,
+        { replacements: { u: u.id }, transaction: t });
+      if (autorise !== dansBase) {
+        await sequelize.query(
+          `INSERT INTO user_permissions (user_id, permission_code, effet) VALUES (:u, 'journal.rattrapage', :e)`,
+          { replacements: { u: u.id, e: autorise ? 'grant' : 'deny' }, transaction: t });
+      }
+      await sequelize.query(
+        `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+         VALUES (:t, :me, :a, 'user', :u, CAST(:v AS jsonb))`,
+        { replacements: { t: req.tenantId, me: req.user.id, a: autorise ? 'RATTRAPAGE_AUTORISE' : 'RATTRAPAGE_RETIRE',
+          u: String(u.id), v: JSON.stringify({ username: u.username }) }, transaction: t });
+    });
+    res.json({
+      autorise,
+      message: autorise
+        ? `${u.username} peut désormais saisir en rattrapage (opérations antidatées).`
+        : `Rattrapage retiré à ${u.username} : retour à la saisie chronologique.`,
+    });
+  } catch (err) {
+    console.error('[Users] setRattrapage :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+
+// PUT /api/users/:id/activite-obligatoire { obligatoire: true|false }
+// Le directeur exige (ou non) d'une personne qu'elle rattache chacune de ses
+// saisies à une activité / un projet (039). Réglage individuel, journalisé.
+const setActiviteObligatoire = async (req, res) => {
+  const obligatoire = req.body?.obligatoire === true || req.body?.obligatoire === 'true';
+  try {
+    const u = await User.findOne({ where: { id: req.params.id, tenant_id: req.tenantId }, attributes: ['id', 'username', 'role'] });
+    if (!u) return res.status(404).json({ error: 'Utilisateur introuvable dans cet espace.' });
+    if (u.id === req.user.id) return res.status(400).json({ error: 'Vous ne pouvez pas modifier votre propre réglage.' });
+    if (u.role === 'super_admin' || u.role === 'auditeur') return res.status(400).json({ error: 'Ce compte ne saisit pas d\'opérations.' });
+    const [{ col }] = await sequelize.query(
+      "SELECT COUNT(*)::int AS col FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'activite_obligatoire'",
+      { type: sequelize.QueryTypes.SELECT });
+    if (!col) return res.status(503).json({ error: 'Migration 039 non appliquée : lancez « node db/migrate.js » puis réessayez.' });
+    const [{ n }] = await sequelize.query(
+      'SELECT COUNT(*)::int AS n FROM activites WHERE tenant_id = :t AND actif',
+      { replacements: { t: req.tenantId }, type: sequelize.QueryTypes.SELECT });
+    await sequelize.transaction(async (t) => {
+      await sequelize.query('UPDATE users SET activite_obligatoire = :o WHERE id = :u',
+        { replacements: { o: obligatoire, u: u.id }, transaction: t });
+      await sequelize.query(
+        `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+         VALUES (:t, :me, :a, 'user', :u, CAST(:v AS jsonb))`,
+        { replacements: { t: req.tenantId, me: req.user.id, a: obligatoire ? 'ACTIVITE_OBLIGATOIRE_ACTIVEE' : 'ACTIVITE_OBLIGATOIRE_RETIREE',
+          u: String(u.id), v: JSON.stringify({ username: u.username }) }, transaction: t });
+    });
+    res.json({
+      obligatoire,
+      message: obligatoire
+        ? `${u.username} devra désormais choisir une activité / un projet pour chaque opération saisie.`
+          + (n === 0 ? ' Aucune activité active pour l\'instant : la règle s\'appliquera dès la première créée.' : '')
+        : `Activité / projet redevenu facultatif pour ${u.username}.`,
+    });
+  } catch (err) {
+    console.error('[Users] setActiviteObligatoire :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+
 module.exports = {
-  getUsers, createUser, updateUser, toggleActif, resetPassword, deleteUser,
+  setRattrapage, setActiviteObligatoire,
+  getUsers, createUser, updateUser, toggleActif, resetPassword, deleteUser, getRolesAttribuables,
   ROLES_LABELS, ROLES_VALIDES, ROLES_TENANT, TOUS_ROLES,
 };

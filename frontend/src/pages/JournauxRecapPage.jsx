@@ -4,21 +4,22 @@ import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import { fmt } from '@/lib/format';
 import { printJournauxRecap } from '@/lib/print';
+import { exporterExcel, num, STYLE_BOUTON_EXPORT } from '@/lib/export';
 
 // Reprend loadJournauxRecap() de legacy/js/app.js (l. 2085-2328) — vue
 // consolidée de tous les journaux de la période. Cliquer une carte/ligne
 // ouvre `/journal/:id` (JournalPage) plutôt que la vue lecture-seule dédiée
 // du legacy (loadJournalView, l. 673) : la cible React est un sur-ensemble
 // fonctionnel de cette vue, pas besoin de la porter séparément.
-const ICONS = { caisse: '💵', om: '🟠', momo: '🟡', carte_prepayee: '💳', autre: '📒' };
-const TYPE_LABEL = { caisse: 'Caisse Espèces', om: 'Orange Money', momo: 'Mobile Money', carte_prepayee: 'Carte Prépayée', autre: 'Autre' };
-const TYPE_COLOR = { caisse: '#16a34a', om: '#ea580c', momo: '#ca8a04', carte_prepayee: '#7c3aed', autre: '#64748b' };
+const ICONS = { caisse: '💵', banque: '🏦', om: '🟠', momo: '🟡', carte_prepayee: '💳', autre: '📒' };
+const TYPE_LABEL = { caisse: 'Caisse Espèces', banque: 'Banque (journal)', om: 'Orange Money', momo: 'Mobile Money', carte_prepayee: 'Carte Prépayée', autre: 'Autre' };
+const TYPE_COLOR = { caisse: '#16a34a', banque: '#0369a1', om: '#ea580c', momo: '#ca8a04', carte_prepayee: '#7c3aed', autre: '#64748b' };
 
 const soldeColor = (n) => (n >= 0 ? '#15803d' : '#dc2626');
 const soldeBg = (n) => (n >= 0 ? '#f0fdf4' : '#fef2f2');
 
 export default function JournauxRecapPage() {
-  const { mois, annee, devise, user, activeTenantId, activeTenantNom } = useApp();
+  const { mois, annee, devise, user, activeTenantId, activeTenantNom, can, entite } = useApp();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [erreur, setErreur] = useState('');
@@ -59,7 +60,7 @@ export default function JournauxRecapPage() {
   const goToJournal = (id) => navigate(`/journal/${id}`);
 
   const onImprimer = () => {
-    printJournauxRecap({ journaux, banque, mois, annee, tenantNom: activeTenantNom || user?.tenantNom });
+    printJournauxRecap({ journaux, banque, mois, annee, tenantNom: activeTenantNom || user?.tenantNom, entite });
   };
 
   return (
@@ -70,6 +71,14 @@ export default function JournauxRecapPage() {
           <div style={{ fontSize: 12, color: '#64748b' }}>{mois} {annee} · Vue d'ensemble consolidée</div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          {can('rapport.export') && (
+            <button style={STYLE_BOUTON_EXPORT} onClick={() => exporterExcel(`Journaux_de_caisse_${mois}_${annee}`,
+              ['Journal', 'Code', 'Type', `RAN (${devise})`, `Entrées (${devise})`, `Sorties (${devise})`, `Solde final (${devise})`, 'Statut'],
+              [...journaux.map((j) => [j.nom, j.code, TYPE_LABEL[j.type] || j.type, num(j.ran), num(j.total_entrees), num(j.total_sorties), num(j.solde_final), j.arrete ? 'Arrêtée' : 'Ouverte']),
+                ...(banqueVisible ? [['Banque (saisie manuelle)', '', 'Compte bancaire', num(banque.solde_initial), num(banque.fonds_recus), '', num(banque.solde_final), '']] : []),
+                ['TOTAL GÉNÉRAL', '', '', num(totalRan), num(totalEntrees), num(totalSorties), num(totalSolde + banque.solde_final), '']],
+              [`Journaux de caisse — ${mois} ${annee}`, activeTenantNom || user?.tenantNom || ''])}>📊 Excel</button>
+          )}
           <button
             onClick={onImprimer}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: 'white', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontWeight: 600, color: '#475569', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,.06)' }}
@@ -165,6 +174,12 @@ export default function JournauxRecapPage() {
         </div>
       )}
 
+      {banqueVisible && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
+          🏦 <strong>Banque (saisie manuelle)</strong> : solde saisi dans la Demande de fonds. Cette ligne n'apparaît que si aucun journal de type
+          banque n'existe ; dès qu'un journal banque est créé, c'est lui qui porte le solde bancaire.
+        </div>
+      )}
       {/* ── Tableau récapitulatif ───────────────────────────────────── */}
       <div style={{ background: 'white', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 1px 8px rgba(0,0,0,.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 18px', borderBottom: '1px solid var(--border)', background: 'linear-gradient(90deg,#f8fafc,#fff)' }}>
@@ -214,7 +229,7 @@ export default function JournauxRecapPage() {
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontSize: 16 }}>🏦</span>
-                      <span style={{ fontWeight: 600, color: '#7c3aed' }}>Banque</span>
+                      <span style={{ fontWeight: 600, color: '#7c3aed' }}>Banque (saisie manuelle)</span>
                     </div>
                   </td>
                   <td><span style={{ color: '#7c3aed', fontWeight: 600, fontSize: 12 }}>Compte bancaire</span></td>

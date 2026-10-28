@@ -58,7 +58,7 @@ function RoleModal({ role, onClose, onSaved }) {
           )}
           <div className="form-section">
             <label>Nom du rôle <span className="req">*</span></label>
-            <input type="text" value={nom} onChange={onNomChange} placeholder="Ex: Caissière, Auditeur interne…" maxLength={100} />
+            <input type="text" value={nom} onChange={onNomChange} placeholder="Ex: Caissière, Contrôleur interne…" maxLength={100} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: isEdit ? '1fr' : '1fr 1fr', gap: 14 }}>
             {!isEdit && (
@@ -146,7 +146,7 @@ export default function RolesTab() {
         <div style={{ background: 'white', border: '2px dashed var(--border)', borderRadius: 16, padding: 48, textAlign: 'center' }}>
           <div style={{ fontSize: 48, marginBottom: 12 }}>🎭</div>
           <h4 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 8px' }}>Aucun rôle défini</h4>
-          <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 20px' }}>Créez des rôles comme "Caissière", "Auditeur interne" et associez-leur des permissions précises.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13, margin: '0 0 20px' }}>Créez des rôles comme "Caissière", "Contrôleur interne" et associez-leur des permissions précises.</p>
           <button onClick={() => setModal('new')} style={{ background: 'linear-gradient(135deg,#7c3aed,#6366f1)', color: 'white', border: 'none', borderRadius: 10, padding: '10px 24px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
             Créer le premier rôle
           </button>

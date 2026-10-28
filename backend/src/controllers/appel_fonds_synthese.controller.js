@@ -3,6 +3,7 @@
 // treso_dispo <- tres + total_ress  (formule R)
 const { Banque, Journal, RessourceAttente, DepenseAttente, Budget, BudgetValidation, User } = require('../models');
 const { situationJournaux } = require('../services/journal.service');
+const hebdo = require('../services/budget_hebdo.service');
 
 const FAMILLE = (type) => (type === 'banque' ? 'banque'
   : ['om', 'momo', 'carte_prepayee'].includes(type) ? 'mobile' : 'especes');
@@ -16,7 +17,11 @@ const moisSuivant = (mois, annee) => {
   return { mois: MOIS[idx + 1], annee };
 };
 
-// GET /api/appel-fonds/synthese?mois=&annee=
+// GET /api/appel-fonds/synthese?mois=&annee=[&semaine=]
+// Budget hebdomadaire (040) : `semaine` = semaine EN COURS du mois ; la
+// demande porte alors sur la semaine suivante (éventuellement S1 du mois
+// suivant). En mensuel, la demande d'un mois porte sur le mois suivant ;
+// si ce mois suivant est hebdomadaire, elle porte sur sa semaine 1.
 const getSynthese = async (req, res) => {
   const { mois, annee } = req.query;
   if (!mois || !annee) {
@@ -24,9 +29,15 @@ const getSynthese = async (req, res) => {
   }
   const an = parseInt(annee, 10);
   const tenantId = req.tenantId;
-  const next = moisSuivant(mois, an);
 
   try {
+    const semaine = await hebdo.exigerSemaine(tenantId, mois, an, req.query.semaine);
+    let next = semaine ? hebdo.semaineSuivante(mois, an, semaine) : { ...moisSuivant(mois, an), semaine: null };
+    const cibleHebdo = await hebdo.estHebdo(tenantId, next.mois, next.annee);
+    if (cibleHebdo && !next.semaine) next = { ...next, semaine: 1 };
+    if (!cibleHebdo && next.semaine) next = { ...next, semaine: null };
+    const semCible = next.semaine ? hebdo.semainesDuMois(next.mois, next.annee).find((x) => x.num === next.semaine) : null;
+    const libelleCible = semCible ? `${semCible.libelle} — ${next.mois} ${next.annee}` : `${next.mois} ${next.annee}`;
     // ── 1. Trésorerie courante — détaillée par journal (caisse) ─────────────
     // Chaque caisse = son SOLDE DU MOIS (RAN + entrées − sorties), calculé
     // comme sur la page journal et le tableau de bord. La banque provient du
@@ -41,8 +52,8 @@ const getSynthese = async (req, res) => {
     const [situation, banque, resAttRows, depAttRows] = await Promise.all([
       situationJournaux(tenantId, mois, an, journaux),
       Banque.findOne({ where: { tenant_id: tenantId, mois, annee: an } }),
-      RessourceAttente.findAll({ where: { tenant_id: tenantId, mois, annee: an }, order: [['id', 'ASC']] }),
-      DepenseAttente.findAll({ where: { tenant_id: tenantId, mois, annee: an }, order: [['id', 'ASC']] }),
+      RessourceAttente.findAll({ where: { tenant_id: tenantId, mois, annee: an, semaine }, order: [['id', 'ASC']] }),
+      DepenseAttente.findAll({ where: { tenant_id: tenantId, mois, annee: an, semaine }, order: [['id', 'ASC']] }),
     ]);
     const lignesTreso = situation.map((j) => ({
       id: j.id, nom: j.nom, code: j.code, type: j.type, famille: FAMILLE(j.type),
@@ -67,7 +78,7 @@ const getSynthese = async (req, res) => {
     // ── 3. Prévision pour mois_cible ─────────────────────────────────────────
     // Budget saisi pour s'appliquer au mois suivant
     const prevRows = await Budget.findAll({
-      where: { tenant_id: tenantId, mois_applic: next.mois, annee_applic: next.annee },
+      where: { tenant_id: tenantId, mois_applic: next.mois, annee_applic: next.annee, semaine: next.semaine },
       order: [['rubrique_code', 'ASC']],
     });
     const total_prevision = prevRows.reduce((s, r) => s + parseFloat(r.montant || 0), 0);
@@ -75,14 +86,15 @@ const getSynthese = async (req, res) => {
     // ── 4. Validation (cherche sur le mois de saisie du budget applicable) ───
     // Le mois/année de saisie sont déjà portés par les lignes budget elles-mêmes
     // (mois, annee) — pas besoin d'une requête séparée pour les retrouver.
-    let moisSaisie = mois, anneeSaisie = an;
+    // Semaine cible : la demande est identifiée par la semaine qu'elle finance.
+    let moisSaisie = next.semaine ? next.mois : mois, anneeSaisie = next.semaine ? next.annee : an;
     if (prevRows.length > 0) {
       moisSaisie  = prevRows[0].mois;
       anneeSaisie = prevRows[0].annee;
     }
 
     const validationRow = await BudgetValidation.findOne({
-      where: { tenant_id: tenantId, mois: moisSaisie, annee: anneeSaisie },
+      where: { tenant_id: tenantId, mois: moisSaisie, annee: anneeSaisie, semaine: next.semaine },
       include: [{ model: User, as: 'validateur', attributes: ['username'], required: false }],
     });
     let validation = { statut: 'en_attente' };
@@ -100,6 +112,10 @@ const getSynthese = async (req, res) => {
       annee: an,
       mois_cible:  next.mois,
       annee_cible: next.annee,
+      // Budget hebdomadaire (040)
+      periodicite: semaine ? 'hebdomadaire' : 'mensuel',
+      semaine, semaines: semaine ? hebdo.semainesDuMois(mois, an) : [],
+      semaine_cible: next.semaine, libelle_cible: libelleCible,
       tresorerie: {
         solde_espece: solde_espece,
         solde_om:     solde_om,
@@ -117,13 +133,14 @@ const getSynthese = async (req, res) => {
       total_prevision,
       validation,
       // Clé de la validation : mois de SAISIE de la demande (à renvoyer tel quel).
-      mois_saisie: moisSaisie, annee_saisie: anneeSaisie,
+      mois_saisie: moisSaisie, annee_saisie: anneeSaisie, semaine_saisie: next.semaine,
       tresorerie_disponible,
       besoin,
       excedent,
     });
 
   } catch (err) {
+    if (err instanceof hebdo.ErreurMetier) return res.status(err.status).json({ error: err.message });
     console.error('[AfSynthese] getSynthese :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
   }

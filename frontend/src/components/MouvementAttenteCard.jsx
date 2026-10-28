@@ -6,6 +6,7 @@ import { fmt } from '@/lib/format';
 export const MOTIF_ATTENTE = {
   rubrique_non_approuvee: ['#fef3c7', '#92400e', 'Rubrique non budgétisée'],
   mois_non_valide: ['#fef3c7', '#92400e', 'Mois non validé'],
+  semaine_non_validee: ['#fef3c7', '#92400e', 'Semaine non validée'],
   depassement_journal: ['#fee2e2', '#991b1b', 'Plafond caisse dépassé'],
   depassement_rubrique: ['#fee2e2', '#991b1b', 'Budget approuvé dépassé'],
 };

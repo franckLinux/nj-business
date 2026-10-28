@@ -36,6 +36,9 @@ const toConfigPayload = (t) => ({
   nui: t.nui || '',
   activite: t.activite || '',
   dirigeant_nom: t.dirigeant_nom || '',
+  telephone: t.telephone || '',
+  email: t.email || '',
+  site_web: t.site_web || '',
   exercice_debut: t.exercice_debut,
   exercice_fin: t.exercice_fin,
   actif: t.actif,
@@ -61,12 +64,50 @@ const getReferentiel = async (req, res) => {
   res.json({ formes_juridiques: FORMES_JURIDIQUES });
 };
 
+// ── Logo de l'entité ──────────────────────────────────────────────────────
+// Stocké en data URL (image redimensionnée par le navigateur). On n'accepte
+// que des images matricielles : pas de SVG, qui peut embarquer du script.
+const LOGO_MAX_CARACTERES = 400 * 1024;   // ≈ 300 Ko d'image une fois décodée
+const LOGO_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$/;
+const verifierLogo = (logo) => {
+  if (logo === undefined) return { garder: true };
+  if (logo === null || logo === '') return { valeur: null };
+  if (typeof logo !== 'string' || !LOGO_RE.test(logo)) {
+    return { erreur: 'Logo invalide : utilisez une image PNG, JPEG ou WebP.' };
+  }
+  if (logo.length > LOGO_MAX_CARACTERES) {
+    return { erreur: 'Logo trop volumineux (300 Ko maximum après redimensionnement).' };
+  }
+  return { valeur: logo };
+};
+
+// ── GET /api/config/entete ────────────────────────────────────────────────
+// Ce qu'il faut pour l'en-tête et le pied des documents imprimés.
+const getEntete = async (req, res) => {
+  try {
+    const t = await Tenant.findByPk(req.tenantId);
+    if (!t) return res.status(404).json({ error: 'Entité introuvable.' });
+    res.json({
+      nom: t.nom || '', sigle: t.sigle || '', forme_juridique: t.forme_juridique || '',
+      activite: t.activite || '', logo_url: t.logo_url || '',
+      adresse: t.adresse || '', boite_postale: t.boite_postale || '',
+      telephone: t.telephone || '', email: t.email || '', site_web: t.site_web || '',
+      nui: t.nui || '', registre_commerce: t.registre_commerce || '',
+      dirigeant_nom: t.dirigeant_nom || '', devise: t.devise || 'FCFA',
+    });
+  } catch (err) {
+    console.error('[Config] getEntete :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+
 // ── PUT /api/config ───────────────────────────────────────────────────────
 const updateConfig = async (req, res) => {
   const {
     nom, sigle, forme_juridique, adresse, registre_commerce,
     boite_postale, nui, activite, dirigeant_nom,
     devise, exercice_debut, exercice_fin,
+    telephone, email, site_web, logo_url,
   } = req.body;
 
   if (!nom || nom.trim() === '') {
@@ -85,6 +126,9 @@ const updateConfig = async (req, res) => {
     return res.status(400).json({ error: 'NUI trop long (max 20 caractères).' });
   }
 
+  const logo = verifierLogo(logo_url);
+  if (logo.erreur) return res.status(400).json({ error: logo.erreur });
+
   try {
     const [count, rows] = await Tenant.update(
       {
@@ -102,6 +146,11 @@ const updateConfig = async (req, res) => {
         devise: devise || 'FCFA',
         exercice_debut: exercice_debut || null,
         exercice_fin: exercice_fin || null,
+        // Coordonnées (031) : un champ absent de la requête n'est pas effacé.
+        ...(telephone !== undefined ? { telephone: String(telephone || '').trim() } : {}),
+        ...(email !== undefined ? { email: String(email || '').trim().toLowerCase() } : {}),
+        ...(site_web !== undefined ? { site_web: String(site_web || '').trim() } : {}),
+        ...(logo.garder ? {} : { logo_url: logo.valeur }),
       },
       { where: { id: req.tenantId }, returning: true }
     );
@@ -113,4 +162,4 @@ const updateConfig = async (req, res) => {
   }
 };
 
-module.exports = { getConfig, updateConfig, getReferentiel, FORMES_JURIDIQUES };
+module.exports = { getConfig, getEntete, updateConfig, getReferentiel, FORMES_JURIDIQUES };

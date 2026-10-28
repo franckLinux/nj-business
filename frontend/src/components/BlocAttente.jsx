@@ -29,7 +29,7 @@ export default function BlocAttente({ num, titre, couleur, type, rows, isCaissie
       <b style={{ color: couleur, display: 'block', marginBottom: 8, fontSize: 13 }}>{num}. {titre}</b>
 
       {isCaissiere && (rubriquesListe.length > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr 150px auto', gap: 10, alignItems: 'flex-end', marginBottom: 14, background: '#f8fafc', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--border)' }}>
+        <div className="bloc-form" style={{ display: 'grid', gridTemplateColumns: '220px 1fr 150px auto', gap: 10, alignItems: 'flex-end', marginBottom: 14, background: '#f8fafc', padding: '14px 16px', borderRadius: 10, border: '1px solid var(--border)' }}>
           <div>
             <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Rubrique</label>
             <select value={rubrique} onChange={(e) => onRubriqueChange(e.target.value)}>
@@ -42,7 +42,7 @@ export default function BlocAttente({ num, titre, couleur, type, rows, isCaissie
             <input type="text" placeholder="Désignation (modifiable)" value={intitule} onChange={(e) => setIntitule(e.target.value)} />
           </div>
           <div>
-            <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Montant (FCFA)</label>
+            <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', display: 'block', marginBottom: 5 }}>Montant ({devise || 'FCFA'})</label>
             <input type="number" min="0" step="1000" placeholder="0" value={montant} onChange={(e) => setMontant(e.target.value)} style={{ textAlign: 'right' }} />
           </div>
           <button className="btn-add" style={{ padding: '10px 18px', whiteSpace: 'nowrap', alignSelf: 'flex-end' }} onClick={onAjouter}>＋ Ajouter</button>

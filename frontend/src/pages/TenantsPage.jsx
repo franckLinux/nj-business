@@ -3,6 +3,7 @@ import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import PermissionsAssignModal from '@/components/PermissionsAssignModal';
+import SuppressionClient from '@/components/SuppressionClient';
 
 // Reprend loadTenants()/openModalNewTenant()/saveNewTenant()/toggleTenantActif()/
 // switchTenant() de legacy/js/app.js (l. 5987-6124).
@@ -87,7 +88,7 @@ export default function TenantsPage() {
   const isSuperAdmin = user?.role === 'super_admin';
   const [tenants, setTenants] = useState(null);
   const [erreur, setErreur] = useState('');
-  const [modal, setModal] = useState(null); // null | 'new' | { perms:t }
+  const [modal, setModal] = useState(null); // null | 'new' | { perms:t } | { suppr:t }
 
   const charger = useCallback(async () => {
     const data = await api.get('/tenants');
@@ -171,6 +172,15 @@ export default function TenantsPage() {
                           🔐 Permissions
                         </button>
                       )}
+                      {isSuperAdmin && (
+                        <button
+                          onClick={() => setModal({ suppr: t })}
+                          title="Réservé à un client ajouté manuellement et jamais utilisé"
+                          style={{ fontSize: 11, padding: '4px 10px', border: '1px solid #fecaca', borderRadius: 6, background: 'white', color: '#b91c1c', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          🗑 Supprimer
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -182,6 +192,13 @@ export default function TenantsPage() {
 
       {modal === 'new' && (
         <NewTenantModal onClose={() => setModal(null)} onSaved={(msg) => { setModal(null); toast(msg, 'success'); charger(); }} />
+      )}
+      {modal?.suppr && (
+        <SuppressionClient
+          id={modal.suppr.id}
+          onAnnuler={() => setModal(null)}
+          onSupprime={() => { if (modal.suppr.id === activeTenantId) selectTenant(null, ''); setModal(null); charger(); }}
+        />
       )}
       {modal?.perms && (
         <PermissionsAssignModal

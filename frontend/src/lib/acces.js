@@ -13,6 +13,15 @@ export const PAGE_PERMS = {
   '/appel-fonds':    ['appel_fonds.view', 'banque.view'],
   '/compte-emploi':  'rapport.view',
   '/attente':        'journal.validate',
+  '/activites':      'rapport.view',
+  // Contrôle comptable (041) : menu réservé au comptable / contrôleur et au directeur.
+  // 25/10/2026 : l'entrée de menu est « Contrôle de régularité formelle » ;
+  // le rapport (/controle/pieces) s'ouvre par le bouton « Rapport » de la page.
+  '/controle/pieces':     'controle.view',
+  '/controle/regularite': 'controle.view',   // 045 : contrôle de régularité formelle
+  '/controle/registre':   'controle.view',
+  '/controle/arretes':    'controle.view',   // 046 : arrêtés de caisse & inventaires (PV)
+  '/controle/passerelle': ['controle.view', 'passerelle.view'],
 };
 
 // Onglets de la page Configuration.
@@ -20,8 +29,9 @@ export const PAGE_PERMS = {
 // La simple consultation ne suffit pas : la caissière a besoin de
 // `rubriques.view`, `users.view`, `pieces.view`… pour saisir (listes
 // déroulantes, pièces jointes), sans pour autant devoir voir les écrans de
-// paramétrage correspondants. Exception : l'auditeur, en lecture seule, voit
-// les onglets qu'il peut consulter. Et un onglet qu'un administrateur a
+// paramétrage correspondants. Exception : le comptable (code « auditeur »,
+// ex-Auditeur), en consultation sur la Configuration, voit les onglets qu'il
+// peut consulter. Et un onglet qu'un administrateur a
 // explicitement accordé à la personne (exception individuelle, par ex.
 // « Voir les rubriques » cochée pour une caissière) réapparaît aussi.
 export const CONFIG_TABS = {
@@ -29,8 +39,11 @@ export const CONFIG_TABS = {
   users:     { voir: 'users.view',          gerer: ['users.create', 'users.edit', 'users.delete'] },
   journaux:  { voir: 'journaux.view',       gerer: ['journaux.edit'] },
   plan:      { voir: 'plan_comptable.view', gerer: ['plan_comptable.edit', 'plan_comptable.delete'] },
-  rubriques: { voir: 'rubriques.view',      gerer: ['rubriques.edit'] },
+  // rubriques.create (044) : la caissière ajoute des rubriques pour sa saisie.
+  rubriques: { voir: 'rubriques.view',      gerer: ['rubriques.edit', 'rubriques.create'] },
   pieces:    { voir: 'pieces.view',         gerer: ['pieces.edit'] },
+  activites: { voir: 'activites.view',      gerer: ['activites.edit'] },
+  // La passerelle comptable a quitté la Configuration (041) : menu « Contrôle comptable ».
 };
 
 export const voitOngletConfig = (user, can, id) => {

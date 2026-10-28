@@ -3,6 +3,7 @@ import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api, API_BASE } from '@/lib/api';
 import { syncManager } from '@/lib/syncManager';
+import { RubriqueModal } from '@/components/config/RubriquesTab';
 
 // Reprend #modal-mouvement de legacy/index.html + openModalMouvement/saveMouvement
 // de legacy/js/app.js (l. 1239-1467), y compris les pièces jointes
@@ -14,7 +15,8 @@ import { syncManager } from '@/lib/syncManager';
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 export default function MouvementModal({ journal, mouvement, onClose, onSaved }) {
-  const { mois, annee, rubriques, token, activeTenantId, user } = useApp();
+  const { mois, annee, rubriques, loadRubriques, token, activeTenantId, user, devise, can } = useApp();
+  const rattrapageAutorise = can('journal.rattrapage');
   const toast = useToast();
 
   const [type, setType] = useState(mouvement ? (parseFloat(mouvement.entree) > 0 ? 'entree' : 'sortie') : '');
@@ -26,6 +28,25 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   const [objet, setObjet] = useState(mouvement?.objet || '');
   const [beneficiaire, setBeneficiaire] = useState(mouvement?.beneficiaire || '');
   const [telephone, setTelephone] = useState(mouvement?.telephone || '');
+  // Tiers du registre (044) : choisi par le nom ou le NUI, il complète le NUI,
+  // le téléphone et apporte son compte tiers. Sans choix, le serveur retrouve
+  // le tiers de même NUI (ou de même nom) à l'enregistrement.
+  const [tiersId, setTiersId] = useState(mouvement?.tiers_id ? Number(mouvement.tiers_id) : null);
+  const [tiersListe, setTiersListe] = useState([]);
+  const [nouvelleRubrique, setNouvelleRubrique] = useState(false);
+  const peutAjouterRubrique = !mouvement && (can('rubriques.create') || can('rubriques.edit'));
+  // Activité / projet (034) : rattachement FACULTATIF. Les désactivées ne sont
+  // proposées que si l'écriture modifiée y est déjà rattachée.
+  const [activiteId, setActiviteId] = useState(mouvement?.activite_id ? String(mouvement.activite_id) : '');
+  const [activites, setActivites] = useState([]);
+  useEffect(() => {
+    let annule = false;
+    api.get('/activites?tous=1').then((r) => {
+      if (annule || !Array.isArray(r)) return;
+      setActivites(r.filter((a) => a.actif || String(a.id) === String(mouvement?.activite_id || '')));
+    });
+    return () => { annule = true; };
+  }, [mouvement?.activite_id]);
   const [montant, setMontant] = useState(mouvement ? (parseFloat(mouvement.entree) > 0 ? mouvement.entree : mouvement.sortie) : '');
   const [erreur, setErreur] = useState('');
   const [piecesHint, setPiecesHint] = useState(null); // { obligatoires:[], recommandees:[] } | null
@@ -33,6 +54,38 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   const [fichiers, setFichiers] = useState([]); // [{ file, dataUrl, name, type }]
 
   const listeRubriques = type === 'entree' ? rubriques.entrees : rubriques.depenses;
+
+  // Bénéficiaires du registre pour le sens de l'opération (entrée : clients, sortie : fournisseurs).
+  useEffect(() => {
+    if (!navigator.onLine) return undefined;
+    let annule = false;
+    api.get(`/registre-tiers/saisie${type ? `?sens=${type}` : ''}`).then((r) => { if (!annule && Array.isArray(r)) setTiersListe(r); });
+    return () => { annule = true; };
+  }, [type]);
+  const tiersChoisi = tiersListe.find((t) => t.id === tiersId) || null;
+  const normNui = (v) => String(v || '').toUpperCase().replace(/\s+/g, '');
+  const normNom = (v) => String(v || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const onBeneficiaire = (v) => {
+    setBeneficiaire(v);
+    const t = tiersListe.find((x) => normNom(x.nom) === normNom(v));
+    if (t) {
+      setTiersId(t.id);
+      if (t.nui) setNui(t.nui);
+      if (t.telephone && !telephone) setTelephone(t.telephone);
+    } else if (tiersChoisi) setTiersId(null);
+  };
+  const onNui = (v) => {
+    setNui(v);
+    const t = normNui(v) ? tiersListe.find((x) => x.nui && x.nui === normNui(v)) : null;
+    if (t) { setTiersId(t.id); setBeneficiaire(t.nom); if (t.telephone && !telephone) setTelephone(t.telephone); }
+    else if (tiersChoisi && tiersChoisi.nui) setTiersId(null);
+  };
+  // Activité / projet obligatoire pour cette personne (039), hors virements
+  // internes et seulement s'il existe des activités actives. L'API applique la
+  // même règle : ce contrôle n'évite qu'un aller-retour.
+  const rubriqueChoisie = [...(rubriques.entrees || []), ...(rubriques.depenses || [])].find((r) => r.code === rubrique);
+  const activiteRequise = Boolean(user?.activite_obligatoire) && !rubriqueChoisie?.est_virement_interne
+    && activites.some((a) => a.actif);
 
   // Auto-remplissage code comptable + intitulé + annotation pièces, comme onRubriqueChange().
   useEffect(() => {
@@ -55,6 +108,18 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
     return () => { annule = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rubrique, type]);
+
+  // Reste disponible de la rubrique (semaine en cours avec report si budget
+  // hebdomadaire, sinon le mois) — indicatif, le contrôle reste côté serveur.
+  const [dispo, setDispo] = useState(null);
+  useEffect(() => {
+    setDispo(null);
+    if (mouvement || type !== 'sortie' || !rubrique || !date || !navigator.onLine) return;
+    let annule = false;
+    const qs = new URLSearchParams({ date, mois, annee: String(annee), rubrique_code: rubrique, ...(journal?.id ? { journal_id: String(journal.id) } : {}) });
+    api.get(`/journal/disponible?${qs}`).then((r) => { if (!annule && r && !r.error) setDispo(r); });
+    return () => { annule = true; };
+  }, [mouvement, type, rubrique, date, mois, annee, journal?.id]);
 
   const onTypeChange = (e) => {
     setType(e.target.value);
@@ -91,6 +156,16 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       setErreur('Champs obligatoires manquants.');
       return;
     }
+    if (activiteRequise && !activiteId) {
+      setErreur('Activité / projet obligatoire : choisissez l\'activité ou le projet concerné par cette opération.');
+      return;
+    }
+    // C16 : pièce obligatoire manquante → avertissement et confirmation
+    // explicite (l'écriture n'est pas bloquée).
+    if (!mouvement && type === 'sortie' && piecesHint?.obligatoires?.length && fichiers.length === 0) {
+      const liste = piecesHint.obligatoires.map((t) => `• ${t.intitule_piece}`).join('\n');
+      if (!window.confirm(`Pièce(s) obligatoire(s) non jointe(s) pour cette dépense :\n${liste}\n\nEnregistrer quand même ? Vous pourrez joindre la pièce plus tard avec 📎 dans le journal.`)) return;
+    }
     const body = {
       date, mois, annee,
       journal_id: journal?.id || null,
@@ -98,6 +173,8 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       rubrique_code: rubrique, intitule: intitule.trim(),
       code_comptable: codeComptable || '',
       nui: nui || '',
+      tiers_id: tiersId || null,
+      activite_id: activiteId ? Number(activiteId) : null,
       objet, beneficiaire, telephone,
       entree: type === 'entree' ? montantNum : 0,
       sortie: type === 'sortie' ? montantNum : 0,
@@ -182,7 +259,18 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
           <div className="form-section">Informations principales</div>
           <div>
             <label>Date <span className="req">*</span></label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={!!mouvement} />
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={!!mouvement}
+              min={journal?.date_ouverture ? String(journal.date_ouverture).slice(0, 10) : undefined} />
+            {!mouvement && rattrapageAutorise && (
+              <div className="field-hint" style={{ color: '#b45309' }}>
+                ⏪ Rattrapage autorisé : vous pouvez dater l'opération avant la dernière écriture (hors mois arrêté). Elle sera marquée « Rattrapage ».
+              </div>
+            )}
+            {!mouvement && journal?.date_ouverture && date && date < String(journal.date_ouverture).slice(0, 10) && (
+              <div className="field-hint" style={{ color: 'var(--accent-red)' }}>
+                Caisse ouverte le {new Date(`${String(journal.date_ouverture).slice(0, 10)}T00:00:00`).toLocaleDateString('fr-FR')} : choisissez une date à partir de ce jour.
+              </div>
+            )}
           </div>
           <div>
             <label>Type <span className="req">*</span></label>
@@ -193,7 +281,14 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
             </select>
           </div>
           <div className="span-2">
-            <label>Rubrique <span className="req">*</span></label>
+            <label style={{ display: 'flex', alignItems: 'center' }}>Rubrique <span className="req">*</span>
+              {peutAjouterRubrique && type && navigator.onLine && (
+                <button type="button" onClick={() => setNouvelleRubrique(true)}
+                  style={{ marginLeft: 'auto', border: 0, background: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer', textTransform: 'none', letterSpacing: 0, padding: 0 }}>
+                  + Nouvelle rubrique
+                </button>
+              )}
+            </label>
             <select value={rubrique} onChange={(e) => setRubrique(e.target.value)} disabled={!!mouvement}>
               <option value="">— choisir —</option>
               {(listeRubriques || []).map((r) => (
@@ -201,6 +296,16 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
               ))}
             </select>
           </div>
+          {dispo && (
+            <div className="span-2" style={{ margin: '4px 0 2px', padding: '6px 12px', borderRadius: 7, fontSize: 12,
+              background: !dispo.valide ? '#fef3c7' : dispo.reste - (parseFloat(montant) || 0) < 0 ? '#fee2e2' : '#ecfdf5',
+              color: !dispo.valide ? '#92400e' : dispo.reste - (parseFloat(montant) || 0) < 0 ? '#991b1b' : '#065f46' }}>
+              {!dispo.valide
+                ? <>⏳ {dispo.periodicite === 'hebdomadaire' ? `Semaine ${dispo.semaine} non validée` : 'Budget du mois non validé'} : la sortie sera mise en attente.</>
+                : <>💰 Reste disponible {dispo.periodicite === 'hebdomadaire' ? `(${dispo.libelle}, avec report)` : `(${dispo.libelle})`} : <strong>{(dispo.reste || 0).toLocaleString('fr-FR')} {devise}</strong>
+                  {parseFloat(montant) > 0 && <> — après cette sortie : {(dispo.reste - parseFloat(montant)).toLocaleString('fr-FR')} {devise}</>}</>}
+            </div>
+          )}
           {piecesHint && (
             <div className="span-2" style={{ margin: '6px 0 2px', padding: '8px 12px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 7, fontSize: 12, color: '#92400e' }}>
               <strong style={{ display: 'block', marginBottom: 4 }}>📎 Pièces pour ce type de dépense :</strong>
@@ -220,25 +325,59 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
             <label>Montant <span className="req">*</span></label>
             <div className="input-group">
               <input type="number" min="0" step="1" placeholder="0" className="has-suffix" value={montant} onChange={(e) => setMontant(e.target.value)} disabled={!!mouvement} />
-              <span className="input-suffix">FCFA</span>
+              <span className="input-suffix">{devise}</span>
             </div>
           </div>
+          {activites.length > 0 && (
+            <div className="span-2">
+              <label>
+                Activité / projet{' '}
+                {activiteRequise
+                  ? <span className="req">*</span>
+                  : <span className="field-hint" style={{ display: 'inline', textTransform: 'none', letterSpacing: 0 }}>(facultatif — pour le suivi par activité)</span>}
+              </label>
+              <select value={activiteId} onChange={(e) => setActiviteId(e.target.value)}>
+                <option value="">{activiteRequise ? '— choisir —' : '— Non classé —'}</option>
+                {['activite', 'projet'].map((ty) => {
+                  const items = activites.filter((a) => a.type === ty);
+                  if (!items.length) return null;
+                  return (
+                    <optgroup key={ty} label={ty === 'projet' ? 'Projets' : 'Activités'}>
+                      {items.map((a) => (
+                        <option key={a.id} value={a.id}>{a.code ? `[${a.code}] ` : ''}{a.nom}{a.actif ? '' : ' (désactivée)'}</option>
+                      ))}
+                    </optgroup>
+                  );
+                })}
+              </select>
+            </div>
+          )}
           <div className="form-section">Détails complémentaires</div>
+          <div>
+            <label>Bénéficiaire {tiersChoisi && <span className="field-hint" style={{ display: 'inline', textTransform: 'none', letterSpacing: 0, color: '#166534' }}>✓ registre</span>}</label>
+            <input type="text" value={beneficiaire} onChange={(e) => onBeneficiaire(e.target.value)} list="mvt-tiers-nom" autoComplete="off"
+              placeholder={tiersListe.length ? 'Nom (suggestions du registre)' : undefined} />
+            <datalist id="mvt-tiers-nom">{tiersListe.map((t) => <option key={t.id} value={t.nom}>{t.nui || ''}</option>)}</datalist>
+            <datalist id="mvt-tiers-nui">{tiersListe.filter((t) => t.nui).map((t) => <option key={t.id} value={t.nui}>{t.nom}</option>)}</datalist>
+          </div>
+          <div>
+            <label>NUI <span className="field-hint" style={{ display: 'inline', textTransform: 'none', letterSpacing: 0 }}>(optionnel)</span></label>
+            <input type="text" placeholder="Numéro Unique d'Identification" value={nui} onChange={(e) => onNui(e.target.value)}
+              list="mvt-tiers-nui" autoComplete="off" />
+          </div>
+          <div>
+            <label>Compte tiers</label>
+            <input type="text" readOnly style={{ fontFamily: 'monospace' }} placeholder="Auto depuis le registre"
+              value={tiersChoisi ? `${tiersChoisi.compte_effectif}${tiersChoisi.compte_collectif ? ' (collectif)' : ''}` : ''}
+              title={tiersChoisi ? `Tiers du registre : ${tiersChoisi.nom}` : 'Choisissez un bénéficiaire du registre (nom ou NUI)'} />
+          </div>
           <div>
             <label>Code comptable</label>
             <input type="text" placeholder="Auto depuis rubrique" style={{ fontFamily: 'monospace' }} readOnly value={codeComptable} />
           </div>
-          <div>
-            <label>NUI <span className="field-hint" style={{ display: 'inline', textTransform: 'none', letterSpacing: 0 }}>(optionnel)</span></label>
-            <input type="text" placeholder="Numéro Unique d'Identification" value={nui} onChange={(e) => setNui(e.target.value)} />
-          </div>
           <div className="span-2">
             <label>Objet / Motif</label>
             <input type="text" placeholder="Détail de l'opération" value={objet} onChange={(e) => setObjet(e.target.value)} />
-          </div>
-          <div>
-            <label>Bénéficiaire</label>
-            <input type="text" value={beneficiaire} onChange={(e) => setBeneficiaire(e.target.value)} />
           </div>
           <div>
             <label>Téléphone</label>
@@ -284,6 +423,17 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
           <button className="btn-primary" onClick={onSave} disabled={saving}>💾 Enregistrer</button>
         </div>
       </div>
+      {nouvelleRubrique && (
+        <RubriqueModal defaultType={type === 'entree' ? 'entree' : 'depense'} simple={!can('rubriques.edit')}
+          onClose={() => setNouvelleRubrique(false)}
+          onSaved={async (msg, res) => {
+            setNouvelleRubrique(false);
+            await loadRubriques();
+            const ok = res?.code && (res.type === 'entree') === (type === 'entree');
+            if (ok) setRubrique(res.code);
+            toast(ok ? `${msg} Elle est sélectionnée pour cette saisie.` : msg, 'success', 5000);
+          }} />
+      )}
     </div>
   );
 }

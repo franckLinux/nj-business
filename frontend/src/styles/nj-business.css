@@ -1,0 +1,177 @@
+/* =====================================================================
+   NJ BUSINESS — connexion, accueil des modules, marque (26/10/2026)
+   Palette inchangée : marine #1a2b4a (--brand), bleu #3b82f6 (--accent).
+   Classes préfixées njb- : aucun style existant de la caisse n'est modifié.
+   ===================================================================== */
+
+/* ── Connexion ─────────────────────────────────────────────────────── */
+.njb-login {
+  min-height: 100vh; min-height: 100dvh;
+  display: flex; align-items: stretch; justify-content: center;
+  background: var(--bg); padding: 24px; box-sizing: border-box;
+}
+.njb-login-shell {
+  width: 100%; max-width: 980px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  background: var(--card); border-radius: 18px; box-shadow: 0 10px 40px rgba(26, 43, 74, 0.12);
+  overflow: hidden; margin: auto;
+}
+.njb-login-marque {
+  background: var(--brand); color: #fff; padding: 44px 40px;
+  display: flex; flex-direction: column; gap: 28px;
+}
+.njb-login-marque img { width: 230px; max-width: 100%; height: auto; display: block; }
+.njb-login-accroche { font-size: 15px; line-height: 1.55; color: #cbd5e1; margin: 0; }
+.njb-login-modules { border-top: 1px solid rgba(255, 255, 255, 0.12); padding-top: 22px; }
+.njb-login-modules .njb-surtitre { color: #94a3b8; }
+.njb-login-module { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.njb-login-module b { display: block; font-size: 14px; letter-spacing: 0.02em; }
+.njb-login-module span { font-size: 12.5px; color: #cbd5e1; }
+.njb-login-pied { margin-top: auto; font-size: 12px; color: #94a3b8; }
+
+.njb-login-form { padding: 48px 48px 40px; display: flex; flex-direction: column; justify-content: center; }
+.njb-login-form h1 { font-size: 26px; font-weight: 800; color: var(--brand); margin: 0 0 6px; letter-spacing: -0.01em; }
+.njb-sous-titre { font-size: 14px; color: var(--text-muted); margin: 0 0 26px; line-height: 1.5; }
+.njb-champ { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.njb-champ label { font-size: 13px; font-weight: 600; color: var(--text); }
+.njb-champ input {
+  width: 100%; box-sizing: border-box; height: 46px; padding: 0 14px; font-size: 15px; font-family: inherit;
+  border: 1.5px solid var(--border); border-radius: 10px; background: #fff; color: var(--text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.njb-champ input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18); }
+.njb-mdp { position: relative; }
+.njb-mdp input { padding-right: 104px; }
+.njb-afficher {
+  position: absolute; right: 6px; top: 6px; height: 34px; padding: 0 10px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; font-family: inherit;
+}
+.njb-afficher:hover, .njb-afficher:focus-visible { background: var(--bg); outline: none; }
+.njb-afficher svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.njb-lien-ligne { display: flex; justify-content: flex-end; margin: -6px 0 18px; }
+.njb-lien {
+  background: none; border: 0; padding: 4px 0; font-size: 13px; color: #1d4ed8; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 3px; font-family: inherit;
+}
+.njb-bouton {
+  height: 48px; width: 100%; border: 0; border-radius: 10px; background: var(--accent); color: #fff;
+  font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  transition: background 0.15s, transform 0.05s;
+}
+.njb-bouton:hover { background: #2563eb; }
+.njb-bouton:active { transform: translateY(1px); }
+.njb-bouton:disabled { background: #93c5fd; cursor: progress; }
+.njb-bouton:focus-visible { outline: 3px solid rgba(59, 130, 246, 0.4); outline-offset: 2px; }
+.njb-spin {
+  width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.45); border-top-color: #fff;
+  animation: njb-tourne 0.8s linear infinite;
+}
+@keyframes njb-tourne { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .njb-spin { animation: none; } }
+.njb-erreur {
+  background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; border-radius: 10px;
+  padding: 10px 12px; font-size: 13px; margin-bottom: 16px; line-height: 1.45;
+}
+.njb-succes {
+  background: #f0fdf4; border: 1px solid #86efac; color: #15803d; border-radius: 10px;
+  padding: 10px 12px; font-size: 13px; margin-bottom: 16px; line-height: 1.45;
+}
+.njb-demo { text-align: center; font-size: 13px; color: var(--text-muted); margin: 22px 0 0; }
+.njb-demo a { color: #1d4ed8; }
+
+@media (max-width: 760px) {
+  .njb-login { padding: 0; }
+  .njb-login-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; border-radius: 0; box-shadow: none; min-height: 100vh; min-height: 100dvh; }
+  .njb-login-marque { padding: 22px 20px; gap: 0; }
+  .njb-login-marque img { width: 170px; }
+  .njb-login-accroche, .njb-login-modules, .njb-login-pied { display: none; }
+  .njb-login-form { padding: 28px 20px 32px; justify-content: flex-start; }
+  .njb-login-form h1 { font-size: 22px; }
+}
+
+/* ── Accueil NJ BUSINESS ───────────────────────────────────────────── */
+.njb-accueil { min-height: 100vh; min-height: 100dvh; background: var(--bg); }
+.njb-barre {
+  background: var(--brand); color: #fff; height: 64px; padding: 0 24px;
+  display: flex; align-items: center; gap: 16px; position: sticky; top: 0; z-index: 5;
+}
+.njb-barre img { height: 34px; width: auto; display: block; }
+.njb-barre-droite { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.njb-barre-btn {
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.22); color: #fff; height: 38px;
+  padding: 0 14px; border-radius: 9px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.njb-barre-btn:hover, .njb-barre-btn:focus-visible { background: rgba(255, 255, 255, 0.1); outline: none; }
+.njb-barre-btn svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2; }
+.njb-utilisateur { font-size: 13px; color: #cbd5e1; margin-right: 6px; }
+.njb-utilisateur b { color: #fff; }
+
+.njb-contenu { max-width: 1120px; margin: 0 auto; padding: 36px 24px 56px; }
+.njb-contenu h1 { font-size: 26px; font-weight: 800; color: var(--brand); margin: 0 0 6px; letter-spacing: -0.01em; }
+.njb-espace { font-size: 14px; color: var(--text-muted); margin: 0 0 28px; }
+.njb-alerte {
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e; border-radius: 12px;
+  padding: 12px 16px; font-size: 14px; margin-bottom: 24px; line-height: 1.5;
+}
+.njb-surtitre { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-muted); text-transform: uppercase; margin: 0 0 12px; }
+.njb-grille { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-bottom: 34px; }
+.njb-carte {
+  background: var(--card); border: 1.5px solid var(--border); border-radius: 16px; padding: 22px;
+  display: flex; flex-direction: column; gap: 10px; min-height: 220px; box-sizing: border-box;
+  transition: box-shadow 0.15s, border-color 0.15s, transform 0.15s;
+}
+.njb-carte.active { border-color: var(--accent); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.12); }
+.njb-carte.active:hover { transform: translateY(-2px); box-shadow: 0 10px 28px rgba(59, 130, 246, 0.18); }
+.njb-carte.a-venir { border-style: dashed; background: #fbfcfe; }
+.njb-carte h2 { font-size: 17px; font-weight: 800; color: var(--brand); margin: 6px 0 0; letter-spacing: 0.01em; }
+.njb-carte.a-venir h2 { color: #475569; }
+.njb-carte p { font-size: 13.5px; color: var(--text-muted); margin: 0; line-height: 1.5; flex: 1; }
+.njb-badge { align-self: flex-start; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
+.njb-badge.ok { background: #dcfce7; color: #166534; }
+.njb-badge.bientot { background: #e2e8f0; color: #334155; }
+.njb-carte .njb-bouton { height: 44px; margin-top: 4px; }
+.njb-contact { font-size: 13px; color: #334155; margin-top: 4px; }
+.njb-contact a { color: #1d4ed8; }
+.njb-ico-vide {
+  width: 34px; height: 34px; border-radius: 9px; border: 1.5px dashed #cbd5e1; display: flex; align-items: center;
+  justify-content: center; font-size: 12px; font-weight: 800; color: #64748b;
+}
+@media (max-width: 980px) { .njb-grille { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 620px) {
+  .njb-grille { grid-template-columns: minmax(0, 1fr); }
+  .njb-barre { padding: 0 14px; height: 58px; }
+  .njb-barre img { height: 28px; }
+  .njb-utilisateur { display: none; }
+  .njb-barre-btn span { display: none; }
+  .njb-contenu { padding: 24px 16px 40px; }
+  .njb-contenu h1 { font-size: 21px; }
+}
+
+/* ── En-tête du menu latéral de la caisse ──────────────────────────── */
+.njb-sidebar-marque { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; color: #fff; text-decoration: none; border-radius: 8px; }
+.njb-sidebar-marque:hover .njb-sidebar-retour, .njb-sidebar-marque:focus-visible .njb-sidebar-retour { color: #fff; }
+.njb-sidebar-marque:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 3px; }
+.njb-sidebar-textes { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.njb-sidebar-nom { font-size: 15px; font-weight: 800; letter-spacing: 0.02em; }
+.njb-sidebar-retour { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.7); white-space: nowrap; }
+
+/* ── Administration : modules par client ──────────────────────────── */
+.njb-interrupteur {
+  position: relative; width: 42px; height: 24px; border-radius: 999px; border: 0; cursor: pointer; flex: none;
+  background: #cbd5e1; transition: background 0.15s; padding: 0;
+}
+.njb-interrupteur::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); transition: transform 0.15s;
+}
+.njb-interrupteur[aria-checked='true'] { background: #16a34a; }
+.njb-interrupteur[aria-checked='true']::after { transform: translateX(18px); }
+.njb-interrupteur:disabled { opacity: 0.45; cursor: not-allowed; }
+.njb-interrupteur:focus-visible { outline: 3px solid rgba(59, 130, 246, 0.4); outline-offset: 2px; }
+
+/* ── Bouton « Rafraîchir » de la barre du haut (27/10/2026) ─────────── */
+.njb-rafraichir:disabled { cursor: progress; opacity: 1; }
+.njb-rafraichir.tourne svg { animation: njb-tourne 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .njb-rafraichir.tourne svg { animation: none; } }

@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const svc = require('../services/prospects.service');
 const com = require('../services/commercial.service');
 const pipe = require('../services/pipeline.service');
+const val = require('../services/validation-demo.service');
 const { isCabinet } = require('../middleware/auth');
 const { userHasPermission } = require('../services/permission.service');
 
@@ -21,6 +22,14 @@ const repondre = (ctx, fn, statut = 200) => async (req, res) => {
     console.error(`[Prospects] ${ctx} :`, err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
+};
+
+// Contexte tracé dans le journal des validations (jamais le code).
+const contexte = (req) => ({ ip: req.ip, userAgent: req.get('user-agent') || '' });
+const idCode = (req) => {
+  const id = parseInt(req.params.codeId, 10);
+  if (!(id > 0)) throw new svc.ErreurMetier(400, 'Identifiant de code invalide.');
+  return id;
 };
 
 // Accès : super_admin, ou membre du cabinet titulaire de « prospects.gerer ».
@@ -79,12 +88,24 @@ module.exports = {
     commercialId: req.user.role === 'commercial' ? req.user.id : (req.body.commercial_id || null),
   }), 201),
   modifier:   repondre('modif',   (req) => svc.modifier({ id: uuid(req.params.id), donnees: req.body || {}, userId: req.user.id })),
-  inviter:    repondre('invitation', (req) => svc.inviter({ id: uuid(req.params.id), userId: req.user.id })),
+  inviter:    repondre('invitation', async (req) => {
+    const id = uuid(req.params.id);
+    const avant = await svc.charger(id);
+    const r = await svc.inviter({ id, userId: req.user.id });
+    // Acceptation « classique » d'une demande du formulaire web : tracée dans
+    // le journal des validations (à côté des validations directes par code).
+    if (!avant.tenant_id && avant.demande_web_le) {
+      await val.tracerValidationClassique({ prospectId: id, user: req.user,
+        libelle: `${avant.entreprise || avant.nom_complet || ''}${avant.email ? ` <${avant.email}>` : ''}`, ctx: contexte(req) });
+    }
+    return r;
+  }),
   apercu:     repondre('aperçu',  (req) => svc.apercuEmail({ nom: req.query.nom, debut: req.query.debut, fin: req.query.fin })),
   prolonger:  repondre('prolongation', (req) => {
     if (req.body.confirmation !== true) throw new svc.ErreurMetier(400, 'Confirmation requise pour prolonger.');
     return svc.prolonger({ id: uuid(req.params.id), nouvelleFin: req.body.nouvelle_fin, motif: req.body.motif, userId: req.user.id });
   }),
+  supprimer:  repondre('suppression', (req) => svc.supprimer({ id: uuid(req.params.id), motif: req.body?.motif, user: req.user })),
   statut:     repondre('statut',  (req) => svc.changerStatut({ id: uuid(req.params.id), statut: req.body.statut, motif: req.body.motif, userId: req.user.id })),
   // Public (lien reçu par e-mail)
   verifierActivation: repondre('activation.verif', (req) => svc.verifierActivation(req.params.token)),
@@ -104,6 +125,20 @@ module.exports = {
   }),
   // Public : page « Demander une démo »
   demandeWeb: repondre('demande web', (req) => svc.demandeWeb(req.body || {}), 201),
+  // Public : même formulaire, validé sur place par un commercial avec son code.
+  demandeWebValidee: repondre('demande web validée', (req) => val.validerDemandeAvecCode({
+    corps: req.body || {}, identifiant: req.body?.identifiant, code: req.body?.validationCode, ctx: contexte(req) })),
+  // Super Admin : codes de validation directe et permission associée
+  vdLister:      repondre('vd.liste', (req) => val.lister({ user: req.user })),
+  vdPermission:  repondre('vd.permission', (req) => val.definirPermission({ user: req.user, userId: uuid(req.params.userId), autorise: req.body?.autorise === true })),
+  vdCode:        repondre('vd.code', (req) => val.definirCode({ user: req.user, userId: uuid(req.params.userId), code: req.body?.code,
+    expireLe: req.body?.expire_le, limite: req.body?.limite_utilisations }), 201),
+  vdModifier:    repondre('vd.modif', (req) => val.modifierCode({ user: req.user, codeId: idCode(req), actif: req.body?.actif,
+    expireLe: req.body?.expire_le, limite: req.body?.limite_utilisations })),
+  vdRevoquer:    repondre('vd.revocation', (req) => val.revoquerCode({ user: req.user, codeId: idCode(req) })),
+  vdDebloquer:   repondre('vd.deblocage', (req) => val.debloquerCode({ user: req.user, codeId: idCode(req) })),
+  vdHistorique:  repondre('vd.historique', (req) => val.historique({ user: req.user,
+    userId: req.query.user_id && UUID_RE.test(req.query.user_id) ? req.query.user_id : null, resultat: req.query.resultat, limite: req.query.limite })),
   // Étape 4 : forfaits, paiements, conversion
   forfaits:      repondre('forfaits', (req) => com.listerForfaits({ tous: req.query.tous === '1' && req.user.role === 'super_admin' })),
   creerForfait:  repondre('forfait.création', (req) => com.creerForfait({ donnees: req.body || {}, userId: req.user.id }), 201),

@@ -10,6 +10,12 @@
     "db:migrate": "node db/migrate.js",
     "db:status": "node db/migrate.js --status",
     "db:seed": "node db/seed-admin.js",
+    "test:validation-directe": "node --test tests/validation-directe.test.js",
+    "test:passerelle": "node --test tests/passerelle.test.js",
+    "test:activite-obligatoire": "node --test tests/activite-obligatoire.test.js",
+    "test:budget-hebdo": "node --test tests/budget-hebdo.test.js",
+    "test:controle": "node --test tests/controle.test.js",
+    "test:passerelle-validation": "node --test tests/passerelle-validation.test.js",
     "db:plan": "node db/seed-plan-comptable.js",
     "db:plan:status": "node db/seed-plan-comptable.js --status",
     "db:setup": "node db/setup.js",
@@ -18,7 +24,11 @@
     "db:check-drift": "node tools/check-drift.js",
     "config:export": "node tools/export-config.js",
     "deploy:check": "node tools/check-deploy.js",
-    "perm:diag": "node tools/diag-permissions.js"
+    "perm:diag": "node tools/diag-permissions.js",
+    "test:controle-ajustement": "node --test tests/controle-ajustement.test.js",
+    "test:regularite-formelle": "node --test tests/regularite-formelle.test.js",
+    "test:arretes-inventaires": "node --test tests/arretes-inventaires.test.js",
+    "test:modules": "node --test tests/modules.test.js"
   },
   "//": "Les scripts sequelize:migrate* ont été retirés : sequelize-cli est gelé sur son baseline et n'est joué nulle part dans la chaîne de déploiement. Toute migration de schéma s'écrit en SQL dans db/migrations/ — voir migrations/README.md.",
   "dependencies": {

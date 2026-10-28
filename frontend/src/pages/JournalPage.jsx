@@ -11,6 +11,8 @@ import ArretCaisseModal from '@/components/ArretCaisseModal';
 import { printJournalView } from '@/lib/print';
 import { BonPretModal, BoutonBon } from '@/components/BonCaisse';
 import { syncManager } from '@/lib/syncManager';
+import PiecesModal from '@/components/PiecesModal';
+import { exporterExcel, num } from '@/lib/export';
 
 // Reprend loadJournalPage() de legacy/js/app.js (l. 295) — même structure DOM,
 // mêmes couleurs, mêmes calculs, y compris les actions RAN / Budget caisse /
@@ -24,7 +26,7 @@ const ALERTE_BORDER = { depasse: '#fca5a5', critique: '#fdba74', attention: '#fd
 export default function JournalPage() {
   const { id } = useParams();
   const journalId = Number(id);
-  const { journaux, mois, annee, MOIS, devise, user, can, activeTenantNom } = useApp();
+  const { journaux, mois, annee, MOIS, devise, user, can, activeTenantNom, entite } = useApp();
   const toast = useToast();
 
   const [data, setData] = useState(null);
@@ -59,6 +61,16 @@ export default function JournalPage() {
 
   useEffect(() => { setData(null); charger(); }, [charger]);
 
+  // Libellés des activités / projets (034) pour l'affichage et l'export.
+  const [activitesParId, setActivitesParId] = useState({});
+  useEffect(() => {
+    let annule = false;
+    api.get('/activites?tous=1').then((r) => {
+      if (!annule && Array.isArray(r)) setActivitesParId(Object.fromEntries(r.map((a) => [a.id, a])));
+    });
+    return () => { annule = true; };
+  }, []);
+
   // Annulation = contre-passation (écriture négative) ; jamais de suppression.
   // Directeur (journal.annuler) : annule directement. Caissière : demande.
   const peutAnnuler = can('journal.annuler');
@@ -75,9 +87,28 @@ export default function JournalPage() {
   };
 
   const [bonPret, setBonPret] = useState(null);
+  const [piecesDe, setPiecesDe] = useState(null);
+  // C3 : l'arrêt est réservé à l'encadrement (journaux.arreter) et au
+  // responsable d'arrêt désigné sur ce journal — même règle que le serveur.
+  const peutArreter = can('journaux.arreter') || (j && user?.id && j.responsable_arret === user.id);
+
+  // C8 : export Excel du journal affiché (permission rapport.export).
+  const onExporter = () => {
+    let c = data.ran_auto || 0;
+    const lignes = (data.mouvements || []).map((m) => {
+      const e = num(m.entree); const so = num(m.sortie); c += e - so;
+      return [m.numero ?? '', m.date ? String(m.date).slice(0, 10) : '', m.rubrique_code, m.intitule, m.objet || '', m.beneficiaire || '',
+        e || '', so || '', num(c), m.annule ? `ANNULÉE${m.motif_annulation ? ` — ${m.motif_annulation}` : ''}` : (m.annulation_de_id ? 'Contre-passation' : ''),
+        activitesParId[m.activite_id]?.nom || ''];
+    });
+    exporterExcel(`Journal_${j.code}_${mois}_${annee}`,
+      ['N°', 'Date', 'Rubrique', 'Intitulé', 'Objet', 'Bénéficiaire', `Entrée (${devise})`, `Sortie (${devise})`, 'Solde cumulé', 'Statut', 'Activité / projet'],
+      [...lignes, ['', '', '', 'TOTAL DU MOIS', '', '', num(data.soldes?.entrees), num(data.soldes?.sorties), num(data.soldes?.solde), '', '']],
+      [`${j.nom} (${j.code}) — ${mois} ${annee}`, `${activeTenantNom || user?.tenantNom || ''}`, `Report à nouveau : ${num(data.ran_auto)} ${devise}`]);
+  };
 
   const onImprimer = () => {
-    printJournalView({ j, data, mois, annee, tenantNom: activeTenantNom || user?.tenantNom });
+    printJournalView({ j, data, mois, annee, tenantNom: activeTenantNom || user?.tenantNom, entite });
   };
 
   const onRouvrir = async () => {
@@ -143,7 +174,7 @@ export default function JournalPage() {
   return (
     <>
       {/* ── Hero header ─────────────────────────────────────────────── */}
-      <div style={{ background: 'linear-gradient(135deg,#1e293b 0%,#0f172a 100%)', borderRadius: 16, padding: '22px 26px', marginBottom: 16, boxShadow: '0 4px 24px rgba(15,23,42,.18)', position: 'relative', overflow: 'hidden' }}>
+      <div className="jr-hero" style={{ background: 'linear-gradient(135deg,#1e293b 0%,#0f172a 100%)', borderRadius: 16, padding: '22px 26px', marginBottom: 16, boxShadow: '0 4px 24px rgba(15,23,42,.18)', position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', top: -30, right: -30, width: 160, height: 160, borderRadius: '50%', background: typeColor, opacity: .12, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', bottom: -40, right: 60, width: 100, height: 100, borderRadius: '50%', background: typeColor, opacity: .08, pointerEvents: 'none' }} />
 
@@ -167,8 +198,8 @@ export default function JournalPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {!isArrete && (
+          <div className="jr-actions" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {!isArrete && can('journal.create') && (
               <button
                 onClick={() => setModal(null)}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 16px', background: 'linear-gradient(135deg,#16a34a,#15803d)', border: 'none', borderRadius: 9, color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 10px rgba(22,163,74,.35)' }}
@@ -190,7 +221,7 @@ export default function JournalPage() {
             >
               💰 Budget
             </button>
-            {!isArrete ? (
+            {!isArrete ? peutArreter && (
               <button
                 onClick={() => setArretOpen(true)}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: 'rgba(217,119,6,.2)', border: '1px solid rgba(217,119,6,.4)', borderRadius: 9, color: '#fbbf24', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
@@ -203,6 +234,15 @@ export default function JournalPage() {
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: 'rgba(239,68,68,.2)', border: '1px solid rgba(239,68,68,.4)', borderRadius: 9, color: '#fca5a5', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
               >
                 🔓 Rouvrir
+              </button>
+            )}
+            {can('rapport.export') && (
+              <button
+                onClick={onExporter}
+                title="Exporter le journal du mois (Excel)"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: 'rgba(134,239,172,.15)', border: '1px solid rgba(134,239,172,.35)', borderRadius: 9, color: '#86efac', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >
+                📊 Excel
               </button>
             )}
             <button
@@ -232,7 +272,7 @@ export default function JournalPage() {
       </div>
 
       {/* ── KPI cards ───────────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', gap: 12, marginBottom: 16 }}>
+      <div className="jr-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', gap: 12, marginBottom: 16 }}>
         <div style={{ background: 'white', borderRadius: 12, border: '1px solid var(--border)', padding: '16px 18px', boxShadow: '0 1px 6px rgba(0,0,0,.05)' }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: '#92400e', marginBottom: 6 }}>Report à Nouveau</div>
           <div style={{ fontSize: 19, fontWeight: 800, color: '#78350f' }}>{fmt(ranAuto, devise)}</div>
@@ -288,7 +328,7 @@ export default function JournalPage() {
           >
             <div style={{ fontSize: 20, marginBottom: 4 }}>💰</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', marginBottom: 2 }}>Budget non défini</div>
-            <div style={{ fontSize: 10, color: '#a78bfa' }}>Cliquez pour définir un plafond mensuel</div>
+            <div style={{ fontSize: 10, color: '#a78bfa' }}>{can('budget.edit') ? 'Cliquez pour définir un plafond de caisse' : 'Aucun plafond pour cette caisse'}</div>
           </div>
         )}
       </div>
@@ -308,7 +348,7 @@ export default function JournalPage() {
         </div>
 
         <div className="table-wrap" style={{ margin: 0 }}>
-          <table>
+          <table className="jr-table">
             <thead>
               <tr>
                 <th style={{ width: 52 }}>N°</th>
@@ -345,6 +385,20 @@ export default function JournalPage() {
                       <div style={{ fontSize: 13, fontWeight: 500, color: m.annulation_de_id ? '#b91c1c' : '#0f172a', ...barree }}>{m.intitule}</div>
                       {m.objet && <div style={{ fontSize: 11, color: '#94a3b8' }}>{m.annulation_de_id ? `Motif : ${m.objet}` : m.objet}</div>}
                       {m.annule && <span style={{ fontSize: 10, fontWeight: 700, color: '#b91c1c', background: '#fee2e2', borderRadius: 5, padding: '1px 6px' }}>ANNULÉE{m.motif_annulation ? ` — ${m.motif_annulation}` : ''}</span>}
+                      {m.activite_id && activitesParId[m.activite_id] && (
+                        <span
+                          title={activitesParId[m.activite_id].type === 'projet' ? 'Projet' : 'Activité'}
+                          style={{ display: 'inline-block', marginTop: 2, marginRight: 4, fontSize: 10, fontWeight: 700, borderRadius: 5, padding: '1px 6px',
+                            color: activitesParId[m.activite_id].type === 'projet' ? '#7c3aed' : '#0369a1',
+                            background: activitesParId[m.activite_id].type === 'projet' ? '#ede9fe' : '#e0f2fe' }}
+                        >{activitesParId[m.activite_id].type === 'projet' ? '🎯' : '🏷️'} {activitesParId[m.activite_id].nom}</span>
+                      )}
+                      {m.rattrapage && (
+                        <span
+                          title={`Saisie de rattrapage (antidatée)${m.created_at ? ` — enregistrée le ${new Date(m.created_at).toLocaleDateString('fr-FR')}` : ''}`}
+                          style={{ fontSize: 10, fontWeight: 700, color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: 5, padding: '1px 6px', marginLeft: m.annule ? 4 : 0 }}
+                        >⏪ RATTRAPAGE{m.created_at ? ` · saisi le ${new Date(m.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}` : ''}</span>
+                      )}
                     </td>
                     <td style={{ fontSize: 12, color: '#64748b' }}>{m.beneficiaire || '—'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: e < 0 ? '#b91c1c' : '#16a34a', fontSize: 13, ...barree }}>{e !== 0 ? fmt(e, devise) : ''}</td>
@@ -352,6 +406,13 @@ export default function JournalPage() {
                     <td style={{ textAlign: 'right', fontWeight: 800, fontSize: 13, color: cumulColor }}>{fmt(c, devise)}</td>
                     <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                       {m.id && m.numero != null && <BoutonBon m={m} toast={toast} onDone={charger} />}
+                      {m.id && can('pieces.view') && (
+                        <button
+                          title="Pièces jointes"
+                          onClick={() => setPiecesDe(m)}
+                          style={{ padding: '4px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, cursor: 'pointer', fontSize: 12, marginRight: 3 }}
+                        >📎</button>
+                      )}
                       {!isArrete && !m.annule && !m.annulation_de_id ? (
                         <>
                           {can('journal.edit') && (
@@ -397,6 +458,14 @@ export default function JournalPage() {
           onClose={() => setModal(undefined)}
           onSaved={(cree) => { setModal(undefined); charger(); if (cree?.id && cree?.numero) setBonPret(cree); else if (cree) toast('Mouvement enregistré ✓', 'success'); }}
         />
+      )}
+
+      {!isArrete && can('journal.create') && (
+        <button type="button" className="fab" onClick={() => setModal(null)} aria-label="Nouveau mouvement">＋</button>
+      )}
+
+      {piecesDe && (
+        <PiecesModal m={piecesDe} modifiable={!isArrete && !piecesDe.annule && !piecesDe.annulation_de_id} onClose={() => setPiecesDe(null)} />
       )}
 
       {bonPret && (

@@ -5,6 +5,7 @@ import Topbar from './Topbar';
 import TenantSelectorModal from './TenantSelectorModal';
 import SupportAcces from './SupportAcces';
 import InitialisationCompte from './InitialisationCompte';
+import BottomNav from './BottomNav';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 
@@ -18,12 +19,19 @@ const TITLES = {
   '/previsions': 'Prévisions de dépenses',
   '/appel-fonds': 'Demande de fonds',
   '/compte-emploi': "Compte d'emploi",
+  '/activites': 'Suivi par activité',
   '/config': 'Configuration',
   '/tenants': 'Clients (Tenants)',
   '/permissions': 'Gestion des permissions',
   '/plan-modele': 'Modèle comptable',
   '/plateforme': 'Administration plateforme',
+  '/validation-directe': 'Validation directe des prospects',
   '/attente': 'Dépenses en attente',
+  '/controle/pieces': 'Contrôle comptable — Rapport',
+  '/controle/regularite': 'Contrôle comptable — Contrôle de substance',
+  '/controle/arretes': 'Contrôle comptable — Arrêtés de caisse & inventaires',
+  '/controle/registre': 'Contrôle comptable — Registre bénéficiaires Payés/Encaissés',
+  '/controle/passerelle': 'Contrôle comptable — Contrôle de régularité formelle',
 };
 
 export default function Layout() {
@@ -46,6 +54,16 @@ export default function Layout() {
     api.get('/initialisation').then((r) => { if (!annule && r && !r.error) setInit(r); });
     return () => { annule = true; };
   }, [user?.tenantId, isAdmin]);
+  // Tiroir de navigation (tablette et téléphone) : fermé à chaque changement d'écran.
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => { setNavOpen(false); }, [location.pathname]);
+  useEffect(() => {
+    document.body.classList.toggle('nav-locked', navOpen);
+    if (!navOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') setNavOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
   const [badgeAttente, setBadgeAttente] = useState(0);
   const [badgeDepassements, setBadgeDepassements] = useState(0);
 
@@ -54,7 +72,7 @@ export default function Layout() {
   // (legacy/js/app.js l. 6278-6280) qui ouvre showTenantSelector() au boot.
   // Les écrans d'administration plateforme ne dépendent d'aucun client : on
   // n'y impose pas le choix d'un client.
-  const pageSansClient = ['/plan-modele', '/tenants', '/permissions', '/plateforme', '/prospects', '/mynjbusiness'].includes(location.pathname);
+  const pageSansClient = ['/plan-modele', '/tenants', '/permissions', '/plateforme', '/prospects', '/mynjbusiness', '/validation-directe'].includes(location.pathname);
   // Le super_admin administre la plateforme : il n'est plus forcé à choisir
   // un client (il en choisit un via le badge du haut ou la fiche client).
   // Le comptable cabinet, lui, travaille toujours DANS un client.
@@ -72,6 +90,18 @@ export default function Layout() {
   // Badges : rechargés au plus une fois par minute, et non plus à CHAQUE
   // changement de page (2 requêtes par clic dans le menu auparavant).
   const dernierBadges = useRef(0);
+  // Bouton « Rafraîchir » (27/10/2026) : la page affichée est remontée (elle
+  // relit ses données), les journaux et les badges sont rechargés.
+  const [cleRafraichir, setCleRafraichir] = useState(0);
+  useEffect(() => {
+    const surRafraichir = () => {
+      setCleRafraichir((k) => k + 1);
+      loadJournaux();
+      dernierBadges.current = 0;
+    };
+    window.addEventListener('njb-rafraichir', surRafraichir);
+    return () => window.removeEventListener('njb-rafraichir', surRafraichir);
+  }, [loadJournaux]);
   useEffect(() => {
     if (!peutVoirAttente) return;
     if (Date.now() - dernierBadges.current < 60000) return;
@@ -82,7 +112,7 @@ export default function Layout() {
     api.get('/budget-caisse/depassements/count').then((r) => {
       if (!r.error && typeof r.count === 'number') setBadgeDepassements(r.count);
     });
-  }, [peutVoirAttente, location.pathname]);
+  }, [peutVoirAttente, location.pathname, cleRafraichir]);
 
   if (init?.requise) {
     return (
@@ -90,14 +120,15 @@ export default function Layout() {
         etat={init}
         devise={devise}
         onLogout={logout}
-        onTermine={(r) => { if (r?.mois) { setMois(r.mois); setAnnee(r.annee); } setInit(null); loadJournaux(); navigate('/'); }}
+        onTermine={(r) => { if (r?.mois) { setMois(r.mois); setAnnee(r.annee); } setInit(null); loadJournaux(); navigate('/config', { state: { bienvenue: true } }); }}
       />
     );
   }
 
   return (
     <div id="screen-app" className="screen" style={{ display: 'flex' }}>
-      <Sidebar badgeAttente={badgeAttente} badgeDepassements={badgeDepassements} />
+      <Sidebar badgeAttente={badgeAttente} badgeDepassements={badgeDepassements} open={navOpen} onClose={() => setNavOpen(false)} />
+      <div className={'nav-backdrop' + (navOpen ? ' show' : '')} onClick={() => setNavOpen(false)} aria-hidden="true" />
       <main className="main-content">
         <SupportAcces />
         {user?.type_compte === 'demo' && user?.demo_expire_le && (
@@ -106,10 +137,11 @@ export default function Layout() {
             <strong>{new Date(user.demo_expire_le).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</strong>.
           </div>
         )}
-        <Topbar title={title} />
+        <Topbar title={title} onMenu={() => setNavOpen(true)} />
         <section className="page active">
-          <Outlet />
+          <Outlet key={cleRafraichir} />
         </section>
+        <BottomNav badgeAttente={badgeAttente} onMenu={() => setNavOpen(true)} />
       </main>
       {tenantSelectorOpen && (
         <TenantSelectorModal

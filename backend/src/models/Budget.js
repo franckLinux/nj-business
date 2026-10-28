@@ -11,6 +11,7 @@ module.exports = (sequelize, DataTypes) => {
     montant: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
     mois_applic: DataTypes.TEXT,
     annee_applic: DataTypes.INTEGER,
+    semaine: DataTypes.SMALLINT,   // migration 040 : NULL = mensuel, 1..6 = semaine du mois
   }, {
     tableName: 'budget',
     timestamps: false,

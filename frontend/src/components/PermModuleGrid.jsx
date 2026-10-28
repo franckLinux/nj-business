@@ -15,6 +15,8 @@ export const MODULE_META = {
   pieces: { label: 'Pièces justificatives', color: '#fef2f2', text: '#b91c1c' },
   banque: { label: 'Banque', color: '#f0f9ff', text: '#0c4a6e' },
   roles: { label: 'Profils métier', color: '#fff7ed', text: '#9a3412' },
+  passerelle: { label: 'Passerelle comptable', color: '#ecfeff', text: '#0e7490' },
+  controle: { label: 'Contrôle comptable', color: '#f0fdfa', text: '#0f766e' },
 };
 
 export const moduleMeta = (mod) => MODULE_META[mod] || { label: mod, color: '#f1f5f9', text: '#64748b' };

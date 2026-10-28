@@ -70,12 +70,16 @@ const notifyMouvementEnAttente = async (p) => {
   const result = { notified: 0, emails: [] };
   const m = p.mouvement;
   try {
+    // L'adresse de l'Entité (Configuration → Entité) reçoit aussi l'alerte :
+    // avant, seule l'adresse de la FICHE UTILISATEUR des valideurs était utilisée,
+    // et un client sans e-mail sur ses fiches ne recevait jamais rien.
     const { rows: tRows } = await query(
-      'SELECT nom FROM tenants WHERE id=$1 LIMIT 1', [p.tenantId]
+      'SELECT nom, email FROM tenants WHERE id=$1 LIMIT 1', [p.tenantId]
     );
     const tenantNom = tRows[0]?.nom || 'Entité';
+    const emailEntite = String(tRows[0]?.email || '').trim().toLowerCase();
 
-    // ── Notification in-app (cloche) à chaque directeur actif ────────────────
+    // ── Notification in-app (cloche) à chaque valideur actif ────────────────
     await notifierPermission({
       tenantId: p.tenantId, permission: PERM_VALIDATION,
       type: 'attente_creee',
@@ -84,27 +88,34 @@ const notifyMouvementEnAttente = async (p) => {
       refType: 'mouvement_attente', refId: m.id,
     });
 
-    // Destinataires e-mail : personnes actives habilitées à valider
+    // ── Destinataires e-mail (dédoublonnés, insensible à la casse) ──────────
     const dirs = (await usersAvecPermission(p.tenantId, PERM_VALIDATION))
       .map((u) => ({ ...u, canal_notif: u.canal_notif || 'email' }));
-
+    const destinataires = new Map();   // email → nom affiché
     for (const d of dirs) {
-      const canal = d.canal_notif;
-      if (canal === 'aucun' || canal === 'plateforme') {
-        // Plateforme : rien à envoyer, la file d'attente fait office de notification.
+      if (d.canal_notif === 'aucun' || d.canal_notif === 'plateforme') {
+        result.emails.push({ dir: d.username, sent: false, reason: `canal « ${d.canal_notif} »` });
         continue;
       }
-      // canal 'email' ou 'les_deux'
-      if (!d.email) {
-        result.emails.push({ dir: d.username, sent: false, reason: 'pas d\'email' });
-        continue;
-      }
+      const adr = String(d.email || '').trim().toLowerCase();
+      if (!adr) { result.emails.push({ dir: d.username, sent: false, reason: 'pas d\'email sur la fiche utilisateur' }); continue; }
+      if (!destinataires.has(adr)) destinataires.set(adr, d.username);
+    }
+    if (emailEntite && !destinataires.has(emailEntite)) destinataires.set(emailEntite, 'Direction');
+
+    if (destinataires.size === 0) {
+      console.warn(`[Notif] Dépense en attente #${m.id} (${tenantNom}) : AUCUN destinataire e-mail `
+        + '(ni e-mail sur les fiches des valideurs, ni e-mail de l\'Entité).');
+    }
+
+    for (const [adr, nom] of destinataires) {
       const r = await sendMouvementAttenteAlert({
-        dirEmail:     d.email,
-        dirNom:       d.username,
+        dirEmail:     adr,
+        dirNom:       nom,
         tenantNom,
         caissierNom:  p.caissierNom || '',
         motif:        m.motif_attente,
+        semaine:      p.semaine || null,
         mois:         m.mois,
         annee:        m.annee,
         rubriqueCode: m.rubrique_code,
@@ -115,12 +126,24 @@ const notifyMouvementEnAttente = async (p) => {
         cumulSorties: parseFloat(m.cumul_sorties) || 0,
         mouvementId:  m.id,
       });
-      result.emails.push({ dir: d.username, ...r });
+      result.emails.push({ dir: nom, email: adr, ...r });
       if (r.sent) result.notified += 1;
     }
   } catch (err) {
     console.warn('[Notif] notifyMouvementEnAttente :', err.message);
+    result.erreur = err.message;
   }
+
+  // Trace consultable (Journal d'audit) : on sait enfin POURQUOI un e-mail n'est pas parti.
+  query(
+    `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+     VALUES ($1, $2, 'EMAIL_ATTENTE', 'mouvement_attente', $3, CAST($4 AS jsonb))`,
+    [p.tenantId, m?.created_by || null, String(m?.id ?? ''), JSON.stringify({
+      envoyes: result.notified,
+      details: result.emails.map((e) => ({ dest: e.email || e.dir, ok: Boolean(e.sent), raison: e.reason || null })),
+      ...(result.erreur ? { erreur: result.erreur } : {}),
+    })]
+  ).catch((e) => console.warn('[Notif] trace EMAIL_ATTENTE :', e.message));
   return result;
 };
 

@@ -56,6 +56,9 @@ export default function DashboardPage() {
         },
         options: {
           responsive: true,
+          // Sur téléphone / tablette, un graphique plus haut reste lisible.
+          ...(window.matchMedia('(max-width: 640px)').matches ? { aspectRatio: 1.3 }
+            : window.matchMedia('(max-width: 1024px)').matches ? { aspectRatio: 2 } : {}),
           plugins: { legend: { position: 'top' } },
           scales: {
             y: { ticks: { callback: (v) => (v / 1000) + 'k' }, grid: { color: '#f1f5f9' } },
@@ -138,7 +141,7 @@ export default function DashboardPage() {
         Situation des journaux — {data.mois} {data.annee}
         <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · trésorerie : {fmt(data.tresorerieMois, devise)}</span>
       </h3>
-      <div className="kpi-grid" style={{ marginTop: 0 }}>
+      <div className="kpi-grid kpi-journaux" style={{ marginTop: 0 }}>
         {(data.soldesJournaux || []).map((j) => (
           <div
             className="kpi-card" key={j.id ?? j.nom}
@@ -169,7 +172,8 @@ export default function DashboardPage() {
           <canvas ref={fluxRef} height="100" />
         </div>
         <div className="chart-card" style={{ flex: 1 }}>
-          <h3>Mouvements par mois</h3>
+          <h3>Volume des flux par mois</h3>
+          <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '-4px 0 6px' }}>Part de chaque mois dans le total entrées + sorties de l'année</p>
           <canvas ref={pieRef} height="220" />
         </div>
       </div>

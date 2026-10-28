@@ -31,6 +31,11 @@ export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine,
   const [etape, setEtape] = useState(0);
   const [mois, setMois] = useState(etat.mois_defaut);
   const [annee, setAnnee] = useState(etat.annee_defaut);
+  // Jour d'ouverture : aujourd'hui par défaut, ramené au dernier jour du mois choisi si besoin.
+  const [jour, setJour] = useState(etat.jour_defaut || 1);
+  const nbJours = new Date(annee, Math.max(0, (etat.mois || []).indexOf(mois)) + 1, 0).getDate();
+  const jourEffectif = Math.min(jour, nbJours);
+  const dateOuvertureTxt = `${jourEffectif === 1 ? '1er' : jourEffectif} ${String(mois || '').toLowerCase()} ${annee}`;
   const [caisses, setCaisses] = useState(() => (etat.types || []).flatMap(({ type }) =>
     Array.from({ length: DEPART[type] ?? 0 }, (_, i) => ({ k: `${type}-${i}-${Math.random()}`, type, nom: nomPropose(type, i, existants), ran: '' }))));
   const [erreur, setErreur] = useState('');
@@ -79,7 +84,7 @@ export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine,
   const valider = async () => {
     setEnvoi(true); setErreur('');
     const res = await api.post('/initialisation', {
-      mois, annee, caisses: caisses.map((c) => ({ type: c.type, nom: c.nom.trim(), ran: montant(c.ran) })),
+      mois, annee, jour: jourEffectif, caisses: caisses.map((c) => ({ type: c.type, nom: c.nom.trim(), ran: montant(c.ran) })),
     });
     setEnvoi(false);
     if (res.error) { setErreur(res.error); return; }
@@ -113,7 +118,7 @@ export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine,
             ))}
             <div className="tot"><span>Trésorerie d'ouverture</span><b>{fmt(fini.total_ran, devise)}</b></div>
           </div>
-          <button className="init-btn" onClick={() => onTermine(fini)}>Accéder à mon espace →</button>
+          <button className="init-btn" onClick={() => onTermine(fini)}>Continuer : configurer mon espace →</button>
         </div>
       </div>
     );
@@ -171,9 +176,14 @@ export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine,
 
           {etape === 1 && (
             <>
-              <p className="init-lead">À partir de quel mois commencez-vous la saisie ? Indiquez ce que contient chaque caisse au <b>1er jour</b> de ce mois.</p>
+              <p className="init-lead">Quel jour ouvrez-vous vos caisses dans l'application ? Indiquez ce que contient chaque caisse <b>ce jour-là</b>, avant toute opération.</p>
               <div className="init-periode">
-                <label>Mois de démarrage
+                <label>Jour d'ouverture
+                  <select value={jourEffectif} onChange={(e) => setJour(Number(e.target.value))}>
+                    {Array.from({ length: nbJours }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d === 1 ? '1er' : d}</option>)}
+                  </select>
+                </label>
+                <label>Mois
                   <select value={mois} onChange={(e) => setMois(e.target.value)}>{(etat.mois || []).map((m) => <option key={m}>{m}</option>)}</select>
                 </label>
                 <label>Année
@@ -193,14 +203,14 @@ export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine,
                   </div>
                 ))}
               </div>
-              <div className="init-total"><span>Trésorerie d'ouverture</span><b>{fmt(total, devise)}</b></div>
-              <p className="init-note">Le solde d'ouverture (RAN) ne se saisit qu'une fois : les mois suivants, il reprend automatiquement le solde final du mois précédent.</p>
+              <div className="init-total"><span>Trésorerie d'ouverture au {dateOuvertureTxt}</span><b>{fmt(total, devise)}</b></div>
+              <p className="init-note">Aucune opération ne pourra être datée avant le {dateOuvertureTxt}. Le solde d'ouverture (RAN) ne se saisit qu'une fois : les mois suivants, il reprend automatiquement le solde final du mois précédent.</p>
             </>
           )}
 
           {etape === 2 && (
             <>
-              <p className="init-lead">Vérifiez avant de valider. Démarrage en <b>{mois} {annee}</b>.</p>
+              <p className="init-lead">Vérifiez avant de valider. Ouverture des caisses le <b>{dateOuvertureTxt}</b>.</p>
               <div className="init-recap">
                 {caisses.map((c) => (
                   <div key={c.k}><span>{ICONES[c.type]} {c.nom}</span><b>{fmt(montant(c.ran), devise)}</b></div>

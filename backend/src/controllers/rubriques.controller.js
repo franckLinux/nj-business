@@ -1,5 +1,7 @@
 // src/controllers/rubriques.controller.js
 const { Rubrique } = require('../models');
+const passerelle = require('../services/passerelle.service');
+const { userHasPermission } = require('../services/permission.service');
 
 const RUBRIQUES_DEFAUT = [
   { code:'ABQ',  intitule:'APPROV BANQUE',              type:'entree',  est_virement_interne:false, code_comptable:'',     ordre:1 },
@@ -50,16 +52,22 @@ const createRubrique = async (req, res) => {
     return res.status(400).json({ error: 'Code, intitulé et type requis.' });
   }
   try {
+    // Sans « Gérer les rubriques » (rubriques.create seul, 044) : la rubrique
+    // est créée pour la saisie, sans compte comptable ni virement interne —
+    // ces choix relèvent du comptable (passerelle comptable).
+    const complet = await userHasPermission({ tenantId: req.tenantId, userId: req.user.id, role: req.user.role }, 'rubriques.edit');
     const rubrique = await Rubrique.create({
       tenant_id: req.tenantId,
       code: code.toUpperCase(),
       intitule,
       type,
-      est_virement_interne: est_virement_interne || false,
-      code_comptable: code_comptable || '',
+      est_virement_interne: complet ? (est_virement_interne || false) : false,
+      code_comptable: complet ? (code_comptable || '') : '',
       ordre: ordre || 0,
     });
-    res.status(201).json(rubrique);
+    res.status(201).json({ ...rubrique.toJSON(),
+      ...(!complet && (code_comptable || est_virement_interne)
+        ? { message: 'Rubrique créée. Le code comptable et le virement interne seront définis par le comptable.' } : {}) });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: 'Ce code existe déjà.' });
     res.status(500).json({ error: 'Erreur serveur.' });
@@ -70,19 +78,35 @@ const createRubrique = async (req, res) => {
 const updateRubrique = async (req, res) => {
   const { intitule, est_virement_interne, code_comptable, ordre, actif } = req.body;
   try {
+    // Passerelle comptable (037) : une rubrique dont le compte a été VALIDÉ par
+    // le cabinet garde ce compte ; un nouveau code devient une proposition.
+    let codeRetenu = code_comptable || '';
+    let passerelleMessage = null;
+    const existe = await Rubrique.findOne({ where: { id: req.params.id, tenant_id: req.tenantId }, attributes: ['id'] });
+    if (!existe) return res.status(404).json({ error: 'Rubrique introuvable.' });
+    const interception = await passerelle.interceptionModificationRubrique({
+      tenantId: req.tenantId, userId: req.user.id, rubriqueId: existe.id, nouveauCode: codeRetenu,
+    });
+    if (interception) {
+      codeRetenu = interception.conserver;
+      passerelleMessage = interception.message;
+    }
+
     const [count, rows] = await Rubrique.update(
       {
         intitule,
         est_virement_interne: est_virement_interne !== undefined ? est_virement_interne : false,
-        code_comptable: code_comptable || '',
+        code_comptable: codeRetenu,
         ordre: ordre || 0,
         actif: actif !== false,
       },
       { where: { id: req.params.id, tenant_id: req.tenantId }, returning: true }
     );
     if (count === 0) return res.status(404).json({ error: 'Rubrique introuvable.' });
-    res.json(rows[0]);
+    res.json(passerelleMessage ? { ...rows[0].toJSON(), passerelle_message: passerelleMessage } : rows[0]);
   } catch (err) {
+    if (err instanceof passerelle.ErreurMetier) return res.status(err.status).json({ error: err.message });
+    console.error('[Rubriques] updateRubrique :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };

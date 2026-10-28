@@ -51,13 +51,13 @@ const passerAnnulation = async ({ tenantId, mouvementId, motif, userId, t }) => 
 
   const [cp] = await q(
     `INSERT INTO journal (tenant_id, date, mois, annee, journal_id, type_caisse, rubrique_code, intitule, objet,
-                          beneficiaire, piece_identite, telephone, entree, sortie, created_by, annulation_de_id, motif_annulation)
-     VALUES (:t, :date, :mois, :annee, :jid, :tc, :rub, :intitule, :objet, :benef, :piece, :tel, :e, :s, :u, :orig, :motif)
+                          beneficiaire, piece_identite, telephone, entree, sortie, created_by, annulation_de_id, motif_annulation, activite_id)
+     VALUES (:t, :date, :mois, :annee, :jid, :tc, :rub, :intitule, :objet, :benef, :piece, :tel, :e, :s, :u, :orig, :motif, :act)
      RETURNING *`,
     { t: tenantId, date: dateCp, mois: m.mois, annee: m.annee, jid: m.journal_id, tc: m.type_caisse, rub: m.rubrique_code,
       intitule: `ANNULATION n°${m.numero} — ${m.intitule}`.slice(0, 250), objet: motif.slice(0, 250),
       benef: m.beneficiaire || '', piece: m.piece_identite || '', tel: m.telephone || '',
-      e: -e, s: -s, u: userId, orig: m.id, motif }, { transaction: t });
+      e: -e, s: -s, u: userId, orig: m.id, motif, act: m.activite_id || null }, { transaction: t });
   await sequelize.query(
     'UPDATE journal SET annule = true, annule_par_id = :cp, motif_annulation = :motif, updated_at = NOW() WHERE id = :id',
     { replacements: { cp: cp.id, motif, id: m.id }, transaction: t });

@@ -13,6 +13,9 @@ const DUREE_MAX_MIN = 240;
 const PREFIXES_METIER = [
   '/journal', '/mouvements-attente', '/budget', '/appel-fonds',
   '/rapport', '/banque', '/dashboard',
+  '/controle',   // contrôle des pièces (042) : détail des écritures
+  '/passerelle/simulation',   // balance de contrôle : détail des écritures du mois
+  '/registre-tiers',   // registre clients / fournisseurs (043) : totaux par tiers
 ];
 const estRouteMetier = (path) => {
   if (path.startsWith('/pieces/') && !path.startsWith('/pieces/types')) return true; // pièces jointes des mouvements

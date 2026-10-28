@@ -1,0 +1,337 @@
+/* =====================================================================
+   NJ Caisse Pro — Adaptation tablette & téléphone
+   ---------------------------------------------------------------------
+   Points de rupture :
+     ≤ 1024 px  tablette  : menu latéral en tiroir (bouton ☰), contenu pleine largeur
+     ≤  640 px  téléphone : barre de navigation basse, grilles sur 1 colonne,
+                            journal en cartes, fenêtres en « feuille » depuis le bas
+   Chargé APRÈS app.css : surcharge uniquement, aucune règle desktop modifiée.
+   ===================================================================== */
+
+/* Éléments propres au mobile : masqués sur ordinateur */
+.btn-menu, .sidebar-close, .bottom-nav, .fab { display: none; }
+.nav-backdrop { display: none; }
+
+/* Formulaire de saisie des blocs « Demande de fonds » : champs homogènes */
+.bloc-form input, .bloc-form select {
+  width: 100%; padding: 9px 12px; border: 1.5px solid var(--border); border-radius: 8px;
+  background: #fff; color: var(--text); font-size: 13.5px; outline: none;
+}
+.bloc-form input:focus, .bloc-form select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
+
+html { -webkit-text-size-adjust: 100%; }
+img, svg, canvas, video { max-width: 100%; }
+
+/* ════════════════════════════════════════════════════════════════════
+   TABLETTE ET EN DESSOUS (≤ 1024 px)
+   ════════════════════════════════════════════════════════════════════ */
+@media (max-width: 1024px) {
+  /* ── Tiroir de navigation ── */
+  .sidebar {
+    width: min(300px, 86vw);
+    transform: translateX(-102%);
+    transition: transform .26s cubic-bezier(.2,.8,.2,1), box-shadow .26s;
+    z-index: 1200;
+    will-change: transform;
+  }
+  .sidebar.open { transform: translateX(0); box-shadow: 8px 0 40px rgba(2,8,23,.35); }
+  .sidebar .nav-item { min-height: 42px; }
+  .sidebar-brand { position: relative; padding-right: 52px; }
+  .sidebar-close {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+    width: 36px; height: 36px; border-radius: 10px; border: 0;
+    background: rgba(255,255,255,.08); color: #fff; font-size: 16px; cursor: pointer;
+  }
+  .sidebar-close:hover { background: rgba(255,255,255,.16); }
+
+  .nav-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 1150;
+    background: rgba(15,23,42,.5); backdrop-filter: blur(2px);
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  .nav-backdrop.show { opacity: 1; pointer-events: auto; }
+  body.nav-locked { overflow: hidden; }
+
+  .main-content { margin-left: 0; min-width: 0; width: 100%; }
+
+  /* ── Barre supérieure ── */
+  .btn-menu {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; margin-left: -6px; flex-shrink: 0;
+    border: 0; border-radius: 10px; background: transparent; color: var(--text); cursor: pointer;
+  }
+  .btn-menu:hover, .btn-menu:focus-visible { background: #f1f5f9; }
+  .topbar { padding: 0 16px; gap: 10px; }
+  .topbar-left { gap: 10px; min-width: 0; flex: 1; }
+  .topbar-left > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .topbar-right { flex-shrink: 0; }
+  .tenant-badge { max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .page { padding: 20px; }
+
+  /* ── Grilles ── */
+  .page [style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .chart-row { flex-direction: column; grid-template-columns: 1fr !important; }
+  .chart-row > .chart-card { flex: 1 1 auto !important; width: 100%; }
+  .chart-card { min-width: 0; }
+  .bloc-form { grid-template-columns: 1fr 1fr !important; }
+  .bloc-form > button { grid-column: 1 / -1; }
+
+  /* Tableaux : défilement horizontal fluide plutôt qu'écrasement */
+  .table-wrap { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+  .page td[style*="text-align: right"], .page th { white-space: nowrap; }
+
+  /* Onglets défilants */
+  .tabs-header { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .tabs-header::-webkit-scrollbar { display: none; }
+  .tab-btn { white-space: nowrap; flex-shrink: 0; }
+
+  .modal-box { max-width: min(540px, 100%); }
+  #modal-mouvement .modal-box { max-width: min(860px, 100%); }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   TÉLÉPHONE (≤ 640 px)
+   ════════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  :root { --bn-h: 62px; }
+  body { font-size: 14px; }
+
+  /* ── Barre supérieure sur deux lignes : titre + actions / période ── */
+  .topbar {
+    height: auto; min-height: 56px; flex-wrap: wrap;
+    padding: 8px 12px; row-gap: 8px;
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+  .topbar-left { display: contents; }
+  .btn-menu { order: 1; }
+  .topbar-left > span { order: 2; flex: 1; font-size: 16px; }
+  .topbar-right { order: 3; gap: 4px; }
+  .period-selector { order: 4; flex-basis: 100%; gap: 8px; }
+  .period-selector select { flex: 1; min-height: 38px; font-size: 14px; }
+  .devise-badge { display: none; }
+  .tenant-badge { max-width: 110px; padding: 4px 8px; font-size: 11px; }
+  .notif-panel {
+    position: fixed !important; left: 12px !important; right: 12px !important;
+    top: 64px !important; width: auto !important; max-width: none !important;
+    max-height: 70vh; overflow-y: auto;
+  }
+
+  /* ── Contenu ── */
+  .page { padding: 14px 12px calc(var(--bn-h) + 24px + env(safe-area-inset-bottom)); }
+  .section-head { flex-wrap: wrap; gap: 10px; }
+  .card { padding: 14px; }
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin-bottom: 16px; }
+  .kpi-card { padding: 12px; gap: 10px; min-width: 0; }
+  .kpi-icon { width: 36px; height: 36px; flex-shrink: 0; }
+  .kpi-value { font-size: 16px; overflow-wrap: anywhere; }
+  .kpi-grid.kpi-journaux { grid-template-columns: minmax(0,1fr); }
+  .kpi-label { font-size: 11px; }
+  .chart-card { padding: 14px; }
+
+  /* Toutes les grilles en ligne passent sur une colonne… */
+  .page [style*="grid-template-columns"],
+  .modal-overlay [style*="grid-template-columns"] { grid-template-columns: minmax(0,1fr) !important; }
+  /* …sauf les petites tuiles de chiffres, lisibles sur deux colonnes */
+  .page [style*="repeat(4"],
+  .page .jr-kpis { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .page [style*="grid-template-columns"] > * { min-width: 0; }
+  .fgrid2 { grid-template-columns: 1fr; }
+  .bloc-form { grid-template-columns: 1fr !important; }
+
+  /* Rangées flex trop larges : on autorise le retour à la ligne */
+  .page [style*="display: flex"]:not(button):not(a):not(label) { flex-wrap: wrap; row-gap: 8px; }
+  .page td[style*="display: flex"], .page td [style*="display: flex"] { flex-wrap: nowrap !important; }
+  .page [style*="display: flex"] > * { min-width: 0; }
+  /* Un bloc « flex: 1 » garde une largeur lisible : il passe à la ligne plutôt que de s'écraser */
+  .page [style*="flex-wrap: wrap"] > [style*="flex: 1"] { flex-basis: 180px !important; }
+  /* Montants des tableaux sur une seule ligne */
+  .page table:not(.jr-table) td[style*="text-align: right"],
+  .page table:not(.jr-table) th { white-space: nowrap; }
+  /* Champs des formulaires en ligne : pleine largeur */
+  .page [style*="grid-template-columns"] > input:not([type="checkbox"]):not([type="radio"]),
+  .page [style*="grid-template-columns"] > select,
+  .page [style*="grid-template-columns"] > div > input:not([type="checkbox"]):not([type="radio"]),
+  .page [style*="grid-template-columns"] > div > select,
+  .page [style*="grid-template-columns"] > label > input:not([type="checkbox"]):not([type="radio"]),
+  .page [style*="grid-template-columns"] > label > select,
+  [id^="af-"] { width: 100% !important; min-height: 40px; }
+  .journal-header, .journal-soldes, .row-actions { flex-wrap: wrap; }
+  .budget-row { flex-wrap: wrap; }
+  .budget-intitule { flex-basis: 100%; }
+
+  /* Tableaux : largeur minimale + défilement horizontal du conteneur */
+  /* (seuls les tableaux d'au moins 5 colonnes reçoivent une largeur minimale) */
+  .page table:not(.jr-table):not(.mnb-table):has(tr > :nth-child(5)),
+  .modal-overlay table:has(tr > :nth-child(5)) { min-width: 620px; }
+  .page div:has(> table), .modal-overlay div:has(> table) {
+    overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%;
+  }
+  th, td { padding: 9px 10px; }
+
+  /* Boutons et cibles tactiles ≥ 40 px */
+  .btn-primary, .btn-ghost, .btn-add { min-height: 42px; }
+  .btn-icon { min-width: 36px; min-height: 36px; }
+  .tab-btn { padding: 10px 14px; }
+
+  /* Champs : 16 px pour éviter le zoom automatique d'iOS */
+  input, select, textarea { font-size: 16px !important; }
+
+  /* ── Journal : bandeau, actions et tuiles ── */
+  .jr-hero { padding: 16px !important; border-radius: 14px !important; }
+  .jr-hero > div { flex-wrap: wrap; gap: 12px; }
+  .jr-actions { display: grid !important; grid-template-columns: 1fr 1fr; width: 100%; }
+  .jr-actions > * { width: 100%; justify-content: center; min-height: 40px; }
+  .jr-actions > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .jr-kpis > * { padding: 12px !important; min-width: 0; }
+
+  /* ── Journal : chaque mouvement devient une carte ── */
+  .jr-table, .jr-table tbody, .jr-table tfoot { display: block; width: 100%; }
+  .jr-table thead { display: none; }
+  .jr-table tr {
+    display: grid;
+    grid-template-columns: max-content max-content minmax(0,1fr) max-content;
+    grid-template-areas:
+      "num date rub act"
+      "int int  int int"
+      "ben ben  ben ben";
+    align-items: center; column-gap: 8px; row-gap: 4px;
+    padding: 12px 14px; border-bottom: 1px solid #eef2f7;
+  }
+  .jr-table tr:hover td { background: transparent; }
+  .jr-table td { display: block; padding: 0; border: 0; text-align: left !important; min-width: 0; }
+  .jr-table td:empty { display: none; }
+  .jr-table tbody td:nth-child(1) { grid-area: num; }
+  .jr-table tbody td:nth-child(1)::before { content: 'N° '; font-weight: 500; color: #94a3b8; }
+  .jr-table tbody td:nth-child(2) { grid-area: date; }
+  .jr-table tbody td:nth-child(3) { grid-area: rub; }
+  .jr-table tbody td:nth-child(4) { grid-area: int; }
+  .jr-table tbody td:nth-child(5) { grid-area: ben; }
+  .jr-table tbody td:nth-child(5)::before { content: 'Bénéficiaire : '; color: #94a3b8; }
+  /* Montant à gauche, solde cumulé à droite, sur la même ligne.
+     Les deux cellules couvrent la colonne flexible : elles n'élargissent pas
+     les colonnes N° / date de la première ligne. */
+  .jr-table tbody td:nth-child(6),
+  .jr-table tbody td:nth-child(7) { grid-row: 4; grid-column: 1 / 4; font-size: 15px !important; }
+  .jr-table tbody td:nth-child(8) { grid-row: 4; grid-column: 3 / 5; justify-self: end; text-align: right !important; font-size: 12px !important; }
+  .jr-table tbody td:nth-child(8)::before { content: 'Solde '; font-weight: 500; color: #94a3b8; }
+  .jr-table tbody td:nth-child(9) { grid-area: act; justify-self: end; display: flex; gap: 4px; }
+  .jr-table tbody td:nth-child(9) button { min-width: 34px; min-height: 34px; margin: 0 !important; }
+  .jr-table tbody td[colspan] { grid-column: 1 / -1; grid-row: 1 / -1; text-align: center !important; padding: 30px 0 !important; }
+  .jr-table tbody td[colspan]::before { content: none; }
+  .jr-table tfoot tr {
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    grid-template-areas: "lbl lbl lbl" "ent sor cum";
+    row-gap: 8px; border-radius: 0 0 var(--radius) var(--radius); border-bottom: 0;
+  }
+  .jr-table tfoot td { font-size: 13px !important; }
+  .jr-table tfoot td:nth-child(1) { grid-area: lbl; }
+  .jr-table tfoot td:nth-child(2) { grid-area: ent; }
+  .jr-table tfoot td:nth-child(3) { grid-area: sor; }
+  .jr-table tfoot td:nth-child(4) { grid-area: cum; text-align: right !important; }
+  .jr-table tfoot td:nth-child(n+2)::before {
+    display: block; font-size: 10px; font-weight: 600; letter-spacing: .4px;
+    text-transform: uppercase; color: rgba(255,255,255,.55); margin-bottom: 2px;
+  }
+  .jr-table tfoot td:nth-child(2)::before { content: 'Entrées'; }
+  .jr-table tfoot td:nth-child(3)::before { content: 'Sorties'; }
+  .jr-table tfoot td:nth-child(4)::before { content: 'Solde'; }
+
+  /* ── Prévisions : intitulé puis montant sur sa propre ligne ── */
+  .prev-col-head { display: none; }
+  .prev-row, .prev-total-row { grid-template-columns: minmax(0,1fr) !important; row-gap: 6px; padding: 10px 12px; }
+  .prev-row > *:first-child { display: none; }
+  .prev-total-row > *:first-child:not(:only-child) { display: none; }
+  .prev-amount-wrap input { width: 100%; }
+  .prev-period-bar { flex-wrap: wrap; gap: 8px; }
+  .prev-save-bar { flex-wrap: wrap; gap: 10px; bottom: calc(var(--bn-h) + env(safe-area-inset-bottom)); }
+  .btn-save-prev { width: 100%; }
+
+  /* ── Fenêtres : feuille qui monte du bas de l'écran ── */
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal-box {
+    max-width: 100% !important; width: 100%; margin: 0;
+    max-height: 94vh; max-height: 94dvh;
+    border-radius: 18px 18px 0 0;
+    animation: sheetIn .26s cubic-bezier(.2,.8,.2,1) both;
+  }
+  .modal-box::before {
+    content: ''; display: block; width: 40px; height: 4px; border-radius: 4px;
+    background: #cbd5e1; margin: 8px auto 0; flex-shrink: 0;
+  }
+  .modal-head { padding: 12px 16px; border-radius: 0; }
+  .modal-body { padding: 14px 16px; }
+  .modal-foot {
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    flex-wrap: wrap; border-radius: 0;
+  }
+  .modal-foot > * { flex: 1 1 140px; min-height: 44px; justify-content: center; }
+  #modal-mouvement .modal-body { grid-template-columns: 1fr; }
+
+  /* ── Barre de navigation basse ── */
+  .bottom-nav {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+    height: calc(var(--bn-h) + env(safe-area-inset-bottom));
+    padding: 6px 6px env(safe-area-inset-bottom);
+    background: rgba(255,255,255,.96); backdrop-filter: saturate(1.4) blur(10px);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 20px rgba(15,23,42,.06);
+  }
+  .bn-item {
+    position: relative; flex: 1; min-width: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    border: 0; background: none; border-radius: 12px; cursor: pointer;
+    color: #64748b; font-size: 11px; font-weight: 600; text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .bn-item svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .bn-item.active { color: var(--accent); }
+  .bn-item.active::before {
+    content: ''; position: absolute; top: 2px; width: 44px; height: 30px; border-radius: 15px;
+    background: rgba(59,130,246,.12); z-index: -1;
+  }
+  .bn-item:active { transform: scale(.96); }
+  .bn-badge {
+    position: absolute; top: 2px; left: calc(50% + 6px);
+    min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+    background: #dc2626; color: #fff; font-size: 10px; font-weight: 700; line-height: 18px; text-align: center;
+  }
+
+  /* ── Bouton flottant « Nouveau mouvement » ── */
+  .fab {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: fixed; right: 16px; z-index: 950;
+    bottom: calc(var(--bn-h) + 16px + env(safe-area-inset-bottom));
+    width: 56px; height: 56px; border-radius: 18px; border: 0;
+    background: linear-gradient(135deg,#3b82f6,#2563eb); color: #fff;
+    font-size: 28px; line-height: 1; cursor: pointer;
+    box-shadow: 0 10px 24px rgba(37,99,235,.4);
+  }
+  .fab:active { transform: scale(.95); }
+
+  /* ── Notifications éphémères ── */
+  .toast {
+    left: 12px; right: 12px; max-width: none; text-align: center;
+    bottom: calc(var(--bn-h) + 14px + env(safe-area-inset-bottom));
+  }
+
+  /* ── Connexion ── */
+  .login-wrap { padding: 24px 16px; gap: 20px; justify-content: flex-start; padding-top: 10vh; }
+  .login-card { padding: 24px 20px; border-radius: 14px; }
+  .brand-icon { width: 60px; height: 60px; font-size: 30px; }
+  .login-brand h1 { font-size: 24px; }
+}
+
+@keyframes sheetIn { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Très petits écrans (≤ 360 px) */
+@media (max-width: 360px) {
+  .kpi-grid, .page [style*="repeat(4"], .page .jr-kpis { grid-template-columns: minmax(0,1fr) !important; }
+  .tenant-badge { display: none; }
+}
+
+/* Accessibilité : pas d'animation si l'utilisateur l'a demandé */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .nav-backdrop, .modal-box { transition: none !important; animation: none !important; }
+}

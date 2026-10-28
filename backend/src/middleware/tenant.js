@@ -4,6 +4,7 @@ const { query } = require('../config/database');
 const { isCabinet } = require('./auth');
 const { peutAccederTenant } = require('../services/affectation.service');
 const support = require('../services/support.service');
+const modules = require('../services/modules.service');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -60,6 +61,23 @@ const tenantGuard = async (req, res, next) => {
     }
     req.tenantId   = rows[0].id;
     req.tenantInfo = rows[0];
+    // NJ BUSINESS (048) : la route appartient-elle à un module désactivé pour
+    // ce client ? Contrôle serveur, quel que soit le rôle (cabinet compris).
+    // Les routes du socle (configuration, utilisateurs…) ne sont jamais bloquées.
+    const cheminRoute = (req.originalUrl.split('?')[0] || '').replace(/^\/api/, '');
+    const module = await modules.moduleDeRoute(cheminRoute);
+    if (module) {
+      const actifs = await modules.modulesActifs(rows[0].id);
+      if (!actifs.includes(module)) {
+        if (modules.modeControle() === 'appliquer') {
+          return res.status(403).json({
+            error: 'Ce module n\'est pas activé pour votre espace. Contactez le cabinet.',
+            code: 'MODULE_INACTIF', module,
+          });
+        }
+        console.warn(`[Modules] refus simulé (mode observer) : ${module} inactif pour ${rows[0].id} — ${req.method} ${cheminRoute} (utilisateur ${req.user.id})`);
+      }
+    }
     // super_admin « limité » (étape 8) : données métier du client uniquement
     // pendant un accès support explicite, motivé et limité dans le temps.
     if (req.user.role === 'super_admin' && support.modeLimite()) {

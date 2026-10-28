@@ -12,7 +12,9 @@ class ErreurMetier extends Error {
 
 const ACTIONS_PLATEFORME = [
   'CREATION_CLIENT', 'MODIF_CLIENT', 'SUSPENSION_CLIENT', 'REACTIVATION_CLIENT',
-  'SUPPORT_OUVERT', 'SUPPORT_FERME', 'INIT_PLAN_COMPTABLE', 'SYNC_PLAN_COMPTABLE',
+  'SUPPORT_OUVERT', 'SUPPORT_FERME', 'INIT_PLAN_COMPTABLE', 'SYNC_PLAN_COMPTABLE', 'ROLES_CLIENT',
+  'MODULE_ACTIVATION', 'MODULE_DESACTIVATION',   // 048 : modules NJ BUSINESS par client
+  'SUPPRESSION_CLIENT',                            // suppression définitive d'un client vide
 ];
 
 const journaliser = (t, { tenantId, userId, action, avant, apres }) => sequelize.query(
@@ -122,8 +124,109 @@ const changerActif = async ({ tenantId, userId, actif, motif }) => sequelize.tra
   return { id: tenantId, actif: Boolean(actif) };
 });
 
+// ── Suppression définitive d'un client (ajouté manuellement, jamais utilisé) ──
+// Garde-fous, tous vérifiés DANS la transaction de suppression :
+//   1. le client est suspendu (deux gestes distincts : suspendre, puis supprimer) ;
+//   2. aucune donnée comptable ou de gestion (écritures, attentes, budgets, arrêtés…) :
+//      les pièces de caisse se conservent (OHADA) — un client qui a travaillé se
+//      suspend, il ne se supprime pas ;
+//   3. aucun lien commercial (prospect / démo, abonnement, paiement) : ces clients
+//      relèvent de l'écran Prospects ;
+//   4. aucun compte du cabinet (super_admin, comptable cabinet) rattaché ;
+//   5. l'administrateur retape l'identifiant (slug) du client.
+// Seul le paramétrage créé avec le client (rubriques, caisses, plan comptable,
+// utilisateurs, modules, permissions…) disparaît. Le journal d'audit est conservé :
+// ses lignes sont détachées du client et la suppression y est tracée.
+const DONNEES_METIER = [
+  ['journal', 'écriture(s) de caisse'], ['mouvements_attente', 'dépense(s) en attente'],
+  ['arrets_caisse', 'arrêté(s) de caisse'], ['budget', 'ligne(s) de budget'],
+  ['budget_validation', 'validation(s) de budget'], ['budget_caisse', 'budget(s) de caisse'],
+  ['appel_fonds', 'demande(s) de fonds'], ['depenses_attente', 'prévision(s) de dépense'],
+  ['ressources_attente', 'prévision(s) de ressource'], ['demandes_depassement', 'demande(s) de dépassement'],
+  ['banque', 'opération(s) bancaire(s)'], ['ran', 'report(s) à nouveau'], ['inventaires', 'inventaire(s)'],
+  ['registre_tiers', 'tiers'], ['pieces_jointes', 'pièce(s) jointe(s)'], ['exports_sage', 'export(s) Sage'],
+  ['controles_pieces', 'contrôle(s) de pièces'], ['controles_anomalies', 'anomalie(s) de contrôle'],
+  ['controles_arrets', 'contrôle(s) d\'arrêté'],
+];
+const LIENS_COMMERCIAUX = [
+  ['prospects', 'fiche prospect / espace de démonstration'], ['abonnements', 'abonnement(s)'],
+  ['paiements', 'paiement(s)'], ['demandes_annulation', 'demande(s) d\'annulation'],
+];
+
+const bilanSuppression = async (tenantId, transaction) => {
+  const opts = { replacements: { tenantId }, type: SELECT, transaction };
+  const [c] = await sequelize.query(
+    `SELECT id, nom, slug, actif, created_at FROM tenants WHERE id = :tenantId${transaction ? ' FOR UPDATE' : ''}`, opts);
+  if (!c) throw new ErreurMetier(404, 'Client introuvable.');
+  // Tables présentes dans CETTE base (une migration manquante ne doit pas tout bloquer).
+  const presentes = new Set((await sequelize.query(
+    `SELECT table_name FROM information_schema.columns WHERE table_schema = 'public' AND column_name = 'tenant_id'`,
+    { type: SELECT, transaction })).map((r) => r.table_name));
+  const compter = async (liste) => {
+    const out = [];
+    for (const [table, libelle] of liste) {
+      if (!presentes.has(table)) continue;
+      const [{ n }] = await sequelize.query(`SELECT COUNT(*)::int AS n FROM ${table} WHERE tenant_id = :tenantId`, opts);
+      if (n > 0) out.push({ table, libelle, n });
+    }
+    return out;
+  };
+  const donnees = await compter(DONNEES_METIER);
+  const liens = await compter(LIENS_COMMERCIAUX);
+  const cabinet = await sequelize.query(
+    `SELECT username, role FROM users WHERE tenant_id = :tenantId AND role IN ('super_admin', 'comptable_cabinet')`, opts);
+  const [{ n: nbUsers }] = await sequelize.query('SELECT COUNT(*)::int AS n FROM users WHERE tenant_id = :tenantId', opts);
+
+  const raisons = [];
+  if (c.actif) raisons.push('Le client est actif : suspendez-le d\'abord.');
+  if (donnees.length) raisons.push(`Le client contient des données : ${donnees.map((d) => `${d.n} ${d.libelle}`).join(', ')}. `
+    + 'Un client qui a travaillé se suspend, il ne se supprime pas (conservation des pièces comptables).');
+  if (liens.length) raisons.push(`Client issu du circuit commercial (${liens.map((d) => `${d.n} ${d.libelle}`).join(', ')}) : `
+    + 'gérez-le depuis l\'écran Prospects / abonnements.');
+  if (cabinet.length) raisons.push(`Comptes du cabinet rattachés : ${cabinet.map((u) => u.username).join(', ')}.`);
+  return {
+    client: { id: c.id, nom: c.nom, slug: c.slug, actif: c.actif, created_at: c.created_at },
+    nb_utilisateurs: nbUsers, donnees, liens, supprimable: raisons.length === 0, raisons,
+  };
+};
+
+const supprimerClient = async ({ tenantId, userId, confirmation, motif }) => {
+  try {
+    return await sequelize.transaction(async (t) => {
+      const b = await bilanSuppression(tenantId, t);
+      if (!b.supprimable) throw new ErreurMetier(409, b.raisons.join(' '));
+      if (String(confirmation || '').trim().toLowerCase() !== String(b.client.slug).toLowerCase()) {
+        throw new ErreurMetier(400, `Confirmation incorrecte : tapez exactement l'identifiant « ${b.client.slug} ».`);
+      }
+      if (String(motif || '').trim().length < 5) throw new ErreurMetier(400, 'Indiquez le motif de la suppression.');
+      const ex = (sql) => sequelize.query(sql, { replacements: { tenantId }, transaction: t });
+      const users = await sequelize.query('SELECT username, role FROM users WHERE tenant_id = :tenantId ORDER BY username',
+        { replacements: { tenantId }, type: SELECT, transaction: t });
+      // Le journal d'audit survit au client : on détache ses lignes avant la cascade.
+      await ex('UPDATE audit_log SET user_id = NULL WHERE user_id IN (SELECT id FROM users WHERE tenant_id = :tenantId)');
+      await ex('UPDATE audit_log SET tenant_id = NULL WHERE tenant_id = :tenantId');
+      await ex('DELETE FROM tenant_modules WHERE tenant_id = :tenantId');   // FK sans cascade (048)
+      await ex('DELETE FROM tenants WHERE id = :tenantId');                  // cascade : paramétrage du client
+      await sequelize.query(
+        `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur, nouvelle_valeur)
+         VALUES (NULL, :userId, 'SUPPRESSION_CLIENT', 'plateforme', :tenantId, CAST(:avant AS jsonb), CAST(:apres AS jsonb))`,
+        { replacements: { tenantId, userId, avant: JSON.stringify({
+            nom: b.client.nom, slug: b.client.slug, cree_le: b.client.created_at, utilisateurs: users.map((u) => `${u.username} (${u.role})`) }),
+          apres: JSON.stringify({ client: b.client.nom, motif: String(motif).trim() }) },
+          transaction: t, type: sequelize.QueryTypes.INSERT });
+      return { ok: true, supprime: { id: tenantId, nom: b.client.nom, slug: b.client.slug } };
+    });
+  } catch (err) {
+    if (err instanceof ErreurMetier) throw err;
+    // Un trigger de protection ou une référence inattendue : RIEN n'a été supprimé (transaction annulée).
+    console.error('[Plateforme] suppression client :', err.message);
+    throw new ErreurMetier(409, `Suppression refusée par la base, rien n'a été supprimé : ${err.message}`);
+  }
+};
+
 const journalAudit = (tenantId) => sequelize.query(
-  `SELECT a.created_at, a.action, a.ancienne_valeur, a.nouvelle_valeur, u.username, t.nom AS client
+  `SELECT a.created_at, a.action, a.ancienne_valeur, a.nouvelle_valeur, u.username,
+          COALESCE(t.nom, a.ancienne_valeur->>'nom') AS client
      FROM audit_log a LEFT JOIN users u ON u.id = a.user_id LEFT JOIN tenants t ON t.id = a.tenant_id
     WHERE a.action IN (:actions)
       AND (CAST(:tenantId AS uuid) IS NULL OR a.tenant_id = CAST(:tenantId AS uuid))
@@ -172,5 +275,6 @@ const mesSessions = (userId) => sequelize.query(
 
 module.exports = {
   ErreurMetier, listerClients, detailClient, modifierClient, changerActif, journalAudit,
+  bilanSuppression, supprimerClient,
   ouvrirSupport, fermerSupport, mesSessions,
 };

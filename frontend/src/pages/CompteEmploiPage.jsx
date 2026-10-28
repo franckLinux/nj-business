@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
 import { fmt } from '@/lib/format';
-import { printCompteEmploi } from '@/lib/print';
+import { printCompteEmploi, decomposerCompteEmploi } from '@/lib/print';
 import CEEmploiDetailModal from '@/components/CEEmploiDetailModal';
+import { exporterExcel, num, STYLE_BOUTON_EXPORT } from '@/lib/export';
 
 // Reprend loadCompteEmploi() de legacy/js/app.js (l. 3371-3753).
 // Impression (printCE, l. 3863-3910) reconstruite ici de façon déclarative à
@@ -15,7 +16,11 @@ import CEEmploiDetailModal from '@/components/CEEmploiDetailModal';
 const CE_TYPE_LABEL = { caisse: 'Caisse Espèces', om: 'Orange Money', momo: 'Mobile Money', carte_prepayee: 'Carte Prépayée', autre: 'Autre' };
 const CE_TYPE_ICO = { caisse: '💵', om: '📱', momo: '📲', carte_prepayee: '💳', autre: '🏦' };
 
-function ResRow({ ico, label, montant, sub, devise }) {
+// Présentation en 4 parties : I. Soldes initiaux · II. Ressources (fonds reçus
+// de la période) · III. Emplois · IV. Trésorerie finale = I + II − III.
+// Le serveur renvoie ressources.total = soldes initiaux + fonds reçus : la
+// séparation se fait ici (decomposerCompteEmploi), sans changer les montants.
+function ResRow({ ico, label, montant, sub, devise, couleur = '#059669' }) {
   if (montant === 0) return null;
   return (
     <tr className="ce-res-row">
@@ -26,13 +31,13 @@ function ResRow({ ico, label, montant, sub, devise }) {
           {sub && <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginTop: 1 }}>{sub}</span>}
         </span>
       </td>
-      <td style={{ padding: '9px 16px', textAlign: 'right', fontWeight: 600, color: '#059669', fontSize: 13 }}>{fmt(montant, devise)}</td>
+      <td style={{ padding: '9px 16px', textAlign: 'right', fontWeight: 600, color: couleur, fontSize: 13 }}>{fmt(montant, devise)}</td>
     </tr>
   );
 }
 
 export default function CompteEmploiPage() {
-  const { mois, annee, user, activeTenantId } = useApp();
+  const { mois, annee, user, activeTenantId, can, entite } = useApp();
   const [data, setData] = useState(null);
   const [erreur, setErreur] = useState('');
   const [detail, setDetail] = useState(null);
@@ -68,7 +73,9 @@ export default function CompteEmploiPage() {
   const { meta, ressources, emplois, tresorerie_finale, solde_net } = data;
   const devise = meta.devise;
   const fmtM = (v) => fmt(v, devise);
-  const txUtilisation = ressources.total > 0 ? Math.round((emplois.total / ressources.total) * 100) : 0;
+  const { soldesInitiaux, fondsRecus } = decomposerCompteEmploi(data);
+  const disponible = soldesInitiaux + fondsRecus; // I + II
+  const txUtilisation = disponible > 0 ? Math.round((emplois.total / disponible) * 100) : 0;
   const jTypeLabel = (t) => CE_TYPE_LABEL[t] || t;
   const jTypeIco = (t) => CE_TYPE_ICO[t] || '💼';
 
@@ -116,8 +123,27 @@ export default function CompteEmploiPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
             Actualiser
           </button>
+          {can('rapport.export') && (
+            <button style={STYLE_BOUTON_EXPORT} onClick={() => exporterExcel(`Compte_emploi_${meta.mois}_${meta.annee}`,
+              ['Section', 'Libellé', `Espèces (${devise})`, `Mobile money (${devise})`, `Montant (${devise})`],
+              [
+                ...ranLignes.map((j) => ['I. Soldes initiaux', j.journal_nom, '', '', num(j.ran)]),
+                ...(ressources.solde_banque_initial > 0 ? [['I. Soldes initiaux', 'Banque', '', '', num(ressources.solde_banque_initial)]] : []),
+                ['', 'TOTAL SOLDES INITIAUX', '', '', num(soldesInitiaux)],
+                ...fondsLignes.map((j) => ['II. Ressources', j.journal_nom, '', '', num(j.fonds_recus)]),
+                ...(ressources.fonds_recus_banque > 0 ? [['II. Ressources', 'Banque', '', '', num(ressources.fonds_recus_banque)]] : []),
+                ['', 'TOTAL RESSOURCES', '', '', num(fondsRecus)],
+                ...emploisTriees.map((e) => ['III. Emplois', `${e.rubrique_code} — ${e.intitule}`, num(e.esp), num(e.om), num(e.total)]),
+                ['', 'TOTAL EMPLOIS', '', '', num(emplois.total)],
+                ['IV. Trésorerie finale & soldes', 'Soldes initiaux + Ressources − Emplois', '', '', num(tresFinale)],
+                ...(tresorerie_finale.journaux || []).map((j) => ['IV. Trésorerie finale & soldes', `dont ${j.journal_nom}`, '', '', num(j.solde_final)]),
+                ['IV. Trésorerie finale & soldes', 'dont Banque', '', '', num(tresorerie_finale.solde_banque || 0)],
+                ['', 'Écart (trésorerie − soldes)', '', '', num(ecart)],
+              ],
+              [`Compte d'emploi — ${meta.mois} ${meta.annee}`, meta.tenant_nom || ''])}>📊 Excel</button>
+          )}
           <button
-            onClick={() => printCompteEmploi(data)}
+            onClick={() => printCompteEmploi(data, entite)}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'white', boxShadow: '0 2px 8px rgba(37,99,235,.35)' }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
@@ -126,53 +152,74 @@ export default function CompteEmploiPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 18 }}>
+          <div style={{ background: 'linear-gradient(135deg,#f0fdfa,#ccfbf1)', border: '1px solid #99f6e4', borderRadius: 14, padding: '16px 18px' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: '#0d9488', marginBottom: 6 }}>I · Soldes initiaux</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#0f766e', lineHeight: 1.1 }}>{fmtM(soldesInitiaux)}</div>
+            <div style={{ fontSize: 11, color: '#2dd4bf', marginTop: 4 }}>Report à nouveau</div>
+          </div>
           <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '1px solid #bbf7d0', borderRadius: 14, padding: '16px 18px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: '#16a34a', marginBottom: 6 }}>Ressources</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#15803d', lineHeight: 1.1 }}>{fmtM(ressources.total)}</div>
-            <div style={{ fontSize: 11, color: '#4ade80', marginTop: 4 }}>Total mobilisé</div>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: '#16a34a', marginBottom: 6 }}>II · Ressources</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#15803d', lineHeight: 1.1 }}>{fmtM(fondsRecus)}</div>
+            <div style={{ fontSize: 11, color: '#4ade80', marginTop: 4 }}>Fonds reçus sur la période</div>
           </div>
           <div style={{ background: 'linear-gradient(135deg,#fff1f2,#fee2e2)', border: '1px solid #fecaca', borderRadius: 14, padding: '16px 18px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: '#dc2626', marginBottom: 6 }}>Emplois</div>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: '#dc2626', marginBottom: 6 }}>III · Emplois</div>
             <div style={{ fontSize: 18, fontWeight: 800, color: '#b91c1c', lineHeight: 1.1 }}>{fmtM(emplois.total)}</div>
-            <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{emplois.lignes?.length || 0} rubrique{(emplois.lignes?.length || 0) > 1 ? 's' : ''}</div>
-          </div>
-          <div style={{ background: 'linear-gradient(135deg,#fdf4ff,#f3e8ff)', border: '1px solid #e9d5ff', borderRadius: 14, padding: '16px 18px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: '#7c3aed', marginBottom: 6 }}>Taux d'utilisation</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: txUtilisation > 90 ? '#dc2626' : txUtilisation > 70 ? '#d97706' : '#7c3aed', lineHeight: 1.1 }}>{txUtilisation}%</div>
-            <div style={{ marginTop: 6, height: 4, background: '#e9d5ff', borderRadius: 2, overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(txUtilisation, 100)}%`, height: '100%', background: txUtilisation > 90 ? '#ef4444' : txUtilisation > 70 ? '#f59e0b' : '#a855f7', borderRadius: 2 }} />
+            <div style={{ marginTop: 6, height: 4, background: '#fecaca', borderRadius: 2, overflow: 'hidden' }} title={`${txUtilisation} % du disponible (I + II)`}>
+              <div style={{ width: `${Math.min(txUtilisation, 100)}%`, height: '100%', background: txUtilisation > 90 ? '#ef4444' : txUtilisation > 70 ? '#f59e0b' : '#f87171', borderRadius: 2 }} />
             </div>
+            <div style={{ fontSize: 11, color: '#f87171', marginTop: 4 }}>{txUtilisation} % du disponible (I + II)</div>
           </div>
-          <div style={{ background: solde_net >= 0 ? 'linear-gradient(135deg,#f0fdf4,#dcfce7)' : 'linear-gradient(135deg,#fff1f2,#fee2e2)', border: `1px solid ${solde_net >= 0 ? '#bbf7d0' : '#fecaca'}`, borderRadius: 14, padding: '16px 18px' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: solde_net >= 0 ? '#16a34a' : '#dc2626', marginBottom: 6 }}>{solde_net >= 0 ? 'Excédent' : 'Déficit'}</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: solde_net >= 0 ? '#15803d' : '#b91c1c', lineHeight: 1.1 }}>{fmtM(Math.abs(solde_net))}</div>
-            <div style={{ fontSize: 11, color: solde_net >= 0 ? '#4ade80' : '#f87171', marginTop: 4 }}>Ressources − Emplois</div>
+          <div style={{ background: solde_net >= 0 ? 'linear-gradient(135deg,#eff6ff,#dbeafe)' : 'linear-gradient(135deg,#fff1f2,#fee2e2)', border: `1px solid ${solde_net >= 0 ? '#bfdbfe' : '#fecaca'}`, borderRadius: 14, padding: '16px 18px' }}>
+            <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .6, color: solde_net >= 0 ? '#1d4ed8' : '#dc2626', marginBottom: 6 }}>IV · Trésorerie finale</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: solde_net >= 0 ? '#1e40af' : '#b91c1c', lineHeight: 1.1 }}>{fmtM(solde_net)}</div>
+            <div style={{ fontSize: 11, color: solde_net >= 0 ? '#60a5fa' : '#f87171', marginTop: 4 }}>I + II − III</div>
           </div>
         </div>
 
-        {/* ── I. RESSOURCES ─────────────────────────────────────────── */}
+        {/* ── I. SOLDES INITIAUX ─────────────────────────────────────── */}
         <div className="ce-section">
-          <div className="ce-section-head" style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
-            <span className="ce-num" style={{ background: '#16a34a', color: 'white' }}>I</span>
+          <div className="ce-section-head" style={{ background: 'linear-gradient(135deg,#f0fdfa,#ccfbf1)' }}>
+            <span className="ce-num" style={{ background: '#0d9488', color: 'white' }}>I</span>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: .5 }}>Ressources</div>
-              <div style={{ fontSize: 11, color: '#4ade80', marginTop: 1 }}>Soldes initiaux + Fonds reçus</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#0f766e', textTransform: 'uppercase', letterSpacing: .5 }}>Soldes initiaux</div>
+              <div style={{ fontSize: 11, color: '#2dd4bf', marginTop: 1 }}>Report à Nouveau (RAN) en début de période</div>
             </div>
-            <div style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 800, color: '#15803d' }}>{fmtM(ressources.total)}</div>
+            <div style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 800, color: '#0f766e' }}>{fmtM(soldesInitiaux)}</div>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <tbody>
-              <tr className="ce-subtit" style={{ background: '#f0fdf4', color: '#16a34a' }}><td colSpan={2}>📊 Soldes initiaux — Report à Nouveau (RAN)</td></tr>
-              {ranLignes.length === 0 ? (
+              {ranLignes.length === 0 && !(ressources.solde_banque_initial > 0) ? (
                 <tr className="ce-res-row"><td style={{ padding: '9px 16px', color: 'var(--text-muted)', fontStyle: 'italic' }} colSpan={2}>Aucun solde initial enregistré</td></tr>
               ) : ranLignes.map((j) => (
-                <ResRow key={`ran-${j.journal_id ?? j.journal_nom}`} ico={jTypeIco(j.journal_type)} label={j.journal_nom} montant={j.ran} sub={`Solde initial (RAN) · ${jTypeLabel(j.journal_type)}`} devise={devise} />
+                <ResRow key={`ran-${j.journal_id ?? j.journal_nom}`} ico={jTypeIco(j.journal_type)} label={j.journal_nom} montant={j.ran} sub={`Solde initial (RAN) · ${jTypeLabel(j.journal_type)}`} devise={devise} couleur="#0f766e" />
               ))}
               {ressources.solde_banque_initial > 0 && (
-                <ResRow ico="🏦" label="Banque" montant={ressources.solde_banque_initial} sub="Solde initial (mois précédent)" devise={devise} />
+                <ResRow ico="🏦" label="Banque" montant={ressources.solde_banque_initial} sub="Solde initial (mois précédent)" devise={devise} couleur="#0f766e" />
               )}
-              <tr className="ce-subtit" style={{ background: '#f0fdf4', color: '#16a34a' }}><td colSpan={2}>💰 Fonds reçus ce mois</td></tr>
-              {fondsLignes.length === 0 ? (
+            </tbody>
+            <tfoot>
+              <tr style={{ background: 'linear-gradient(135deg,#f0fdfa,#ccfbf1)' }}>
+                <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: 13, color: '#0f766e', borderTop: '2px solid #5eead4', letterSpacing: .3 }}>TOTAL SOLDES INITIAUX</td>
+                <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#0f766e', borderTop: '2px solid #5eead4' }}>{fmtM(soldesInitiaux)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        {/* ── II. RESSOURCES ────────────────────────────────────────── */}
+        <div className="ce-section">
+          <div className="ce-section-head" style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
+            <span className="ce-num" style={{ background: '#16a34a', color: 'white', fontSize: 11 }}>II</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#15803d', textTransform: 'uppercase', letterSpacing: .5 }}>Ressources</div>
+              <div style={{ fontSize: 11, color: '#4ade80', marginTop: 1 }}>Fonds reçus au cours de la période</div>
+            </div>
+            <div style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 800, color: '#15803d' }}>{fmtM(fondsRecus)}</div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <tbody>
+              {fondsLignes.length === 0 && !(ressources.fonds_recus_banque > 0) ? (
                 <tr className="ce-res-row"><td style={{ padding: '9px 16px', color: 'var(--text-muted)', fontStyle: 'italic' }} colSpan={2}>Aucun fonds reçu ce mois</td></tr>
               ) : fondsLignes.map((j) => (
                 <ResRow key={`fonds-${j.journal_id ?? j.journal_nom}`} ico={jTypeIco(j.journal_type)} label={j.journal_nom} montant={j.fonds_recus} sub={`Fonds reçus · ${jTypeLabel(j.journal_type)}`} devise={devise} />
@@ -184,16 +231,16 @@ export default function CompteEmploiPage() {
             <tfoot>
               <tr style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)' }}>
                 <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: 13, color: '#15803d', borderTop: '2px solid #86efac', letterSpacing: .3 }}>TOTAL RESSOURCES</td>
-                <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#15803d', borderTop: '2px solid #86efac' }}>{fmtM(ressources.total)}</td>
+                <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#15803d', borderTop: '2px solid #86efac' }}>{fmtM(fondsRecus)}</td>
               </tr>
             </tfoot>
           </table>
         </div>
 
-        {/* ── II. EMPLOIS ───────────────────────────────────────────── */}
+        {/* ── III. EMPLOIS ──────────────────────────────────────────── */}
         <div className="ce-section">
           <div className="ce-section-head" style={{ background: 'linear-gradient(135deg,#fff1f2,#fee2e2)' }}>
-            <span className="ce-num" style={{ background: '#dc2626', color: 'white' }}>II</span>
+            <span className="ce-num" style={{ background: '#dc2626', color: 'white', fontSize: 10 }}>III</span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: .5 }}>Emplois</div>
               <div style={{ fontSize: 11, color: '#f87171', marginTop: 1 }}>Journal de dépenses — cliquez pour voir le détail</div>
@@ -250,23 +297,35 @@ export default function CompteEmploiPage() {
           </table>
         </div>
 
-        {/* ── III. TRÉSORERIE FINALE ────────────────────────────────── */}
+        {/* ── IV. TRÉSORERIE FINALE & SOLDES ───────────────────────── */}
         <div className="ce-section">
           <div className="ce-section-head" style={{ background: 'linear-gradient(135deg,#eff6ff,#dbeafe)' }}>
-            <span className="ce-num" style={{ background: '#1d4ed8', color: 'white', fontSize: 10 }}>III</span>
+            <span className="ce-num" style={{ background: '#1d4ed8', color: 'white', fontSize: 10 }}>IV</span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#1e40af', textTransform: 'uppercase', letterSpacing: .5 }}>Trésorerie Finale &amp; Soldes</div>
-              <div style={{ fontSize: 11, color: '#93c5fd', marginTop: 1 }}>Ressources − Emplois et ventilation par compte</div>
+              <div style={{ fontSize: 11, color: '#93c5fd', marginTop: 1 }}>Soldes initiaux + Ressources − Emplois, et ventilation par compte</div>
             </div>
             <div style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 800, color: tresFinale >= 0 ? '#1d4ed8' : '#dc2626' }}>{fmtM(tresFinale)}</div>
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <tbody>
+              {[
+                ['I', 'Soldes initiaux', '+', soldesInitiaux, '#0f766e'],
+                ['II', 'Ressources', '+', fondsRecus, '#15803d'],
+                ['III', 'Emplois', '−', emplois.total, '#b91c1c'],
+              ].map(([n, lib, signe, m, c]) => (
+                <tr key={n} className="ce-res-row">
+                  <td style={{ padding: '8px 16px', fontSize: 13 }}>
+                    <span style={{ display: 'inline-block', width: 26, fontWeight: 700, color: c }}>{n}.</span>{lib}
+                  </td>
+                  <td style={{ padding: '8px 16px', textAlign: 'right', fontWeight: 600, color: c, whiteSpace: 'nowrap' }}>{signe} {fmtM(m)}</td>
+                </tr>
+              ))}
               <tr style={{ background: 'linear-gradient(135deg,#eff6ff,#dbeafe)' }}>
-                <td style={{ padding: '13px 16px', fontWeight: 700, fontSize: 13, color: '#1e40af', borderBottom: '2px solid #bfdbfe', letterSpacing: .2 }}>
-                  ⚖️ Trésorerie Finale &nbsp;<span style={{ fontSize: 11, fontWeight: 500, color: '#60a5fa' }}>(Ressources − Emplois)</span>
+                <td style={{ padding: '13px 16px', fontWeight: 700, fontSize: 13, color: '#1e40af', borderBottom: '2px solid #bfdbfe', borderTop: '2px solid #bfdbfe', letterSpacing: .2 }}>
+                  ⚖️ Trésorerie Finale &nbsp;<span style={{ fontSize: 11, fontWeight: 500, color: '#60a5fa' }}>(I + II − III)</span>
                 </td>
-                <td style={{ padding: '13px 16px', textAlign: 'right', fontWeight: 800, fontSize: 16, color: tresFinale >= 0 ? '#1d4ed8' : '#dc2626', borderBottom: '2px solid #bfdbfe' }}>{fmtM(tresFinale)}</td>
+                <td style={{ padding: '13px 16px', textAlign: 'right', fontWeight: 800, fontSize: 16, color: tresFinale >= 0 ? '#1d4ed8' : '#dc2626', borderBottom: '2px solid #bfdbfe', borderTop: '2px solid #bfdbfe' }}>{fmtM(tresFinale)}</td>
               </tr>
               {(tresorerie_finale.journaux || []).map((j) => {
                 const pos = j.solde_final >= 0;

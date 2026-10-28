@@ -30,6 +30,55 @@ function openPrintWindowViaBlob(html) {
   return Boolean(w);
 }
 
+// ── En-tête « entité » commun à tous les documents ───────────────────────
+// Logo, raison sociale, coordonnées et mentions légales du client, tels que
+// saisis dans Configuration → Entité (GET /api/config/entete).
+const escE = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const logoSur = (u) => (typeof u === 'string' && /^(data:image\/(png|jpeg|webp);base64,|https?:\/\/|\/)/.test(u) ? u : '');
+// Texte brut (non échappé) : utilisable aussi dans l'interface React.
+export function lignesEntite(ent) {
+  if (!ent) return { coord: [], legal: [] };
+  return {
+    coord: [
+      ent.adresse,
+      ent.boite_postale && (/^\s*bp/i.test(ent.boite_postale) ? ent.boite_postale : `BP ${ent.boite_postale}`),
+      ent.telephone && `Tél. ${ent.telephone}`,
+      ent.email,
+      ent.site_web,
+    ].filter(Boolean),
+    legal: [
+      ent.forme_juridique,
+      ent.registre_commerce && `RCCM ${ent.registre_commerce}`,
+      ent.nui && `NUI ${ent.nui}`,
+    ].filter(Boolean),
+  };
+}
+const coordonneesEntite = (ent) => lignesEntite(ent).coord.map(escE).join(' · ');
+const mentionsEntite = (ent) => lignesEntite(ent).legal.map(escE).join(' · ');
+const ENTITE_CSS = `
+  .ent{ display:flex; align-items:center; gap:10px; min-width:0; }
+  .ent img{ max-height:46px; max-width:120px; object-fit:contain; flex-shrink:0; }
+  .ent-nom{ font-size:15px; font-weight:800; color:#1e293b; line-height:1.15; }
+  .ent-nom small{ font-size:11px; font-weight:600; color:#64748b; }
+  .ent-l{ font-size:9px; color:#64748b; margin-top:2px; line-height:1.35; }
+  .ent-pied{ text-align:center; font-size:8.5px; color:#64748b; border-top:1px solid #e2e8f0; padding-top:5px; margin-top:12px; line-height:1.5; }
+`;
+function blocEntite(ent, nomSecours) {
+  const nom = ent?.nom || nomSecours || 'CaissePro';
+  const logo = logoSur(ent?.logo_url);
+  const coord = coordonneesEntite(ent);
+  const legal = mentionsEntite(ent);
+  return `<div class="ent">${logo ? `<img src="${logo}" alt="">` : ''}<div>
+    <div class="ent-nom">${escE(nom)}${ent?.sigle ? ` <small>(${escE(ent.sigle)})</small>` : ''}</div>
+    ${coord ? `<div class="ent-l">${coord}</div>` : ''}${legal ? `<div class="ent-l">${legal}</div>` : ''}
+  </div></div>`;
+}
+function piedEntite(ent, nomSecours) {
+  const nom = ent?.nom || nomSecours;
+  const l = [nom && `<b>${escE(nom)}</b>`, coordonneesEntite(ent), mentionsEntite(ent)].filter(Boolean).join(' · ');
+  return l ? `<div class="ent-pied">${l}</div>` : '';
+}
+
 const A4_LANDSCAPE_BASE_CSS = `
   @page { size: A4 landscape; margin: 14mm 12mm 10mm; }
   *{ box-sizing:border-box; margin:0; padding:0; }
@@ -67,10 +116,12 @@ const A4_LANDSCAPE_BASE_CSS = `
   tr{ page-break-inside:avoid; }
   thead{ display:table-header-group; }
   tfoot{ display:table-footer-group; }
+  .dh-left .doc-title{ margin-top:8px; }
+  ${ENTITE_CSS}
 `;
 
 // ── Vue journal (reprend printJournalView) ────────────────────────────────
-export function printJournalView({ j, data, mois, annee, tenantNom }) {
+export function printJournalView({ j, data, mois, annee, tenantNom, entite }) {
   const s = data.soldes || {};
   const ranAuto = data.ran_auto || 0;
   const mouvements = data.mouvements || [];
@@ -93,7 +144,7 @@ export function printJournalView({ j, data, mois, annee, tenantNom }) {
           <td style="font-weight:700;color:#475569">${m.numero ?? ''}</td>
           <td style="color:#6b7280;white-space:nowrap;${barre}">${new Date(m.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
           <td><span style="background:#f1f5f9;border:1px solid #cbd5e1;padding:1px 5px;border-radius:3px;font-weight:700;font-size:9px;color:#475569;white-space:nowrap">${m.rubrique_code}</span></td>
-          <td><span style="${barre}">${m.intitule}</span>${m.objet ? `<br><span style="font-size:9px;color:#9ca3af">${m.annulation_de_id ? 'Motif : ' : ''}${m.objet}</span>` : ''}${m.annule ? '<br><span style="font-size:9px;color:#b91c1c;font-weight:700">ANNULÉE</span>' : ''}</td>
+          <td><span style="${barre}">${m.intitule}</span>${m.objet ? `<br><span style="font-size:9px;color:#9ca3af">${m.annulation_de_id ? 'Motif : ' : ''}${m.objet}</span>` : ''}${m.annule ? '<br><span style="font-size:9px;color:#b91c1c;font-weight:700">ANNULÉE</span>' : ''}${m.rattrapage ? `<br><span style="font-size:9px;color:#b45309;font-weight:700">RATTRAPAGE${m.created_at ? ` — saisi le ${new Date(m.created_at).toLocaleDateString('fr-FR')}` : ''}</span>` : ''}</td>
           <td style="color:#6b7280">${m.beneficiaire || '—'}</td>
           <td style="text-align:right;color:${e < 0 ? '#b91c1c' : '#15803d'};font-weight:700;${barre}">${e !== 0 ? fmtN(e) : ''}</td>
           <td style="text-align:right;color:#b91c1c;font-weight:700;${barre}">${so !== 0 ? fmtN(so) : ''}</td>
@@ -118,7 +169,7 @@ export function printJournalView({ j, data, mois, annee, tenantNom }) {
 
   <div class="doc-header">
     <div class="dh-left">
-      <div class="company">${tenantNom || 'CaissePro'}</div>
+      ${blocEntite(entite, tenantNom)}
       <div class="doc-title">Journal de caisse — ${j.nom}&nbsp;&nbsp;<span style="background:#f1f5f9;border-radius:4px;padding:1px 6px;font-size:11px;color:#475569">${j.code}</span></div>
       <div class="doc-sub">${TYPE_LABEL_P[j.type] || j.type} · ${isArrete ? 'Caisse arrêtée' : 'Caisse ouverte'}</div>
     </div>
@@ -169,9 +220,10 @@ export function printJournalView({ j, data, mois, annee, tenantNom }) {
   </table>
 
   <div class="doc-footer">
-    <span>${tenantNom || 'CaissePro'} · Journal ${j.nom} (${j.code}) · ${mois} ${annee}</span>
-    <span>CaissePro v2 — Document généré le ${new Date().toLocaleDateString('fr-FR')}</span>
+    <span>Journal ${j.nom} (${j.code}) · ${mois} ${annee}</span>
+    <span>Document généré le ${new Date().toLocaleDateString('fr-FR')}</span>
   </div>
+  ${piedEntite(entite, tenantNom)}
 
   <script>window.onload=()=>{ window.print(); };<\/script>
 </body></html>`;
@@ -180,7 +232,7 @@ export function printJournalView({ j, data, mois, annee, tenantNom }) {
 }
 
 // ── Récap des journaux (reprend printJournauxRecap) ───────────────────────
-export function printJournauxRecap({ journaux, banque, mois, annee, tenantNom }) {
+export function printJournauxRecap({ journaux, banque, mois, annee, tenantNom, entite }) {
   const totalE = journaux.reduce((s, j) => s + j.total_entrees, 0);
   const totalS = journaux.reduce((s, j) => s + j.total_sorties, 0);
   const totalSol = journaux.reduce((s, j) => s + j.solde_final, 0);
@@ -220,7 +272,7 @@ export function printJournauxRecap({ journaux, banque, mois, annee, tenantNom })
 </head><body>
   <div class="doc-header">
     <div class="dh-left">
-      <div class="company">${tenantNom || 'CaissePro'}</div>
+      ${blocEntite(entite, tenantNom)}
       <div class="doc-title">État consolidé — Journaux de caisse</div>
       <div style="font-size:10px;color:#6b7280;margin-top:2px">${journaux.length} journal${journaux.length > 1 ? 'x' : ''} de caisse</div>
     </div>
@@ -263,9 +315,10 @@ export function printJournauxRecap({ journaux, banque, mois, annee, tenantNom })
   </table>
 
   <div class="doc-footer">
-    <span>${tenantNom || 'CaissePro'} · Journaux de caisse · ${mois} ${annee}</span>
-    <span>CaissePro v2 — Document généré le ${new Date().toLocaleDateString('fr-FR')}</span>
+    <span>Journaux de caisse · ${mois} ${annee}</span>
+    <span>Document généré le ${new Date().toLocaleDateString('fr-FR')}</span>
   </div>
+  ${piedEntite(entite, tenantNom)}
   <script>window.onload=()=>{ window.print(); };<\/script>
 </body></html>`;
 
@@ -273,7 +326,7 @@ export function printJournauxRecap({ journaux, banque, mois, annee, tenantNom })
 }
 
 // ── Demande de fonds (reprend imprimerDemande — technique Blob URL) ───────
-export function printDemandeFonds(s) {
+export function printDemandeFonds(s, entite) {
   const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
   const tr = s.tresorerie;
   const lignesPrev = s.prevision.map((r) => `<tr><td><span class="badge">${r.rubrique_code}</span></td><td>${r.intitule}</td><td class="sol" style="text-align:right">${fmtN(r.montant)}</td></tr>`).join('');
@@ -282,8 +335,9 @@ export function printDemandeFonds(s) {
   const besoinBloc = s.besoin > 0
     ? `<div class="resultat" style="border-color:#e53e3e;background:#fff5f5"><div class="rlabel">FONDS À DEMANDER POUR ${s.mois_cible} ${s.annee_cible}</div><div class="rval" style="color:#c53030">${fmtN(s.besoin)}</div></div>`
     : `<div class="resultat" style="border-color:#38a169;background:#f0fff4"><div class="rlabel">TRÉSORERIE SUFFISANTE POUR ${s.mois_cible} ${s.annee_cible}</div><div class="rval" style="color:#276749">${fmtN(s.excedent)}</div></div>`;
-  const css = `*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#1a202c}.ph{text-align:center;margin-bottom:20px;border-bottom:2px solid #1a365d;padding-bottom:12px}.ph h2{font-size:16px;color:#1a365d;margin-bottom:4px}h3{font-size:13px;color:#1a365d;margin:16px 0 6px}table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px}th{background:#1a365d;color:#fff;padding:7px 9px;text-align:left}th:last-child{text-align:right}td{padding:6px 9px;border-bottom:1px solid #e2e8f0}.ev{color:#276749;font-weight:600}.sv{color:#c53030;font-weight:600}.sol{color:#1a365d;font-weight:700}.badge{background:#ebf4ff;color:#1a365d;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700}.tot td{background:#edf2f7;font-weight:700}.resultat{border:2px solid;border-radius:8px;padding:14px;text-align:center;margin-top:14px}.rlabel{font-size:11px;font-weight:700;color:#718096;text-transform:uppercase}.rval{font-size:24px;font-weight:700;margin-top:4px}.sig{margin-top:40px;display:flex;justify-content:space-between}.sig div{text-align:center;font-size:11px;width:45%}.sig .line{border-top:1px solid #1a202c;margin-top:40px;padding-top:4px}@media print{@page{size:A4;margin:15mm}}`;
+  const css = `*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:12px;padding:20px;color:#1a202c}.ph{text-align:center;margin-bottom:20px;border-bottom:2px solid #1a365d;padding-bottom:12px}.ph h2{font-size:16px;color:#1a365d;margin-bottom:4px}h3{font-size:13px;color:#1a365d;margin:16px 0 6px}table{width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px}th{background:#1a365d;color:#fff;padding:7px 9px;text-align:left}th:last-child{text-align:right}td{padding:6px 9px;border-bottom:1px solid #e2e8f0}.ev{color:#276749;font-weight:600}.sv{color:#c53030;font-weight:600}.sol{color:#1a365d;font-weight:700}.badge{background:#ebf4ff;color:#1a365d;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700}.tot td{background:#edf2f7;font-weight:700}.resultat{border:2px solid;border-radius:8px;padding:14px;text-align:center;margin-top:14px}.rlabel{font-size:11px;font-weight:700;color:#718096;text-transform:uppercase}.rval{font-size:24px;font-weight:700;margin-top:4px}.sig{margin-top:40px;display:flex;justify-content:space-between}.sig div{text-align:center;font-size:11px;width:45%}.sig .line{border-top:1px solid #1a202c;margin-top:40px;padding-top:4px}@media print{@page{size:A4;margin:15mm}}.doc-ent{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.doc-ent .dr{text-align:right;font-size:10px;color:#64748b;white-space:nowrap}${ENTITE_CSS}`;
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Demande de Fonds — ${s.mois_cible} ${s.annee_cible}</title><style>${css}</style></head><body>
+    <div class="doc-ent">${blocEntite(entite)}</div>
     <div class="ph"><h2>DEMANDE DE FONDS</h2><p>Pour la période : <b>${s.mois_cible} ${s.annee_cible}</b></p><p>Imprimé le : ${dateStr}</p></div>
     <h3>1. Trésorerie Actuelle (${s.mois} ${s.annee})</h3>
     <table><tbody>
@@ -300,28 +354,40 @@ export function printDemandeFonds(s) {
     <table><thead><tr><th>Rubrique</th><th>Intitulé</th><th>Montant prévisionnel</th></tr></thead><tbody>${lignesPrev}<tr class="tot"><td colspan="2">TOTAL PRÉVISIONNEL</td><td class="sol" style="text-align:right">${fmtN(s.total_prevision)}</td></tr></tbody></table>
     ${besoinBloc}
     <div class="sig"><div><div class="line">La Caissière</div></div><div><div class="line">Le Directeur (Approbation)</div></div></div>
+    ${piedEntite(entite)}
     </body></html>`;
 
   return openPrintWindowViaBlob(html);
 }
 
 // ── Compte d'emploi (reconstruit à partir des données, sans clonage DOM) ──
-export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale, solde_net }) {
+// Compte d'emploi en 4 parties : I. Soldes initiaux (RAN) · II. Ressources
+// (fonds reçus de la période) · III. Emplois · IV. Trésorerie finale = I + II − III.
+// L'API renvoie ressources.total = I + II ; on sépare ici les deux montants.
+export function decomposerCompteEmploi({ ressources }) {
+  const js = ressources?.journaux || [];
+  const soldesInitiaux = js.reduce((s, j) => s + (Number(j.ran) || 0), 0) + (Number(ressources?.solde_banque_initial) || 0);
+  const fondsRecus = js.reduce((s, j) => s + (Number(j.fonds_recus) || 0), 0) + (Number(ressources?.fonds_recus_banque) || 0);
+  return { soldesInitiaux, fondsRecus };
+}
+
+export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale, solde_net }, entite) {
   const jTypeLabel = (t) => CE_TYPE_LABEL[t] || t;
   const jTypeIco = (t) => CE_TYPE_ICO[t] || '💼';
+  const { soldesInitiaux, fondsRecus } = decomposerCompteEmploi({ ressources });
 
-  const resRow = (ico, label, montant, sub = '') => montant === 0 ? '' : `
+  const resRow = (ico, label, montant, sub = '', couleur = '#059669') => montant === 0 ? '' : `
     <tr class="ce-res-row">
       <td style="padding:9px 14px;display:flex;align-items:center;gap:8px">
         <span style="font-size:13px;flex-shrink:0">${ico}</span>
         <span><span style="font-weight:500">${label}</span>${sub ? `<span style="font-size:10px;color:#6b7280;display:block;margin-top:1px">${sub}</span>` : ''}</span>
       </td>
-      <td style="padding:9px 14px;text-align:right;font-weight:600;color:#059669;font-size:12px">${fmtN(montant)}</td>
+      <td style="padding:9px 14px;text-align:right;font-weight:600;color:${couleur};font-size:12px">${fmtN(montant)}</td>
     </tr>`;
 
   const ranLignes = (ressources.journaux || []).filter((j) => j.ran > 0)
-    .map((j) => resRow(jTypeIco(j.journal_type), j.journal_nom, j.ran, `Solde initial (RAN) · ${jTypeLabel(j.journal_type)}`)).join('');
-  const ranBanqueRow = ressources.solde_banque_initial > 0 ? resRow('🏦', 'Banque', ressources.solde_banque_initial, 'Solde initial (mois précédent)') : '';
+    .map((j) => resRow(jTypeIco(j.journal_type), j.journal_nom, j.ran, `Solde initial (RAN) · ${jTypeLabel(j.journal_type)}`, '#0f766e')).join('');
+  const ranBanqueRow = ressources.solde_banque_initial > 0 ? resRow('🏦', 'Banque', ressources.solde_banque_initial, 'Solde initial (mois précédent)', '#0f766e') : '';
   const fondsLignes = (ressources.journaux || []).filter((j) => j.fonds_recus > 0)
     .map((j) => resRow(jTypeIco(j.journal_type), j.journal_nom, j.fonds_recus, `Fonds reçus · ${jTypeLabel(j.journal_type)}`)).join('');
   const fondsBanqueRow = ressources.fonds_recus_banque > 0 ? resRow('🏦', 'Banque', ressources.fonds_recus_banque, 'Fonds reçus en banque') : '';
@@ -355,6 +421,7 @@ export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale
     body{font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#1a1a1a;background:white;padding:18mm 16mm}
     .ce-section{border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:12px}
     .ce-section-head{display:flex;align-items:center;gap:10px;padding:10px 14px}
+    .ce-section-head.teal{background:#f0fdfa;border-bottom:1px solid #99f6e4}
     .ce-section-head.green{background:#f0fdf4;border-bottom:1px solid #bbf7d0}
     .ce-section-head.red{background:#fff1f2;border-bottom:1px solid #fecaca}
     .ce-section-head.blue{background:#eff6ff;border-bottom:1px solid #bfdbfe}
@@ -367,38 +434,51 @@ export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale
     tfoot td{font-weight:700;border-top:2px solid #e2e8f0;padding:9px 14px}
     .print-head{text-align:center;padding-bottom:14px;margin-bottom:16px;border-bottom:3px solid #2563eb}
     @media print{@page{size:A4;margin:15mm}}
+    .doc-ent{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+    .doc-ent .dr{text-align:right;font-size:10px;color:#64748b;white-space:nowrap}
+    ${ENTITE_CSS}
   `;
 
   const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">
     <title>Compte d'Emploi — ${meta.mois} ${meta.annee}</title>
     <style>${css}</style></head><body>
+      <div class="doc-ent">${blocEntite(entite, meta.tenant_nom)}<div class="dr">Période<br><b style="font-size:13px;color:#1e293b">${meta.mois} ${meta.annee}</b></div></div>
       <div class="print-head">
         <h1 style="font-size:16px;font-weight:800;color:#2563eb;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">COMPTE D'EMPLOI</h1>
         <p style="font-size:13px;font-weight:600;color:#374151">${meta.tenant_nom || ''} · ${meta.mois} ${meta.annee}</p>
       </div>
 
       <div class="ce-section">
-        <div class="ce-section-head green">
-          <span class="ce-num" style="background:#16a34a;color:white">I</span>
-          <span class="sec-title" style="color:#15803d">Ressources</span>
-          <span class="sec-total" style="color:#15803d">${fmtN(ressources.total)}</span>
+        <div class="ce-section-head teal">
+          <span class="ce-num" style="background:#0d9488;color:white">I</span>
+          <span class="sec-title" style="color:#0f766e">Soldes initiaux — Report à Nouveau (RAN)</span>
+          <span class="sec-total" style="color:#0f766e">${fmtN(soldesInitiaux)}</span>
         </div>
         <table>
           <tbody>
-            <tr class="ce-subtit"><td colspan="2">Soldes initiaux — Report à Nouveau (RAN)</td></tr>
-            ${ranLignes || '<tr class="ce-res-row"><td style="padding:9px 14px;color:#6b7280;font-style:italic" colspan="2">Aucun solde initial enregistré</td></tr>'}
-            ${ranBanqueRow}
-            <tr class="ce-subtit"><td colspan="2">Fonds reçus ce mois</td></tr>
-            ${fondsLignes || '<tr class="ce-res-row"><td style="padding:9px 14px;color:#6b7280;font-style:italic" colspan="2">Aucun fonds reçu ce mois</td></tr>'}
-            ${fondsBanqueRow}
+            ${(ranLignes || ranBanqueRow) ? ranLignes + ranBanqueRow : '<tr class="ce-res-row"><td style="padding:9px 14px;color:#6b7280;font-style:italic" colspan="2">Aucun solde initial enregistré</td></tr>'}
           </tbody>
-          <tfoot><tr><td>TOTAL RESSOURCES</td><td style="text-align:right;color:#15803d">${fmtN(ressources.total)}</td></tr></tfoot>
+          <tfoot><tr><td>TOTAL SOLDES INITIAUX</td><td style="text-align:right;color:#0f766e">${fmtN(soldesInitiaux)}</td></tr></tfoot>
+        </table>
+      </div>
+
+      <div class="ce-section">
+        <div class="ce-section-head green">
+          <span class="ce-num" style="background:#16a34a;color:white;font-size:9px">II</span>
+          <span class="sec-title" style="color:#15803d">Ressources — fonds reçus sur la période</span>
+          <span class="sec-total" style="color:#15803d">${fmtN(fondsRecus)}</span>
+        </div>
+        <table>
+          <tbody>
+            ${(fondsLignes || fondsBanqueRow) ? fondsLignes + fondsBanqueRow : '<tr class="ce-res-row"><td style="padding:9px 14px;color:#6b7280;font-style:italic" colspan="2">Aucun fonds reçu ce mois</td></tr>'}
+          </tbody>
+          <tfoot><tr><td>TOTAL RESSOURCES</td><td style="text-align:right;color:#15803d">${fmtN(fondsRecus)}</td></tr></tfoot>
         </table>
       </div>
 
       <div class="ce-section">
         <div class="ce-section-head red">
-          <span class="ce-num" style="background:#dc2626;color:white">II</span>
+          <span class="ce-num" style="background:#dc2626;color:white;font-size:8px">III</span>
           <span class="sec-title" style="color:#b91c1c">Emplois</span>
           <span class="sec-total" style="color:#b91c1c">${fmtN(emplois.total)}</span>
         </div>
@@ -417,13 +497,16 @@ export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale
 
       <div class="ce-section">
         <div class="ce-section-head blue">
-          <span class="ce-num" style="background:#1d4ed8;color:white;font-size:9px">III</span>
+          <span class="ce-num" style="background:#1d4ed8;color:white;font-size:9px">IV</span>
           <span class="sec-title" style="color:#1e40af">Trésorerie Finale &amp; Soldes</span>
           <span class="sec-total" style="color:${solde_net >= 0 ? '#1d4ed8' : '#dc2626'}">${fmtN(solde_net)}</span>
         </div>
         <table>
           <tbody>
-            <tr><td style="padding:10px 14px;font-weight:700;font-size:12px;color:#1e40af">⚖️ Trésorerie Finale (Ressources − Emplois)</td><td style="padding:10px 14px;text-align:right;font-weight:800;font-size:13px;color:${solde_net >= 0 ? '#1d4ed8' : '#dc2626'}">${fmtN(solde_net)}</td></tr>
+            <tr class="ce-res-row"><td style="padding:6px 14px;font-size:12px"><b style="color:#0f766e;display:inline-block;width:24px">I.</b>Soldes initiaux</td><td style="padding:6px 14px;text-align:right;font-weight:600;font-size:12px;color:#0f766e">+ ${fmtN(soldesInitiaux)}</td></tr>
+            <tr class="ce-res-row"><td style="padding:6px 14px;font-size:12px"><b style="color:#15803d;display:inline-block;width:24px">II.</b>Ressources</td><td style="padding:6px 14px;text-align:right;font-weight:600;font-size:12px;color:#15803d">+ ${fmtN(fondsRecus)}</td></tr>
+            <tr class="ce-res-row"><td style="padding:6px 14px;font-size:12px"><b style="color:#b91c1c;display:inline-block;width:24px">III.</b>Emplois</td><td style="padding:6px 14px;text-align:right;font-weight:600;font-size:12px;color:#b91c1c">− ${fmtN(emplois.total)}</td></tr>
+            <tr style="background:#eff6ff"><td style="padding:10px 14px;font-weight:700;font-size:12px;color:#1e40af;border-top:2px solid #bfdbfe">⚖️ Trésorerie Finale (I + II − III)</td><td style="padding:10px 14px;text-align:right;font-weight:800;font-size:13px;border-top:2px solid #bfdbfe;color:${solde_net >= 0 ? '#1d4ed8' : '#dc2626'}">${fmtN(solde_net)}</td></tr>
             ${tresoLignes}
             <tr class="ce-res-row"><td style="padding:7px 14px 7px 30px;display:flex;align-items:center;gap:6px;font-size:12px"><span>🏦</span><span><span style="font-size:11px;color:#6b7280">dont</span> <strong>Banque</strong> <span style="font-size:10px;color:#6b7280">(Compte bancaire)</span></span></td><td style="padding:7px 14px;text-align:right;font-weight:600;font-size:12px;color:${banqueSF >= 0 ? '#1d4ed8' : '#dc2626'}">${fmtN(banqueSF)}</td></tr>
           </tbody>
@@ -431,7 +514,8 @@ export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale
         </table>
       </div>
 
-      <div style="margin-top:10px;font-size:9px;color:#9ca3af;text-align:right">Édité le ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })} — CaissePro v2</div>
+      <div style="margin-top:10px;font-size:9px;color:#9ca3af;text-align:right">Édité le ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</div>
+      ${piedEntite(entite, meta.tenant_nom)}
       <script>window.onload=()=>window.print();<\/script>
     </body></html>`;
 
@@ -507,8 +591,11 @@ export function htmlBonCaisse(m) {
   const enLettres = `${lettres.charAt(0).toUpperCase()}${lettres.slice(1)} ${devise === 'FCFA' ? 'francs CFA' : esc(devise)}`;
   const tiers = estEntree ? 'Versé par' : 'Bénéficiaire';
   const ligne = (lbl, val) => (val ? `<div class="f"><span>${lbl}</span><b>${val}</b></div>` : '');
-  const coord = [m.tenant_adresse, m.tenant_bp && `BP ${m.tenant_bp}`, m.tenant_nui && `NUI ${m.tenant_nui}`, m.tenant_rc && `RC ${m.tenant_rc}`]
+  const coord = [m.tenant_adresse, m.tenant_bp && (/^\s*bp/i.test(m.tenant_bp) ? m.tenant_bp : `BP ${m.tenant_bp}`),
+    m.tenant_tel && `Tél. ${m.tenant_tel}`, m.tenant_email]
     .filter(Boolean).map(esc).join(' · ');
+  const legal = [m.tenant_rc && `RCCM ${m.tenant_rc}`, m.tenant_nui && `NUI ${m.tenant_nui}`].filter(Boolean).map(esc).join(' · ');
+  const logoBon = logoSur(m.tenant_logo);
 
   // Deux exemplaires identiques sur une feuille A4 paysage, à signer tous
   // les deux : l'un reste à la caisse (pièce justificative), l'autre est remis
@@ -523,7 +610,7 @@ export function htmlBonCaisse(m) {
   ${m.annule ? '<div class="wm">ANNULÉ</div>' : duplicata ? '<div class="wm2">DUPLICATA</div>' : ''}
   <div class="ex"><span>EXEMPLAIRE ${ex.n}/2</span><b>${ex.dest}</b></div>
   <div class="head">
-    <div class="org">${m.tenant_logo ? `<img src="${esc(m.tenant_logo)}" alt="">` : ''}<div><b>${esc(m.tenant_nom || '')}${m.tenant_sigle ? ` <span class="sig">(${esc(m.tenant_sigle)})</span>` : ''}</b>${coord ? `<small>${coord}</small>` : ''}</div></div>
+    <div class="org">${logoBon ? `<img src="${logoBon}" alt="">` : ''}<div><b>${esc(m.tenant_nom || '')}${m.tenant_sigle ? ` <span class="sig">(${esc(m.tenant_sigle)})</span>` : ''}</b>${coord ? `<small>${coord}</small>` : ''}${legal ? `<small>${legal}</small>` : ''}</div></div>
     <div class="ttl"><h1>${titre}</h1><p>${sousTitre}</p></div>
     <div class="stamp"><small>N° DE PIÈCE</small><div class="no">${num}</div>
       <span class="tag">${duplicata ? `DUPLICATA N°${(m.nb_impressions || 1) - 1}` : 'ORIGINAL'}</span></div>
@@ -560,7 +647,7 @@ export function htmlBonCaisse(m) {
     <div><b>${tiersLbl}</b><i>${esc(tiersNom || 'Nom & signature')}</i></div>
     <div><b>Directeur / Visa</b><i>${esc(m.directeur_nom || '')}</i></div>
   </div>
-  <div class="foot"><span>Saisi par ${esc(m.saisi_par || '—')} · écriture n°${esc(m.numero)}</span><span>Imprimé le ${imprimeLe} par ${esc(m.imprime_par || '')}</span></div>
+  <div class="foot"><span>Saisi par ${esc(m.saisi_par || '—')} · écriture n°${esc(m.numero)}${String(m.rattrapage) === 'true' ? ` · <b style="color:#b45309">saisie de rattrapage le ${esc(new Date(m.created_at).toLocaleDateString('fr-FR'))}</b>` : ''}</span><span>Imprimé le ${imprimeLe} par ${esc(m.imprime_par || '')}</span></div>
 </div>`;
 
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Bon ${num}</title>
@@ -577,13 +664,14 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;font-size:10px;-webki
 .cut span{position:relative;background:#f1f5f9;color:#64748b;font-size:13px;padding:0 6px}
 .ex{display:flex;justify-content:space-between;align-items:center;padding:3px 14px;background:#0f172a;color:#fff;font-size:8.5px;letter-spacing:1.2px}
 .ex span{opacity:.7;font-weight:700}.ex b{font-size:9px;letter-spacing:1px}
-.head{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px dashed #cbd5e1}
+.head{display:grid;grid-template-columns:1fr auto;grid-template-areas:'org stamp' 'ttl ttl';align-items:center;gap:4px 14px;padding:8px 14px 6px;border-bottom:1px dashed #cbd5e1}
+.org{grid-area:org}.stamp{grid-area:stamp}.ttl{grid-area:ttl;border-top:1px solid #f1f5f9;padding-top:4px}
 .org{display:flex;align-items:center;gap:8px;min-width:0}
-.org img{max-height:30px;max-width:70px}
-.org b{display:block;font-size:15px;font-weight:800}.org .sig{color:#64748b;font-weight:600}
+.org img{max-height:40px;max-width:90px;object-fit:contain;flex-shrink:0}
+.org b{display:block;font-size:14px;font-weight:800;line-height:1.15}.org .sig{color:#64748b;font-weight:600}
 .org small{display:block;color:#64748b;font-size:8.5px;margin-top:1px;line-height:1.35}
 .ttl{text-align:center}
-.ttl h1{font-size:19px;font-weight:900;letter-spacing:1.1px;color:${accent};white-space:nowrap}
+.ttl h1{font-size:18px;font-weight:900;letter-spacing:1.1px;color:${accent};white-space:nowrap}
 .ttl p{color:#64748b;font-size:10px;margin-top:1px}
 .stamp{text-align:right;white-space:nowrap}
 .stamp small{font-size:8px;color:#94a3b8;letter-spacing:1px}
@@ -632,5 +720,134 @@ export function ouvrirFenetreBon() {
 export function printBonCaisse(m, w) {
   const html = htmlBonCaisse(m);
   if (w && !w.closed) { w.document.open(); w.document.write(html); w.document.close(); return true; }
+  return openPrintWindowViaWrite(html);
+}
+
+// ── Rapport de contrôle comptable (migrations 042-044) ──────────────────────
+// A4 paysage, même lecture que l'écran : synthèse puis détail. « Enregistrer
+// en PDF » depuis la boîte d'impression du navigateur.
+export function printRapportControle({ data, filtres, entite, tenantNom, devise = 'FCFA' }) {
+  const r = data.resume;
+  const L = data.lignes;
+  const ST = {
+    controle: ['Validée', '#166534', '#dcfce7', '#10b981'], anomalie: ['Anomalies constatées', '#991b1b', '#fee2e2', '#ef4444'],
+    en_cours: ['En cours', '#92400e', '#fef3c7', '#f59e0b'], a_controler: ['À contrôler', '#475569', '#f1f5f9', '#94a3b8'],
+  };
+  const ORDRE = ['controle', 'anomalie', 'en_cours', 'a_controler'];
+  const mt = (n) => `${fmtN(n)} ${escE(devise)}`;
+  const df = (d) => (d ? escE(String(d).slice(0, 10).split('-').reverse().join('/')) : '');
+  const pc = (n, t) => (t ? Math.round((n / t) * 100) : 0);
+  const montant = (l) => l.debit || l.credit;
+  const parSt = Object.fromEntries(ORDRE.map((k) => [k, { n: 0, m: 0 }]));
+  const parJ = new Map();
+  let total = 0; let risque = 0;
+  for (const l of L) {
+    const m = montant(l); total += m;
+    parSt[l.statut].n += 1; parSt[l.statut].m += m;
+    if (l.anomalies.length) risque += m;
+    const j = parJ.get(l.journal_code) || { code: l.journal_code || '—', nom: l.journal_nom || '', n: 0, m: 0, f: 0, a: 0 };
+    j.n += 1; j.m += m; if (l.statut === 'controle' || l.statut === 'anomalie') j.f += 1; if (l.anomalies.length) j.a += 1;
+    parJ.set(l.journal_code, j);
+  }
+  const faits = r.par_statut.controle + r.par_statut.anomalie;
+  const anoms = Object.entries(r.par_anomalie).sort((a, b) => b[1] - a[1]);
+  const maxA = anoms.length ? anoms[0][1] : 1;
+  const solde = L.reduce((t, l) => t + (l.debit ? -l.debit : l.credit), 0);
+
+  const pile = ORDRE.filter((k) => parSt[k].n).map((k) => `<span style="width:${pc(parSt[k].n, r.total)}%;background:${ST[k][3]}"></span>`).join('');
+  const lStatuts = ORDRE.map((k) => `<tr><td><i class="dot" style="background:${ST[k][3]}"></i>${ST[k][0]}</td><td class="n">${parSt[k].n}</td><td class="n mu">${pc(parSt[k].n, r.total)} %</td><td class="n">${mt(parSt[k].m)}</td></tr>`).join('');
+  const lAnoms = anoms.length
+    ? anoms.map(([k, n]) => `<tr><td>${escE(data.anomalies[k] || k)}</td><td class="bar"><i style="width:${Math.max(6, (n / maxA) * 100)}%"></i></td><td class="n ro">${n}</td></tr>`).join('')
+    : '<tr><td colspan="3" style="color:#15803d">✓ Aucune anomalie sur les opérations de la période.</td></tr>';
+  const lJournaux = [...parJ.values()].sort((a, b) => b.m - a.m)
+    .map((j) => `<tr><td><b>${escE(j.code)}</b> <span class="mu">${escE(j.nom)}</span></td><td class="n">${j.n}</td><td class="n">${mt(j.m)}</td><td class="n">${pc(j.f, j.n)} %</td><td class="n${j.a ? ' ro' : ''}">${j.a}</td></tr>`).join('');
+
+  const lignes = L.map((l) => {
+    const s = ST[l.statut];
+    const tiers = l.virement ? '<span class="mu">Virement interne</span>'
+      : `${l.tiers_nom ? escE(l.tiers_nom) : '<span class="ro">non renseigné</span>'}${l.registre?.verifie ? ' <span class="ve">✓</span>' : ''}<div class="mu mo">${escE(l.tiers_nui || '—')}</div>`;
+    const compte = `${l.compte ? `cpte <b>${escE(l.compte)}</b>` : '<span class="ro">compte manquant</span>'}${l.compte_etat === 'non_valide' ? ' <span style="color:#b45309">(non validé)</span>' : ''}${l.compte_etat === 'corrige' ? ` <span style="color:#7c3aed">✎ corrigé (rubrique ${escE(l.compte_rubrique || '—')})</span>` : ''} ↔ ${escE(l.compte_tresorerie || '?')}`;
+    const cTiers = l.virement ? '<span class="mu">—</span>'
+      : l.compte_tiers ? `<span class="mo">${escE(l.compte_tiers)}</span>${l.compte_tiers_source === 'collectif' ? '<div class="mu">collectif</div>' : ''}` : '<span class="mu">non identifié</span>';
+    const dec = l.controle_par && (l.statut === 'controle' || l.statut === 'anomalie') ? `<div class="mu">${escE(l.controle_par)}, ${df(l.controle_le)}</div>` : '';
+    const an = l.anomalies.length ? `<div class="an">${l.anomalies_libelles.map((a) => `⚠ ${escE(a)}`).join('<br>')}</div>` : '';
+    const ligne = `<tr class="${l.observation ? 'ao' : ''}"><td><b>${escE(l.reference)}</b><div class="mu">${df(l.date)}</div></td><td>${tiers}</td>
+      <td>${cTiers}</td><td>${escE(l.libelle)}<div class="mu">${compte}</div></td>
+      <td class="n" style="color:${l.debit ? '#b91c1c' : '#15803d'};font-weight:700">${l.debit ? '− ' + mt(l.debit) : '+ ' + mt(l.credit)}</td>
+      <td><span class="st" style="background:${s[2]};color:${s[1]}">${s[0]}</span>${dec}${an}</td></tr>`;
+    return l.observation ? `${ligne}<tr class="obs"><td colspan="6"><b>Observation :</b> ${escE(l.observation)}</td></tr>` : ligne;
+  }).join('');
+
+  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Rapport de contrôle — ${df(data.du)} au ${df(data.au)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm 11mm 12mm; }
+    *{ box-sizing:border-box; margin:0; padding:0; }
+    body{ font-family: 'Segoe UI', Arial, Helvetica, sans-serif; font-size:9.5px; color:#1e293b; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    ${ENTITE_CSS}
+    .tete{ display:flex; justify-content:space-between; align-items:flex-end; gap:16px; padding-bottom:9px; border-bottom:2.5px solid #1a2b4a; margin-bottom:10px; }
+    .titre{ font-size:15px; font-weight:800; color:#1a2b4a; margin-top:7px; }
+    .sous{ font-size:9px; color:#64748b; margin-top:2px; }
+    .per{ text-align:right; } .per b{ display:block; font-size:13px; color:#1a2b4a; } .per span{ font-size:8.5px; color:#94a3b8; }
+    .crit{ font-size:8.5px; color:#475569; background:#f8fafc; border:1px solid #e2e8f0; border-radius:4px; padding:4px 8px; margin-bottom:10px; }
+    .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:10px; }
+    .kpi{ border:1px solid #e2e8f0; border-top:3px solid; border-radius:5px; padding:7px 10px; }
+    .kpi t{ display:block; font-size:7.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:#64748b; }
+    .kpi v{ display:block; font-size:15px; font-weight:800; margin-top:2px; }
+    .kpi s{ display:block; text-decoration:none; font-size:8px; color:#64748b; margin-top:2px; }
+    .jg{ height:4px; background:#e2e8f0; border-radius:2px; margin-top:4px; overflow:hidden; } .jg i{ display:block; height:100%; background:#2563eb; }
+    .grille{ display:grid; grid-template-columns:1fr 1.3fr 1fr; gap:8px; margin-bottom:12px; }
+    .carte{ border:1px solid #e2e8f0; border-radius:5px; padding:7px 9px; }
+    h3{ font-size:8.5px; font-weight:800; text-transform:uppercase; letter-spacing:.45px; color:#1a2b4a; margin-bottom:5px; }
+    .pile{ display:flex; height:7px; border-radius:4px; overflow:hidden; background:#e2e8f0; margin-bottom:5px; } .pile span{ display:block; height:100%; }
+    table{ width:100%; border-collapse:collapse; }
+    .mini td,.mini th{ padding:2.5px 4px; border-bottom:1px solid #f1f5f9; font-size:8.5px; text-align:left; }
+    .mini th{ font-size:7.5px; text-transform:uppercase; color:#64748b; border-bottom:1px solid #e2e8f0; }
+    .mini tr:last-child td{ border-bottom:0; }
+    .bar{ width:38%; } .bar i{ display:block; height:6px; border-radius:3px; background:#ef4444; }
+    .dot{ display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:4px; }
+    .n{ text-align:right !important; white-space:nowrap; } .mu{ color:#64748b; font-size:8px; } .mo{ font-family:Consolas,monospace; }
+    .ro{ color:#b91c1c; } .ve{ color:#15803d; }
+    .det-t{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; }
+    .det thead th{ background:#1a2b4a; color:#fff; font-size:7.5px; text-transform:uppercase; letter-spacing:.35px; padding:5px 6px; text-align:left; }
+    .det td{ padding:5px 6px; border-bottom:1px solid #e2e8f0; vertical-align:top; font-size:8.8px; }
+    .det tr.ao td{ border-bottom:0; padding-bottom:2px; }
+    .det tr.obs td{ padding:0 6px 5px 6px; font-style:italic; color:#334155; font-size:8.5px; border-bottom:1px solid #e2e8f0; }
+    .det tr.obs b{ font-style:normal; font-size:7.5px; text-transform:uppercase; color:#64748b; }
+    .det tr{ page-break-inside:avoid; } .det thead{ display:table-header-group; }
+    .st{ display:inline-block; padding:1px 6px; border-radius:8px; font-size:7.8px; font-weight:700; }
+    .an{ color:#b91c1c; font-size:7.8px; margin-top:2px; line-height:1.35; }
+    .tag{ display:inline-block; font-size:7.2px; padding:0 5px; border-radius:6px; background:#f1f5f9; color:#64748b; margin:2px 3px 0 0; }
+    .tag.ve{ background:#dcfce7; color:#166534; }
+    .tot td{ background:#f1f5f9; font-weight:800; font-size:9px; border-top:1.5px solid #1a2b4a; }
+    .visa{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px; page-break-inside:avoid; }
+    .visa div{ border:1px solid #cbd5e1; border-radius:5px; height:62px; padding:5px 8px; font-size:8px; color:#64748b; font-weight:700; text-transform:uppercase; }
+    .note{ margin-top:8px; font-size:7.8px; color:#94a3b8; }
+  </style></head><body>
+  <div class="tete"><div>${blocEntite(entite, tenantNom)}
+      <div class="titre">Rapport de contrôle comptable</div>
+      <div class="sous">Contrôle préalable à la passerelle comptable — aucune écriture n'a été modifiée</div></div>
+    <div class="per"><b>Du ${df(data.du)} au ${df(data.au)}</b><span>Édité le ${new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</span></div></div>
+  <div class="crit"><b>Critères :</b> ${escE(filtres)}</div>
+  <div class="kpis">
+    <div class="kpi" style="border-top-color:#1e293b"><t>Opérations</t><v>${r.total}</v><s>${mt(total)} de mouvements</s></div>
+    <div class="kpi" style="border-top-color:#2563eb"><t>Avancement du contrôle</t><v style="color:#2563eb">${pc(faits, r.total)} %</v><div class="jg"><i style="width:${pc(faits, r.total)}%"></i></div><s>${faits} opération(s) décidée(s) sur ${r.total}</s></div>
+    <div class="kpi" style="border-top-color:#dc2626"><t>Anomalies constatées</t><v style="color:#dc2626">${r.par_statut.anomalie}</v><s>${mt(parSt.anomalie.m)} concernés</s></div>
+    <div class="kpi" style="border-top-color:#b45309"><t>Montant à risque</t><v style="color:#b45309">${mt(risque)}</v><s>${r.avec_anomalies} opération(s) avec au moins un point à vérifier</s></div>
+  </div>
+  <div class="grille">
+    <div class="carte"><h3>Répartition par statut</h3><div class="pile">${pile}</div><table class="mini"><tbody>${lStatuts}</tbody></table></div>
+    <div class="carte"><h3>Points à vérifier relevés</h3><table class="mini"><tbody>${lAnoms}</tbody></table></div>
+    <div class="carte"><h3>Par journal</h3><table class="mini"><thead><tr><th>Journal</th><th class="n">Opér.</th><th class="n">Montant</th><th class="n">Validé</th><th class="n">⚠</th></tr></thead><tbody>${lJournaux}</tbody></table></div>
+  </div>
+  <div class="det-t"><h3>Détail des opérations</h3><span class="mu">${L.length} opération(s)</span></div>
+  <table class="det"><thead><tr><th style="width:8%">Pièce</th><th style="width:18%">Fournisseur / client</th><th style="width:10%">Compte tiers</th>
+    <th style="width:29%">Libellé · code comptable</th><th class="n" style="width:12%">Montant</th><th style="width:23%">Contrôle</th></tr></thead>
+    <tbody>${lignes || '<tr><td colspan="6" style="text-align:center">Aucune opération</td></tr>'}
+      <tr class="tot"><td colspan="4">Solde des opérations examinées (sorties en négatif, entrées en positif)</td>
+      <td class="n" style="color:${solde < 0 ? '#b91c1c' : '#15803d'}">${solde < 0 ? '− ' + mt(-solde) : '+ ' + mt(solde)}</td><td></td></tr></tbody></table>
+  <div class="visa"><div>Contrôlé par (nom, date, signature)</div><div>Visa du responsable</div></div>
+  <div class="note">Code comptable : compte de la rubrique validé dans la passerelle comptable, ou compte corrigé par le comptable (✎) ; contrepartie : compte de trésorerie du journal. Compte tiers : registre des bénéficiaires payés / encaissés (collectif 401 / 411 à défaut). Les écritures annulées et leurs contre-passations ne sont pas présentées.</div>
+  ${piedEntite(entite, tenantNom)}
+  <script>window.onload=()=>{ window.print(); };<\/script></body></html>`;
   return openPrintWindowViaWrite(html);
 }

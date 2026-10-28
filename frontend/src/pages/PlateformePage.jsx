@@ -2,18 +2,23 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
+import { ModulesClient, ModulesMatrice } from '@/components/ModulesClients';
+import SuppressionClient from '@/components/SuppressionClient';
 
 // Administration PLATEFORME (réforme, étape 8) — super_admin.
 // Vue administrative et technique des clients : aucune donnée de transaction.
 // L'accès aux écrans de caisse d'un client passe par un accès support
 // temporaire et tracé (composant SupportAcces).
 const dateFr = (d, h = false) => (d ? (h ? new Date(d).toLocaleString('fr-FR') : new Date(d).toLocaleDateString('fr-FR')) : '—');
-const ROLES = { directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Auditeur', comptable_cabinet: 'Comptable cabinet' };
+const ROLES = { directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', comptable_cabinet: 'Comptable cabinet' };
 const ACTIONS = {
   CREATION_CLIENT: 'Création du client', MODIF_CLIENT: 'Modification des informations',
   SUSPENSION_CLIENT: 'Suspension', REACTIVATION_CLIENT: 'Réactivation',
   SUPPORT_OUVERT: 'Accès support ouvert', SUPPORT_FERME: 'Accès support fermé',
+  ROLES_CLIENT: 'Rôles autorisés modifiés',
+  MODULE_ACTIVATION: 'Module activé', MODULE_DESACTIVATION: 'Module désactivé',
   INIT_PLAN_COMPTABLE: 'Initialisation du plan comptable', SYNC_PLAN_COMPTABLE: 'Synchronisation du plan comptable',
+  SUPPRESSION_CLIENT: 'Client supprimé',
 };
 const resume = (v) => (v ? Object.entries(v).filter(([, x]) => x !== undefined && x !== null && x !== '').map(([k, x]) => `${k} : ${typeof x === 'object' ? JSON.stringify(x) : x}`).join(' · ') : '');
 
@@ -49,6 +54,81 @@ function AuditListe({ lignes }) {
   );
 }
 
+// Rôles autorisés du client (migration 038). Par défaut : démonstration →
+// Directeur + Caissier ; client → tous. Le choix du super_admin est prioritaire.
+const ROLES_CLIENT = [
+  ['directeur', 'Directeur', 'Encadrement : validation, paramétrage, utilisateurs'],
+  ['caissier', 'Caissier(ère)', 'Saisie quotidienne des mouvements'],
+  ['auditeur', 'Comptable', 'Contrôle comptable : imputations et observations'],
+];
+
+function RolesClient({ id, utilisateurs }) {
+  const toast = useToast();
+  const [info, setInfo] = useState(null);
+  const [choix, setChoix] = useState([]);
+  const [erreur, setErreur] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const charger = useCallback(async () => {
+    const r = await api.get(`/plateforme/clients/${id}/roles`);
+    if (r.error) { setErreur(r.error); return; }
+    setInfo(r); setChoix(r.roles); setErreur('');
+  }, [id]);
+  useEffect(() => { charger(); }, [charger]);
+
+  const enregistrer = async (roles) => {
+    setSaving(true);
+    const r = await api.put(`/plateforme/clients/${id}/roles`, { roles });
+    setSaving(false);
+    if (r.error) { setErreur(r.error); return; }
+    toast(roles === null ? 'Rôles remis à la valeur par défaut.' : 'Rôles autorisés enregistrés.', 'success');
+    setInfo(r); setChoix(r.roles); setErreur('');
+  };
+
+  if (!info) return erreur ? <div className="alert-err">{erreur}</div> : <div className="loading-msg">Chargement…</div>;
+  const actifsParRole = (r) => utilisateurs.filter((u) => u.actif && u.role === r).length;
+  const modifie = choix.length !== info.roles.length || choix.some((r) => !info.roles.includes(r));
+  const demo = info.type_compte === 'demo';
+  return (
+    <>
+      <p style={{ fontSize: 13, marginBottom: 10 }}>
+        Rôles que ce client peut attribuer à ses utilisateurs (nombre d'utilisateurs illimité).{' '}
+        {info.personnalise
+          ? <strong>Réglage personnalisé.</strong>
+          : <span style={{ color: 'var(--text-muted)' }}>Valeur par défaut {demo ? 'd\'une démonstration (Directeur + Caissier)' : 'd\'un client (tous les rôles)'}.</span>}
+      </p>
+      <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+        {ROLES_CLIENT.map(([code, nom, desc]) => {
+          const n = actifsParRole(code);
+          const coche = choix.includes(code);
+          const verrou = coche && n > 0;
+          return (
+            <label key={code} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: coche ? '#eff6ff' : 'white', cursor: verrou ? 'not-allowed' : 'pointer', textTransform: 'none', letterSpacing: 0, fontSize: 13, color: 'var(--text)', fontWeight: 400, margin: 0 }}
+              title={verrou ? `${n} utilisateur(s) actif(s) ont ce rôle : changez leur rôle ou désactivez-les avant de le retirer.` : ''}>
+              <input type="checkbox" checked={coche} disabled={verrou || saving} style={{ appearance: 'auto', WebkitAppearance: 'auto', width: 16, height: 16, padding: 0, marginTop: 2, flexShrink: 0, accentColor: 'var(--accent)' }}
+                onChange={(e) => setChoix((c) => (e.target.checked ? [...c, code] : c.filter((x) => x !== code)))} />
+              <span>
+                <strong>{nom}</strong> <span style={{ color: 'var(--text-muted)' }}>— {desc}</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>{n} utilisateur(s) actif(s)</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      {erreur && <div className="alert-err" style={{ marginBottom: 10 }}>{erreur}</div>}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button className="btn-add" disabled={!modifie || saving || choix.length === 0} onClick={() => enregistrer(choix)}>Enregistrer</button>
+        {info.personnalise && <button className="btn-secondary" disabled={saving} onClick={() => enregistrer(null)}>Revenir à la valeur par défaut</button>}
+      </div>
+      {demo && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
+          À la conversion en client, le nouvel espace reçoit tous les rôles (réglage modifiable ensuite ici).
+        </p>
+      )}
+    </>
+  );
+}
+
 function DetailClient({ id, onClose, onChange }) {
   const toast = useToast();
   const { selectTenant } = useApp();
@@ -57,6 +137,7 @@ function DetailClient({ id, onClose, onChange }) {
   const [f, setF] = useState(null);
   const [erreur, setErreur] = useState('');
   const [onglet, setOnglet] = useState('infos');
+  const [suppression, setSuppression] = useState(false);
 
   const charger = useCallback(async () => {
     const [r, a] = await Promise.all([api.get(`/plateforme/clients/${id}`), api.get(`/plateforme/audit?tenant=${id}`)]);
@@ -103,7 +184,7 @@ function DetailClient({ id, onClose, onChange }) {
                 </div>
               )}
               <div className="tabs-header" style={{ marginBottom: 12 }}>
-                {[['infos', 'Informations'], ['users', `Utilisateurs (${d.utilisateurs.length})`], ['plan', 'Plan comptable'], ['audit', 'Journal d\'audit']].map(([k, l]) => (
+                {[['infos', 'Informations'], ['users', `Utilisateurs (${d.utilisateurs.length})`], ['roles', 'Rôles autorisés'], ['modules', '▦ Modules'], ['plan', 'Plan comptable'], ['audit', 'Journal d\'audit']].map(([k, l]) => (
                   <button key={k} className={'tab-btn' + (onglet === k ? ' active' : '')} onClick={() => setOnglet(k)}>{l}</button>
                 ))}
               </div>
@@ -160,6 +241,8 @@ function DetailClient({ id, onClose, onChange }) {
                   <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Aperçu et synchronisation : page « Modèle comptable » → onglet Synchronisation.</p>
                 </>
               )}
+              {onglet === 'roles' && <RolesClient id={id} utilisateurs={d.utilisateurs} />}
+              {onglet === 'modules' && <ModulesClient id={id} />}
               {onglet === 'audit' && <AuditListe lignes={audit} />}
             </>
           )}
@@ -169,11 +252,14 @@ function DetailClient({ id, onClose, onChange }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn-secondary" onClick={basculerActif}>{d.client.actif ? '⏸ Suspendre' : '↺ Réactiver'}</button>
               {d.client.actif && <button className="btn-secondary" onClick={ouvrirClient} title="Sélectionne ce client (utilisateurs, configuration, plan comptable)">Gérer dans Configuration</button>}
+              <button className="btn-secondary" onClick={() => setSuppression(true)} style={{ color: '#b91c1c', borderColor: '#fecaca' }}
+                title="Réservé à un client ajouté manuellement et jamais utilisé">🗑 Supprimer</button>
             </div>
             {onglet === 'infos' && <button className="btn-add" onClick={enregistrer}>Enregistrer</button>}
           </div>
         )}
       </div>
+      {suppression && <SuppressionClient id={id} onAnnuler={() => setSuppression(false)} onSupprime={() => { setSuppression(false); onClose(); onChange(); }} />}
     </div>
   );
 }
@@ -233,6 +319,9 @@ export default function PlateformePage() {
           </tbody>
         </table>
       </div>
+      <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>▦ Modules NJ BUSINESS par client</h3>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0 }}>Un module désactivé n'est plus accessible aux utilisateurs du client (contrôle serveur). Ses données sont conservées et retrouvées à la réactivation.</p>
+      <div style={{ marginBottom: 24 }}><ModulesMatrice /></div>
       <h3 style={{ fontSize: 15, margin: '0 0 8px' }}>Journal des actions administratives</h3>
       <AuditListe lignes={audit} />
       {detail && <DetailClient id={detail} onClose={() => setDetail(null)} onChange={charger} />}

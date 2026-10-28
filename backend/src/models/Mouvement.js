@@ -14,6 +14,7 @@ module.exports = (sequelize, DataTypes) => {
     objet: DataTypes.TEXT,
     beneficiaire: DataTypes.TEXT,
     piece_identite: DataTypes.TEXT,
+    nui: { type: DataTypes.TEXT, defaultValue: '' },   // migration 030 (C18)
     telephone: DataTypes.TEXT,
     entree: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
     sortie: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
@@ -22,6 +23,9 @@ module.exports = (sequelize, DataTypes) => {
     numero: DataTypes.INTEGER,
     annule: { type: DataTypes.BOOLEAN, defaultValue: false },
     nb_impressions: { type: DataTypes.INTEGER, defaultValue: 0 },
+    rattrapage: { type: DataTypes.BOOLEAN, defaultValue: false },   // migration 033 : écriture antidatée
+    activite_id: DataTypes.INTEGER,   // migration 034 : activité / projet (facultatif)
+    tiers_id: DataTypes.BIGINT,       // migration 044 : tiers du registre (rattaché automatiquement)
     derniere_impression_le: DataTypes.DATE,
     annule_par_id: DataTypes.BIGINT,
     annulation_de_id: DataTypes.BIGINT,

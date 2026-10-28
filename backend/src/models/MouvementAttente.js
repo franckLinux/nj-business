@@ -14,12 +14,14 @@ module.exports = (sequelize, DataTypes) => {
     objet: DataTypes.TEXT,
     beneficiaire: DataTypes.TEXT,
     piece_identite: DataTypes.TEXT,
+    nui: { type: DataTypes.TEXT, defaultValue: '' },   // migration 030 (C18)
+    activite_id: DataTypes.INTEGER,   // migration 034 : activité / projet (facultatif)
     telephone: DataTypes.TEXT,
     sortie: { type: DataTypes.DECIMAL(15, 2), allowNull: false, defaultValue: 0 },
     motif_attente: {
       type: DataTypes.TEXT,
       allowNull: false,
-      validate: { isIn: [['mois_non_valide', 'rubrique_non_approuvee', 'depassement_journal', 'depassement_rubrique']] },
+      validate: { isIn: [['mois_non_valide', 'semaine_non_validee', 'rubrique_non_approuvee', 'depassement_journal', 'depassement_rubrique']] },
     },
     montant_prevu: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },
     cumul_sorties: { type: DataTypes.DECIMAL(15, 2), defaultValue: 0 },

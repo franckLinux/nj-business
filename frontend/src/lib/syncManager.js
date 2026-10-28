@@ -90,6 +90,13 @@ const replayAll = async () => {
       } else if (res.status >= 500) {
         await idb.put('sync_queue', { ...op, tentatives: op.tentatives + 1, last_error: `HTTP ${res.status}` });
         errors++;
+      } else if (res.status === 403 && (await res.clone().json().then(unwrapSyncResponse).catch(() => ({}))).code === 'MODULE_INACTIF') {
+        // NJ BUSINESS (048) : module désactivé pour l'espace. La saisie n'est
+        // NI supprimée NI marquée en erreur : elle reste en file et repartira
+        // après réactivation. Inutile d'envoyer les suivantes.
+        await idb.put('sync_queue', { ...op, tentatives: op.tentatives + 1, last_error: 'Module désactivé pour votre espace' });
+        errors++;
+        break;
       } else {
         const errData = await res.json().then(unwrapSyncResponse).catch(() => ({}));
         await idb.put('sync_queue', {
@@ -183,13 +190,14 @@ const getCachedControleContext = async (jid, mois, annee) => {
   return m ? m.value : null;
 };
 
-const sommeSortiesOffline = async (jid, mois, annee, rubriqueCode) => {
+const sommeSortiesOffline = async (jid, mois, annee, rubriqueCode, jusqua = null) => {
   let sj = 0, sr = 0;
   try {
     const all = await idb.getAll('journal_cache');
     for (const e of all) {
       if (e.synced || !e.created_offline) continue;
       if (e.mois !== mois || String(e.annee) !== String(annee)) continue;
+      if (jusqua && e.date && String(e.date).slice(0, 10) > jusqua) continue;
       const sortie = parseFloat(e.sortie) || 0;
       if (sortie <= 0) continue;
       if ((e.journal_id || null) == (jid || null)) sj += sortie;
@@ -208,8 +216,42 @@ const controleBudgetLocal = async (body) => {
   const ctx = await getCachedControleContext(jid, body.mois, body.annee);
   if (!ctx) return { bloque: false, connu: false };
 
-  const off = await sommeSortiesOffline(jid, body.mois, body.annee, body.rubrique_code);
   const fmtN = (n) => (parseFloat(n) || 0).toLocaleString('fr-FR');
+
+  // Budget hebdomadaire (040) : semaine k tirée de la date du mouvement,
+  // contrôle sur le cumul des semaines 1..k (report du non-dépensé).
+  if (ctx.hebdo && Array.isArray(ctx.hebdo.semaines) && body.date) {
+    const d = String(body.date).slice(0, 10);
+    const sem = ctx.hebdo.semaines.find((x) => d >= x.debut && d <= x.fin);
+    if (sem) {
+      const offH = await sommeSortiesOffline(jid, body.mois, body.annee, body.rubrique_code, sem.fin);
+      if (!sem.valide) {
+        return { bloque: true, connu: true, motif: 'semaine_non_validee',
+          message: `la semaine ${sem.num} n'est pas encore validée par le directeur.` };
+      }
+      const appr = parseFloat(sem.approuve_cumul?.[body.rubrique_code]) || 0;
+      const srH = (parseFloat(sem.sorties_cumul?.[body.rubrique_code]) || 0) + offH.sr + montant;
+      if (appr <= 0) {
+        return { bloque: true, connu: true, motif: 'rubrique_non_approuvee',
+          message: `la rubrique "${body.rubrique_code}" n'a pas de budget validé jusqu'à la semaine ${sem.num}.` };
+      }
+      if (srH > appr) {
+        return { bloque: true, connu: true, motif: 'depassement_rubrique',
+          message: `la rubrique "${body.rubrique_code}" dépasserait de ${fmtN(srH - appr)} FCFA le budget cumulé des semaines 1 à ${sem.num}.` };
+      }
+      const plafH = parseFloat(sem.plafond_cumul) || 0;
+      if (plafH > 0) {
+        const apresH = (parseFloat(sem.sorties_journal_cumul) || 0) + offH.sj + montant;
+        if (apresH > plafH) {
+          return { bloque: true, connu: true, motif: 'depassement_journal',
+            message: `le plafond de caisse cumulé (semaines 1 à ${sem.num}) serait dépassé de ${fmtN(apresH - plafH)} FCFA.` };
+        }
+      }
+      return { bloque: false, connu: true };
+    }
+  }
+
+  const off = await sommeSortiesOffline(jid, body.mois, body.annee, body.rubrique_code);
 
   const approuve = parseFloat(ctx.approuve_by_rubrique?.[body.rubrique_code]) || 0;
   const sr = (parseFloat(ctx.sorties_by_rubrique?.[body.rubrique_code]) || 0) + off.sr + montant;

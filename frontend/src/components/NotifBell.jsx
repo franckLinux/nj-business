@@ -40,7 +40,12 @@ export default function NotifBell() {
     const id = setInterval(tick, 120000);
     const onVisible = () => { if (!document.hidden) tick(); };
     document.addEventListener('visibilitychange', onVisible);
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
+    // Bouton « Rafraîchir » de la barre du haut.
+    window.addEventListener('njb-rafraichir', refreshCount);
+    return () => {
+      clearInterval(id); document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('njb-rafraichir', refreshCount);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -93,7 +98,7 @@ export default function NotifBell() {
         )}
       </button>
       {open && (
-        <div style={{ display: 'flex', flexDirection: 'column', position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 360, maxHeight: 460, background: 'white', borderRadius: 12, boxShadow: '0 8px 30px rgba(0,0,0,.15)', border: '1px solid var(--border)', zIndex: 300, overflow: 'hidden' }}>
+        <div className="notif-panel" style={{ display: 'flex', flexDirection: 'column', position: 'absolute', right: 0, top: 'calc(100% + 8px)', width: 360, maxHeight: 460, background: 'white', borderRadius: 12, boxShadow: '0 8px 30px rgba(0,0,0,.15)', border: '1px solid var(--border)', zIndex: 300, overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontWeight: 700, fontSize: 13 }}>
             🔔 Notifications
             <button onClick={marquerTout} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Tout marquer lu</button>

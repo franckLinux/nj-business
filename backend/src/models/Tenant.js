@@ -19,6 +19,9 @@ module.exports = (sequelize, DataTypes) => {
     nui: DataTypes.TEXT,
     activite: DataTypes.TEXT,
     dirigeant_nom: DataTypes.TEXT,
+    telephone: DataTypes.TEXT,   // migration 031
+    email: DataTypes.TEXT,       // migration 031
+    site_web: DataTypes.TEXT,    // migration 031
     actif: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated_at: DataTypes.DATE,

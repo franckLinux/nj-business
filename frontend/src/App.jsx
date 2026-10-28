@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import Layout from '@/components/Layout';
 import LoginPage from '@/pages/LoginPage';
@@ -9,19 +10,28 @@ import JournauxRecapPage from '@/pages/JournauxRecapPage';
 import BudgetPage from '@/pages/BudgetPage';
 import PrevisionsPage from '@/pages/PrevisionsPage';
 import AppelFondsPage from '@/pages/AppelFondsPage';
+import SuiviActivitesPage from '@/pages/SuiviActivitesPage';
 import CompteEmploiPage from '@/pages/CompteEmploiPage';
 import ConfigPage from '@/pages/ConfigPage';
+import PasserelleTab from '@/components/config/PasserelleTab';
+import ControlePage from '@/pages/ControlePage';
+import RegistreTiersPage from '@/pages/RegistreTiersPage';
+import ArretsInventairesPage from '@/pages/ArretsInventairesPage';
 import TenantsPage from '@/pages/TenantsPage';
 import PermissionsPage from '@/pages/PermissionsPage';
 import PlanModelePage from '@/pages/PlanModelePage';
+import ValidationDirectePage from '@/pages/ValidationDirectePage';
 import PlateformePage from '@/pages/PlateformePage';
 import ProspectsPage from '@/pages/ProspectsPage';
 import MyNjBusinessPage from '@/pages/MyNjBusinessPage';
 import ActivationPage from '@/pages/ActivationPage';
 import DemandeDemoPage from '@/pages/DemandeDemoPage';
+import ReinitialisationPage from '@/pages/ReinitialisationPage';
 import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
 import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
+import AccueilPage from '@/pages/AccueilPage';
+import { consommerEntree, moduleActif, routeApresConnexion, systemeInstalle, utiliseAccueil } from '@/lib/modules';
 
 // Toutes les pages listées dans MIGRATION.md sont désormais portées.
 export default function App() {
@@ -31,6 +41,9 @@ export default function App() {
   if (activation) return <ActivationPage token={activation[1]} />;
   // Page publique de demande de démonstration (lien à diffuser).
   if (/^\/demande-demo\/?$/.test(window.location.pathname)) return <DemandeDemoPage />;
+  // Lien « mot de passe oublié » reçu par e-mail (C9).
+  const reinit = window.location.pathname.match(/^\/reinitialisation\/([A-Za-z0-9_-]+)\/?$/);
+  if (reinit) return <ReinitialisationPage token={reinit[1]} />;
 
   return (
     <>
@@ -51,11 +64,45 @@ function Autorise({ code, ok, children }) {
   return permis ? children : <Navigate to="/" replace />;
 }
 
+// NJ BUSINESS (048) — garde côté interface du module NJ CAISSE PRO.
+// Un utilisateur de client dont la caisse n'est pas activée est ramené à
+// l'accueil (le serveur refuse de toute façon : 403 MODULE_INACTIF).
+// Système de modules absent côté serveur : aucun effet (comportement d'avant).
+function GardeCaisse({ children }) {
+  const { user } = useApp();
+  if (utiliseAccueil(user) && systemeInstalle(user) && !moduleActif(user, 'caisse')) {
+    return <Navigate to="/accueil" replace />;
+  }
+  return children;
+}
+
 function AuthenticatedApp() {
   const { user, can, activeTenantId } = useApp();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Juste après la connexion (une seule fois) : un module → entrée directe
+  // (comportement actuel) ; plusieurs ou aucun → accueil NJ BUSINESS (D1).
+  useEffect(() => {
+    if (!consommerEntree()) return;
+    const dest = routeApresConnexion(user);
+    if (dest && dest !== location.pathname) navigate(dest, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Module désactivé pendant la session : retour à l'accueil avec un message.
+  useEffect(() => {
+    const surModuleInactif = () => {
+      if (utiliseAccueil(user)) navigate('/accueil', { replace: true, state: { raison: 'module-inactif' } });
+    };
+    window.addEventListener('module-inactif', surModuleInactif);
+    return () => window.removeEventListener('module-inactif', surModuleInactif);
+  }, [user, navigate]);
+
   return (
     <Routes>
-      <Route element={<Layout />}>
+      {/* Accueil NJ BUSINESS : hors du menu de la caisse, réservé aux utilisateurs d'un client. */}
+      <Route path="accueil" element={utiliseAccueil(user) ? <AccueilPage /> : <Navigate to="/" replace />} />
+      <Route element={<GardeCaisse><Layout /></GardeCaisse>}>
         {/* Accueil du super_admin : l'administration (plateforme, ou configuration
             du client choisi) — jamais directement les données de caisse, qui
             demandent un accès support (voir middleware/tenant.js). */}
@@ -69,12 +116,19 @@ function AuthenticatedApp() {
         <Route path="previsions"     element={<Autorise code={PAGE_PERMS['/previsions']}><PrevisionsPage /></Autorise>} />
         <Route path="appel-fonds"    element={<Autorise code={PAGE_PERMS['/appel-fonds']}><AppelFondsPage /></Autorise>} />
         <Route path="compte-emploi"  element={<Autorise code={PAGE_PERMS['/compte-emploi']}><CompteEmploiPage /></Autorise>} />
+        <Route path="activites"      element={<Autorise code={PAGE_PERMS['/activites']}><SuiviActivitesPage /></Autorise>} />
+        <Route path="controle/pieces"     element={<Autorise code={PAGE_PERMS['/controle/pieces']}><ControlePage /></Autorise>} />
+        <Route path="controle/regularite" element={<Autorise code={PAGE_PERMS['/controle/regularite']}><ControlePage /></Autorise>} />
+        <Route path="controle/arretes"    element={<Autorise code={PAGE_PERMS['/controle/arretes']}><ArretsInventairesPage /></Autorise>} />
+        <Route path="controle/registre"   element={<Autorise code={PAGE_PERMS['/controle/registre']}><RegistreTiersPage /></Autorise>} />
+        <Route path="controle/passerelle" element={<Autorise code={PAGE_PERMS['/controle/passerelle']}><PasserelleTab /></Autorise>} />
         <Route path="config"         element={<Autorise ok={voitConfiguration(user, can)}><ConfigPage /></Autorise>} />
         <Route path="attente"        element={<Autorise code={PAGE_PERMS['/attente']}><AttentePage /></Autorise>} />
         <Route path="tenants"        element={<TenantsPage />} />
         <Route path="permissions"    element={<PermissionsPage />} />
         <Route path="plan-modele"    element={<Autorise ok={user?.role === 'super_admin'}><PlanModelePage /></Autorise>} />
         <Route path="plateforme"     element={<Autorise ok={user?.role === 'super_admin'}><PlateformePage /></Autorise>} />
+        <Route path="validation-directe" element={<Autorise ok={user?.role === 'super_admin'}><ValidationDirectePage /></Autorise>} />
         <Route path="mynjbusiness"   element={<Autorise ok={peutGererProspects(user, can)}><MyNjBusinessPage /></Autorise>} />
         <Route path="prospects"      element={<Autorise ok={peutGererProspects(user, can)}><ProspectsPage /></Autorise>} />
         <Route path="*"              element={<Navigate to="/" replace />} />

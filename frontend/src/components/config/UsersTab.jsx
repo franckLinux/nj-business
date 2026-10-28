@@ -8,7 +8,7 @@ import AffectationsModal from '@/components/AffectationsModal';
 // Reprend loadTabUsers()/openModalUser()/saveUser()/openModalResetPwd()/toggleUser()/deleteUser()
 // de legacy/js/app.js (l. 4774-5170).
 const ROLES_LABELS = {
-  directeur: '👔 Directeur', caissier: '🧾 Caissier(ère)', auditeur: '🔍 Auditeur',
+  directeur: '👔 Directeur', caissier: '🧾 Caissier(ère)', auditeur: '📘 Comptable',
   comptable_cabinet: '📊 Comptable Cabinet', super_admin: '⚙️ Super Admin', commercial: '💼 Commercial',
 };
 const ROLES_COLORS = {
@@ -26,7 +26,13 @@ const ROLES_CABINET = ['comptable_cabinet', 'commercial'];
 export function UserModal({ user, onClose, onSaved }) {
   const isEdit = !!user;
   const { activeTenantId, user: me } = useApp();
-  const rolesBase = (activeTenantId || me?.tenantId) ? ROLES_CLIENT : ROLES_CABINET;
+  // Rôles proposés : ceux que le cabinet autorise pour ce client
+  // (GET /users/roles-attribuables, migration 038 — démo : directeur + caissier
+  // par défaut). En attendant la réponse : règle locale par défaut.
+  const demo = me?.type_compte === 'demo' && !!me?.tenantId;
+  const dansClient = Boolean(activeTenantId || me?.tenantId);
+  const [rolesSrv, setRolesSrv] = useState(null);
+  const rolesBase = rolesSrv || (!dansClient ? ROLES_CABINET : demo ? ['directeur', 'caissier'] : ROLES_CLIENT);
   // En édition, le rôle actuel reste affiché même s'il n'est plus attribuable.
   const rolesCreables = isEdit && !rolesBase.includes(user.role) ? [user.role, ...rolesBase] : rolesBase;
   const [username, setUsername] = useState(user?.username || '');
@@ -42,8 +48,14 @@ export function UserModal({ user, onClose, onSaved }) {
   useEffect(() => {
     let annule = false;
     api.get('/roles').then((r) => { if (!annule) setRoles(Array.isArray(r) ? r : []); });
+    api.get('/users/roles-attribuables').then((r) => {
+      if (annule || !Array.isArray(r?.roles) || r.roles.length === 0) return;
+      setRolesSrv(r.roles);
+      // Nouveau compte : rôle par défaut pris dans la liste autorisée.
+      if (!isEdit) setRole((cur) => (r.roles.includes(cur) ? cur : (r.roles.includes('caissier') ? 'caissier' : r.roles[0])));
+    });
     return () => { annule = true; };
-  }, []);
+  }, [isEdit]);
 
   const onSave = async () => {
     if (!username.trim() || !role) { setErreur('Identifiant et rôle obligatoires.'); return; }
@@ -220,9 +232,37 @@ export default function UsersTab() {
   const canEdit = can('users.edit');
   const canDelete = can('users.delete');
   const showActions = canEdit || canDelete;
+  // Activité / projet obligatoire (039) : exigé par le directeur, personne par personne.
+  const canActivite = can('activites.edit');
+  const [activiteEnCours, setActiviteEnCours] = useState(null);
+  const onActiviteObligatoire = async (u) => {
+    const obligatoire = !u.activite_obligatoire;
+    setActiviteEnCours(u.id);
+    const res = await api.put(`/users/${u.id}/activite-obligatoire`, { obligatoire });
+    setActiviteEnCours(null);
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast(res.message, 'success');
+    charger();
+  };
+  // Rattrapage (saisie antidatée) : accordé par le directeur, personne par personne.
+  const canRattrapage = can('journal.rattrapage_autoriser');
+  const [rattrapageEnCours, setRattrapageEnCours] = useState(null);
+  const onRattrapage = async (u) => {
+    const autorise = !u.rattrapage;
+    if (autorise && !window.confirm(`Autoriser ${u.username} à saisir en rattrapage ?\n\nElle pourra enregistrer des opérations datées AVANT la dernière écriture de la caisse (jamais dans un mois arrêté, ni avant l'ouverture de la caisse). Chaque écriture concernée sera marquée « Rattrapage ».\n\nPensez à retirer l'autorisation une fois le rattrapage terminé.`)) return;
+    setRattrapageEnCours(u.id);
+    const res = await api.put(`/users/${u.id}/rattrapage`, { autorise });
+    setRattrapageEnCours(null);
+    if (res.error) { toast(res.error, 'error'); return; }
+    toast(res.message, 'success');
+    charger();
+  };
   // L'attribution de permissions reste réservée au super_admin (la route
   // POST /users/:id/permissions est la seule à garder un requireRole).
   const isSuperAdmin = me?.role === 'super_admin';
+  // Espace de démonstration : rôles Directeur et Caissier par défaut,
+  // utilisateurs en nombre illimité (le cabinet peut ouvrir d'autres rôles).
+  const demo = me?.type_compte === 'demo' && !!me?.tenantId;
 
   const charger = useCallback(async () => {
     const data = await api.get('/users');
@@ -240,7 +280,7 @@ export default function UsersTab() {
   };
 
   const onDelete = async (id, username) => {
-    if (!window.confirm(`Supprimer définitivement "${username}" ?`)) return;
+    if (!window.confirm(`Supprimer définitivement "${username}" ?\nImpossible s'il a déjà enregistré des opérations : désactivez-le plutôt (⏸).`)) return;
     const res = await api.delete(`/users/${id}`);
     if (res.error) { toast(res.error, 'error'); return; }
     toast('Utilisateur supprimé.', 'success');
@@ -254,13 +294,23 @@ export default function UsersTab() {
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h3 style={{ fontSize: 15, fontWeight: 700 }}>Utilisateurs ({users.length})</h3>
-        {canCreate && <button className="btn-add" onClick={() => setModal('new')}>+ Nouvel utilisateur</button>}
+        {canCreate && (
+          <button className="btn-add" onClick={() => setModal('new')}>+ Nouvel utilisateur</button>
+        )}
       </div>
+      {demo && (
+        <div style={{ background: '#fefce8', border: '1px solid #fde68a', color: '#854d0e', borderRadius: 10, padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>
+          🧪 <b>Démonstration</b> — ajoutez autant d'utilisateurs que nécessaire avec les rôles <b>Directeur</b> et <b>Caissier(ère)</b>.
+          Les autres rôles seront disponibles après souscription.
+        </div>
+      )}
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
               <th>Utilisateur</th><th>Accès système</th><th>Profil métier</th><th>Email</th><th>Dernière connexion</th><th>Statut</th>
+              {canRattrapage && <th title="Saisie d'opérations antidatées">Rattrapage</th>}
+              {canActivite && <th title="Activité / projet obligatoire à chaque saisie">Activité obligatoire</th>}
               {showActions && <th>Actions</th>}
             </tr>
           </thead>
@@ -297,6 +347,63 @@ export default function UsersTab() {
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.email || '—'}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{conn}</td>
                   <td><span className={'statut-badge ' + (u.actif ? 'statut-valide' : 'statut-rejete')}>{u.actif ? '✓ Actif' : '✗ Inactif'}</span></td>
+                  {canRattrapage && (
+                    <td>
+                      {isMe || u.role === 'directeur' || u.role === 'auditeur' ? (
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }} title={u.role === 'auditeur' ? 'Le comptable ne saisit pas en caisse' : 'Inclus dans le rôle'}>
+                          {u.role === 'auditeur' ? '—' : (u.rattrapage ? '✓ Inclus' : '—')}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onRattrapage(u)}
+                          disabled={rattrapageEnCours === u.id}
+                          title={u.rattrapage ? 'Cliquer pour retirer l\'autorisation de saisie antidatée' : 'Cliquer pour autoriser la saisie antidatée (rattrapage)'}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 11px', borderRadius: 20, cursor: 'pointer',
+                            fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+                            border: `1px solid ${u.rattrapage ? '#f59e0b' : 'var(--border)'}`,
+                            background: u.rattrapage ? '#fffbeb' : '#fff', color: u.rattrapage ? '#b45309' : 'var(--text-muted)',
+                          }}
+                        >
+                          <span style={{ width: 26, height: 14, borderRadius: 8, background: u.rattrapage ? '#f59e0b' : '#cbd5e1', position: 'relative', display: 'inline-block', transition: 'background .15s' }}>
+                            <span style={{ position: 'absolute', top: 2, left: u.rattrapage ? 14 : 2, width: 10, height: 10, borderRadius: '50%', background: '#fff', transition: 'left .15s' }} />
+                          </span>
+                          {u.rattrapage ? '⏪ Autorisé' : 'Non autorisé'}
+                        </button>
+                      )}
+                    </td>
+                  )}
+                  {canActivite && (
+                    <td>
+                      {isMe || u.role === 'auditeur' || !u.actif ? (
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}
+                          title={u.role === 'auditeur' ? 'Le comptable ne saisit pas en caisse' : isMe ? 'Réglé par un autre responsable' : 'Compte inactif'}>
+                          {u.activite_obligatoire ? '✓ Obligatoire' : '—'}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onActiviteObligatoire(u)}
+                          disabled={activiteEnCours === u.id}
+                          title={u.activite_obligatoire
+                            ? 'Cliquer pour rendre le choix d\'une activité / d\'un projet facultatif pour cette personne'
+                            : 'Cliquer pour exiger une activité / un projet à chaque opération saisie par cette personne'}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 11px', borderRadius: 20, cursor: 'pointer',
+                            fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+                            border: `1px solid ${u.activite_obligatoire ? '#6366f1' : 'var(--border)'}`,
+                            background: u.activite_obligatoire ? '#eef2ff' : '#fff', color: u.activite_obligatoire ? '#4338ca' : 'var(--text-muted)',
+                          }}
+                        >
+                          <span style={{ width: 26, height: 14, borderRadius: 8, background: u.activite_obligatoire ? '#6366f1' : '#cbd5e1', position: 'relative', display: 'inline-block', transition: 'background .15s' }}>
+                            <span style={{ position: 'absolute', top: 2, left: u.activite_obligatoire ? 14 : 2, width: 10, height: 10, borderRadius: '50%', background: '#fff', transition: 'left .15s' }} />
+                          </span>
+                          {u.activite_obligatoire ? '🎯 Obligatoire' : 'Facultative'}
+                        </button>
+                      )}
+                    </td>
+                  )}
                   {showActions && (
                     <td>
                       <div className="row-actions">

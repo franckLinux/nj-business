@@ -14,6 +14,7 @@
 const { Op } = require('sequelize');
 const { Journal, Mouvement, Ran, AppelFonds, BudgetCaisse, MouvementAttente } = require('../models');
 const notif = require('../services/notification.service');
+const hebdo = require('./budget_hebdo.service');
 
 const MOIS = ['Janvier','Fevrier','Mars','Avril','Mai','Juin',
               'Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
@@ -168,18 +169,32 @@ const verifierPeriodeOuverte = async (tenantId, journalId, mois, annee) => {
 // Ordre chronologique : une nouvelle écriture ne peut pas être datée avant la
 // dernière écriture du même journal. Numéro (ordre d'enregistrement) et date
 // progressent ainsi ensemble, sans antidatage.
-const verifierOrdreChronologique = async (tenantId, journalId, date) => {
-  if (!journalId || !date) return;
+// Renvoie { antidatee: true } quand l'écriture est acceptée EN RATTRAPAGE
+// (date antérieure à la dernière écriture, permis par `journal.rattrapage`).
+const verifierOrdreChronologique = async (tenantId, journalId, date, { rattrapage = false } = {}) => {
+  if (!journalId || !date) return { antidatee: false };
+  // Jour d'ouverture de la caisse (migration 032) : rien ne peut être daté avant.
+  const [ouv] = await Ran.sequelize.query(
+    `SELECT nom, to_jsonb(jx)->>'date_ouverture' AS date_ouverture FROM journaux jx WHERE id = :j AND tenant_id = :t`,
+    { replacements: { t: tenantId, j: journalId }, type: QueryTypes.SELECT });
+  if (ouv?.date_ouverture && String(date).slice(0, 10) < String(ouv.date_ouverture).slice(0, 10)) {
+    const fr = (d) => new Date(`${String(d).slice(0, 10)}T00:00:00`).toLocaleDateString('fr-FR');
+    throw new ErreurComptable(409, `« ${ouv.nom} » a été ouverte le ${fr(ouv.date_ouverture)} : `
+      + 'aucune opération ne peut être datée avant son ouverture.');
+  }
   const [der] = await Ran.sequelize.query(
     `SELECT numero, date FROM journal WHERE tenant_id = :t AND journal_id = :j
       ORDER BY date DESC, numero DESC NULLS LAST LIMIT 1`,
     { replacements: { t: tenantId, j: journalId }, type: QueryTypes.SELECT });
   if (der && String(date).slice(0, 10) < String(der.date).slice(0, 10)) {
+    if (rattrapage) return { antidatee: true };
     const fr = (d) => new Date(`${String(d).slice(0, 10)}T00:00:00`).toLocaleDateString('fr-FR');
     throw new ErreurComptable(409, `Date antérieure à la dernière écriture de ce journal (n°${der.numero} du ${fr(der.date)}) : `
       + 'les écritures se saisissent dans l\'ordre chronologique. Datez l\'opération au '
-      + `${fr(der.date)} ou après, en précisant la date réelle dans l'objet si besoin.`);
+      + `${fr(der.date)} ou après, en précisant la date réelle dans l'objet si besoin — `
+      + 'ou demandez au directeur l\'autorisation de saisir en rattrapage.');
   }
+  return { antidatee: false };
 };
 
 // Espèces, mobile money, carte : le solde ne peut jamais devenir négatif, ni
@@ -294,14 +309,15 @@ const mettreEnAttente = async ({ tenantId, userId, username }, m, motif, snap) =
     tenant_id: tenantId, date: m.date, mois: m.mois, annee: m.annee,
     journal_id: m.journal_id, type_caisse: m.type_caisse, rubrique_code: m.rubrique_code,
     intitule: m.intitule, objet: m.objet || '', beneficiaire: m.beneficiaire || '',
-    piece_identite: m.piece_identite || '', telephone: m.telephone || '',
+    piece_identite: m.piece_identite || '', telephone: m.telephone || '', nui: String(m.nui || '').slice(0, 30),
+    activite_id: m.activite_id || null,
     sortie: m.sortie, motif_attente: motif,
     montant_prevu: snap.montant_prevu || 0, cumul_sorties: snap.cumul || 0,
     created_by: userId,
   });
   // Notification directeur — best-effort, ne bloque jamais la réponse au caissier
   notif.notifyMouvementEnAttente({
-    tenantId, mouvement: row, caissierNom: username,
+    tenantId, mouvement: row, caissierNom: username, semaine: snap.semaine || null,
   }).catch(e => console.warn('[Journal] notif attente :', e.message));
   return row;
 };
@@ -313,13 +329,40 @@ const mettreEnAttente = async ({ tenantId, userId, username }, m, motif, snap) =
 // le mois M (mois_applic), dès que leur mois de saisie est « valide ».
 // Repli : anciennes demandes de fonds (table appel_fonds) approuvées.
 // Renvoie { valide, source, parRubrique: Map(code → montant), saisie: {mois, annee} | null }.
-const budgetApprouve = async (tenantId, mois, annee) => {
+//
+// Budget hebdomadaire (040) — option `semaine` = k : budget approuvé CUMULÉ
+// des semaines 1..k du mois (seules les semaines validées comptent ; le non
+// dépensé d'une semaine se reporte sur les suivantes, jamais sur le mois
+// suivant). `valide` = la semaine k elle-même est validée.
+const budgetApprouve = async (tenantId, mois, annee, { semaine = null } = {}) => {
   const seq = Mouvement.sequelize;
+  if (semaine) {
+    const k = Number(semaine);
+    const [rows, [v]] = await Promise.all([
+      seq.query(`
+        SELECT b.rubrique_code, SUM(b.montant) AS montant
+          FROM budget b
+          JOIN budget_validation v ON v.tenant_id = b.tenant_id AND v.mois = b.mois AND v.annee = b.annee
+                                  AND v.semaine = b.semaine AND v.statut = 'valide'
+         WHERE b.tenant_id = :t AND b.mois_applic = :m AND b.annee_applic = :a AND b.semaine BETWEEN 1 AND :k
+         GROUP BY b.rubrique_code`,
+      { replacements: { t: tenantId, m: mois, a: Number(annee), k }, type: QueryTypes.SELECT }),
+      seq.query(`SELECT 1 AS ok FROM budget_validation
+                  WHERE tenant_id = :t AND mois = :m AND annee = :a AND semaine = :k AND statut = 'valide'`,
+      { replacements: { t: tenantId, m: mois, a: Number(annee), k }, type: QueryTypes.SELECT }),
+    ]);
+    return {
+      valide: Boolean(v), source: 'demande_de_fonds_hebdo', semaine: k,
+      parRubrique: new Map(rows.map((r) => [r.rubrique_code, parseFloat(r.montant) || 0])),
+      saisie: { mois, annee: Number(annee), semaine: k },
+    };
+  }
   const rows = await seq.query(`
     SELECT b.rubrique_code, SUM(b.montant) AS montant, MIN(b.mois) AS mois_saisie, MIN(b.annee) AS annee_saisie
       FROM budget b
       JOIN budget_validation v ON v.tenant_id = b.tenant_id AND v.mois = b.mois AND v.annee = b.annee AND v.statut = 'valide'
-     WHERE b.tenant_id = :t AND b.mois_applic = :m AND b.annee_applic = :a
+                              AND v.semaine IS NULL
+     WHERE b.tenant_id = :t AND b.mois_applic = :m AND b.annee_applic = :a AND b.semaine IS NULL
      GROUP BY b.rubrique_code`,
   { replacements: { t: tenantId, m: mois, a: Number(annee) }, type: QueryTypes.SELECT });
   if (rows.length) {
@@ -367,6 +410,11 @@ const controleBudgetSortie = async (tenantId, p) => {
     { replacements: { t: tenantId, c: p.rubrique_code }, type: QueryTypes.SELECT });
   if (rub && rub.est_virement_interne) {
     return { bloque: false, motif: null, montant_prevu: 0, cumul: 0, plafond: 0, warning: null };
+  }
+
+  // Budget hebdomadaire (040) : contrôle cumulé des semaines 1..k du mois.
+  if (await hebdo.estHebdo(tenantId, p.mois, an)) {
+    return controleBudgetSortieHebdo(tenantId, { ...p, jid, an, montant, exclId: hasExcl ? exclId : null });
   }
 
   const [budget, srVal] = await Promise.all([
@@ -436,6 +484,98 @@ const controleBudgetSortie = async (tenantId, p) => {
   return { bloque: false, motif: null, montant_prevu: approuve, cumul: sr, plafond, warning };
 };
 
+// ── Contrôle d'une SORTIE pour un client au budget HEBDOMADAIRE (040) ─────
+// Semaine k = semaine (dans son mois) de la DATE de l'écriture.
+//   1. semaine k non validée                         → attente (semaine_non_validee)
+//   2. rubrique sans budget approuvé sur S1..k        → attente (rubrique_non_approuvee)
+//   3. sorties de la rubrique depuis le 1er (≤ fin Sk) + montant > approuvé cumulé
+//                                                     → attente (depassement_rubrique)
+//   4. plafond de caisse cumulé S1..k dépassé         → attente (depassement_journal)
+// Le report du non-dépensé est donc automatique à l'intérieur du mois.
+const controleBudgetSortieHebdo = async (tenantId, p) => {
+  const fmt = (n) => (parseFloat(n) || 0).toLocaleString('fr-FR');
+  if (!p.date) throw new Error('Date de l\'écriture requise pour le contrôle hebdomadaire.');
+  const sem = hebdo.semaineDeDate(p.date);
+  const k = sem.semaine;
+  const debutMois = `${String(p.date).slice(0, 8)}01`;
+  const periode = { [Op.between]: [debutMois, sem.fin] };
+  const lib = `la semaine ${k} (du ${sem.debut.slice(8)} au ${sem.fin.slice(8)} ${p.mois})`;
+
+  const whereR = { tenant_id: tenantId, mois: p.mois, annee: p.an, rubrique_code: p.rubrique_code, date: periode };
+  if (p.exclId !== null && p.exclId !== undefined) whereR.id = { [Op.ne]: p.exclId };
+  const [budget, srVal] = await Promise.all([
+    budgetApprouve(tenantId, p.mois, p.an, { semaine: k }),
+    Mouvement.sum('sortie', { where: whereR }),
+  ]);
+  const approuve = budget.parRubrique.get(p.rubrique_code) || 0;
+  const sr = srVal || 0;
+
+  let plafond = 0;
+  let sj = 0;
+  if (p.jid) {
+    const whereJ = { tenant_id: tenantId, journal_id: p.jid, mois: p.mois, annee: p.an, date: periode };
+    if (p.exclId !== null && p.exclId !== undefined) whereJ.id = { [Op.ne]: p.exclId };
+    sj = (await Mouvement.sum('sortie', { where: whereJ })) || 0;
+    try {
+      plafond = (await BudgetCaisse.sum('montant', {
+        where: { tenant_id: tenantId, journal_id: p.jid, mois: p.mois, annee: p.an, semaine: { [Op.between]: [1, k] } },
+      })) || 0;
+    } catch (plafondErr) {
+      console.warn('[Journal] plafond budget_caisse (hebdo) ignoré :', plafondErr.message);
+      plafond = 0;
+    }
+  }
+
+  if (!budget.valide) {
+    return { bloque: true, motif: 'semaine_non_validee', montant_prevu: 0, cumul: sr, plafond, semaine: k,
+      message: `la demande de fonds de ${lib} n'est pas encore validée par le directeur. Sortie mise en attente : le directeur doit l'autoriser.` };
+  }
+  if (approuve <= 0) {
+    return { bloque: true, motif: 'rubrique_non_approuvee', montant_prevu: 0, cumul: sr, plafond, semaine: k,
+      message: `la rubrique "${p.rubrique_code}" n'a pas de budget approuvé jusqu'à ${lib}. Sortie mise en attente : le directeur doit l'autoriser.` };
+  }
+  const apresR = sr + p.montant;
+  if (apresR > approuve) {
+    return { bloque: true, motif: 'depassement_rubrique', montant_prevu: approuve, cumul: sr, plafond, semaine: k,
+      message: `la rubrique "${p.rubrique_code}" dépasse de ${fmt(apresR - approuve)} FCFA le budget approuvé cumulé jusqu'à ${lib} (${fmt(approuve)} FCFA). Sortie mise en attente : autorisation du directeur requise.` };
+  }
+  let warning = null;
+  const tauxR = Math.round((apresR / approuve) * 100);
+  if (tauxR >= 80) warning = { type: 'rubrique', taux: tauxR, restant: approuve - apresR, rubrique_code: p.rubrique_code, semaine: k,
+    message: `${tauxR >= 95 ? '🔴' : '🟡'} Rubrique ${p.rubrique_code} : ${tauxR}% du budget cumulé jusqu'à la semaine ${k} — reste ${fmt(approuve - apresR)} FCFA.` };
+  if (plafond > 0) {
+    const apres = sj + p.montant;
+    if (apres > plafond) {
+      return { bloque: true, motif: 'depassement_journal', montant_prevu: plafond, cumul: sj, plafond, semaine: k,
+        message: `le plafond de caisse cumulé jusqu'à ${lib} est dépassé de ${fmt(apres - plafond)} FCFA. Sortie mise en attente : autorisation du directeur requise.` };
+    }
+    const taux = Math.round((apres / plafond) * 100);
+    if (taux >= 80 && !warning) warning = { type: 'journal', taux, restant: plafond - apres, semaine: k,
+      message: `${taux >= 95 ? '🔴' : '🟡'} Plafond caisse : ${taux}% consommé jusqu'à la semaine ${k} — reste ${fmt(plafond - apres)} FCFA.` };
+  }
+  return { bloque: false, motif: null, montant_prevu: approuve, cumul: sr, plafond, semaine: k, warning };
+};
+
+// ── Disponible d'une rubrique à une date (affichage à la saisie) ─────────
+// Même calcul que le contrôle, sans le montant saisi.
+const disponibleRubrique = async (tenantId, { date, mois, annee, journal_id, rubrique_code }) => {
+  const an = Number(annee);
+  const hebdoMois = await hebdo.estHebdo(tenantId, mois, an);
+  const sem = hebdoMois ? hebdo.semaineDeDate(date) : null;
+  const where = { tenant_id: tenantId, mois, annee: an, rubrique_code,
+    ...(sem ? { date: { [Op.between]: [`${String(date).slice(0, 8)}01`, sem.fin] } } : {}) };
+  const [budget, sr] = await Promise.all([
+    budgetApprouve(tenantId, mois, an, sem ? { semaine: sem.semaine } : {}),
+    Mouvement.sum('sortie', { where }),
+  ]);
+  const approuve = budget.parRubrique.get(rubrique_code) || 0;
+  return {
+    periodicite: hebdoMois ? 'hebdomadaire' : 'mensuel',
+    semaine: sem ? sem.semaine : null, libelle: sem ? sem.libelle : `${mois} ${an}`,
+    valide: budget.valide, approuve, consomme: sr || 0, reste: approuve - (sr || 0), journal_id: journal_id || null,
+  };
+};
+
 // ── Situation du mois de plusieurs journaux (lecture seule) ─────────────
 // RAN + entrées − sorties, calculé EXACTEMENT comme la page du journal :
 // RAN saisi/enregistré s'il existe, sinon report du solde du mois précédent.
@@ -475,5 +615,5 @@ module.exports = {
   ErreurComptable, cle, SQL_CLE, filtreOuverture,
   MOIS, moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
   typeCaisseDuJournal, enregistrerRan,
-  mettreEnAttente, controleBudgetSortie,
+  mettreEnAttente, controleBudgetSortie, controleBudgetSortieHebdo, disponibleRubrique,
 };

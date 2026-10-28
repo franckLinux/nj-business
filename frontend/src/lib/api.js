@@ -66,6 +66,11 @@ const request = async (method, url, body) => {
     if (res.status === 403 && out?.code === 'SUPPORT_REQUIS' && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('support-requis', { detail: { tenantId: out.tenant_id } }));
     }
+    // NJ BUSINESS (048) : module désactivé pour l'espace. AppContext relit les
+    // modules et App ramène l'utilisateur à l'accueil NJ BUSINESS.
+    if (res.status === 403 && out?.code === 'MODULE_INACTIF' && authToken && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('module-inactif', { detail: { module: out.module } }));
+    }
     // Démonstration expirée (contrôle serveur) : AppContext ferme la session
     // et la page de connexion affiche le message.
     if (res.status === 403 && out?.code === 'DEMO_EXPIREE' && authToken && typeof window !== 'undefined') {
@@ -77,7 +82,25 @@ const request = async (method, url, body) => {
   }
 };
 
+// Fichier protégé (ex. PV scanné, 046) : lu avec le jeton, jamais par une URL publique.
+// Renvoie { blob, type } ou { error }.
+const fichier = async (url) => {
+  let res;
+  try {
+    res = await fetch(API + url, { headers: headers() });
+  } catch {
+    return { error: 'Connexion au serveur impossible.' };
+  }
+  if (res.status === 401 && onUnauthorized) onUnauthorized();
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    try { const j = JSON.parse(t); return { error: j.message || j.error || `Erreur ${res.status}` }; } catch { return { error: `Erreur ${res.status}` }; }
+  }
+  return { blob: await res.blob(), type: res.headers.get('content-type') || '' };
+};
+
 export const api = {
+  fichier,
   get:    (url)       => request('GET', url),
   post:   (url, body) => request('POST', url, body ?? {}),
   put:    (url, body) => request('PUT', url, body ?? {}),

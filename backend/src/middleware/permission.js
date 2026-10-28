@@ -33,4 +33,20 @@ const requirePermission = (code) => async (req, res, next) => {
   }
 };
 
-module.exports = { requirePermission };
+// Au moins une des permissions (ex. saisie des prévisions : budget.edit OU
+// previsions.edit). Les contrôles métier restent dans le contrôleur.
+const requireAnyPermission = (...codes) => async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Non authentifié.' });
+  try {
+    const accordees = await resoudre(req);
+    if (accordees !== null && !codes.some((c) => accordees.includes(c))) {
+      return res.status(403).json({ error: `Permission requise : ${codes.join(' ou ')}.` });
+    }
+    next();
+  } catch (err) {
+    console.error('[Permission] vérification échouée :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+
+module.exports = { requirePermission, requireAnyPermission };

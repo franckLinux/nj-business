@@ -6,6 +6,7 @@ module.exports = (sequelize, DataTypes) => {
     tenant_id: { type: DataTypes.UUID, allowNull: false },
     mois: { type: DataTypes.TEXT, allowNull: false },
     annee: { type: DataTypes.INTEGER, allowNull: false },
+    semaine: DataTypes.SMALLINT,   // migration 040 : NULL = mensuel, 1..6 = semaine du mois
     statut: {
       type: DataTypes.TEXT,
       allowNull: false,

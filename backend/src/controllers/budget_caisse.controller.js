@@ -4,6 +4,7 @@ const { Op } = require('sequelize');
 const { sequelize, BudgetCaisse, DemandeDepassement, Mouvement, Journal, User, Tenant } = require('../models');
 const { sendDepassementAlert } = require('../services/email.service');
 const { usersAvecPermission } = require('../services/permission.service');
+const hebdo = require('../services/budget_hebdo.service');
 
 // ── GET /api/budget-caisse?journal_id=&mois=&annee= ──────────────────────
 const getBudgetCaisse = async (req, res) => {
@@ -14,13 +15,28 @@ const getBudgetCaisse = async (req, res) => {
   try {
     const jid = parseInt(journal_id, 10);
     const an  = parseInt(annee, 10);
+    // Budget hebdomadaire (040) : plafond de la semaine, sorties datées dans la semaine.
+    // Sans semaine précisée (carte du journal) : semaine du jour si elle est
+    // dans ce mois, sinon la première.
+    let semaine;
+    if ((req.query.semaine === undefined || req.query.semaine === '') && await hebdo.estHebdo(req.tenantId, mois, an)) {
+      const auj = new Date();
+      const iso = `${auj.getFullYear()}-${String(auj.getMonth() + 1).padStart(2, '0')}-${String(auj.getDate()).padStart(2, '0')}`;
+      const s = hebdo.semaineDeDate(iso);
+      semaine = s.mois === hebdo.MOIS[hebdo.indexMois(mois)] && s.annee === an ? s.semaine : 1;
+    } else {
+      semaine = await hebdo.exigerSemaine(req.tenantId, mois, an, req.query.semaine);
+    }
+    const bornes = semaine ? hebdo.semainesDuMois(mois, an).find((x) => x.num === semaine) : null;
+    const filtreSorties = { tenant_id: req.tenantId, journal_id: jid, mois, annee: an,
+      ...(bornes ? { date: { [Op.between]: [bornes.debut, bornes.fin] } } : {}) };
     const [bc, sortiesVal, depNb, depTotal] = await Promise.all([
       BudgetCaisse.findOne({
-        where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an },
+        where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an, semaine },
         include: [{ model: User, attributes: ['username'], required: false }],
       }),
-      // Sorties réelles du mois (hors demandes en attente)
-      Mouvement.sum('sortie', { where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an } }),
+      // Sorties réelles de la période (hors demandes en attente)
+      Mouvement.sum('sortie', { where: filtreSorties }),
       // Demandes de dépassement en attente (sorties bloquées)
       DemandeDepassement.count({ where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an, statut: 'en_attente' } }),
       DemandeDepassement.sum('sortie', { where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an, statut: 'en_attente' } }),
@@ -46,9 +62,11 @@ const getBudgetCaisse = async (req, res) => {
     const { User: setParUser, ...rest } = bc.toJSON();
     res.json({
       ...rest, set_par_nom: setParUser ? setParUser.username : null,
+      libelle_periode: bornes ? `${bornes.libelle} — ${mois} ${an}` : `${mois} ${an}`,
       sorties_actuelles, taux_consommation, restant, alerte, en_attente_nb, en_attente_montant,
     });
   } catch (err) {
+    if (err instanceof hebdo.ErreurMetier) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
@@ -60,9 +78,10 @@ const setBudgetCaisse = async (req, res) => {
     return res.status(400).json({ error: 'journal_id, mois et annee requis.' });
   }
   try {
+    const semaine = await hebdo.exigerSemaine(req.tenantId, mois, parseInt(annee, 10), req.body.semaine);
     const budget = await sequelize.transaction(async (t) => {
       const [row] = await BudgetCaisse.findOrCreate({
-        where: { tenant_id: req.tenantId, journal_id: parseInt(journal_id, 10), mois, annee: parseInt(annee, 10) },
+        where: { tenant_id: req.tenantId, journal_id: parseInt(journal_id, 10), mois, annee: parseInt(annee, 10), semaine },
         defaults: {},
         transaction: t, lock: t.LOCK.UPDATE,
       });
@@ -74,6 +93,7 @@ const setBudgetCaisse = async (req, res) => {
     });
     res.json(budget);
   } catch (err) {
+    if (err instanceof hebdo.ErreurMetier) return res.status(err.status).json({ error: err.message });
     console.error('[BudgetCaisse] setBudgetCaisse :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }
@@ -83,11 +103,13 @@ const setBudgetCaisse = async (req, res) => {
 const deleteBudgetCaisse = async (req, res) => {
   const { journal_id, mois, annee } = req.query;
   try {
+    const semaine = await hebdo.exigerSemaine(req.tenantId, mois, parseInt(annee, 10), req.query.semaine);
     await BudgetCaisse.destroy({
-      where: { tenant_id: req.tenantId, journal_id: parseInt(journal_id, 10), mois, annee: parseInt(annee, 10) },
+      where: { tenant_id: req.tenantId, journal_id: parseInt(journal_id, 10), mois, annee: parseInt(annee, 10), semaine },
     });
     res.json({ message: 'Budget supprimé.' });
   } catch (err) {
+    if (err instanceof hebdo.ErreurMetier) return res.status(err.status).json({ error: err.message });
     res.status(500).json({ error: 'Erreur serveur.' });
   }
 };

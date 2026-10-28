@@ -4,6 +4,8 @@ const nodemailer = require('nodemailer');
 const createTransporter = () => {
   if (!process.env.SMTP_HOST) return null;
   return nodemailer.createTransport({
+    // Délais bornés : un SMTP injoignable ne doit pas laisser l'envoi pendre en silence.
+    connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000,
     host:   process.env.SMTP_HOST,
     port:   parseInt(process.env.SMTP_PORT || '587'),
     secure: process.env.SMTP_SECURE === 'true',
@@ -186,11 +188,27 @@ const sendMouvementAttenteAlert = async (o) => {
   }
 
   const fmtN = n => (parseFloat(n) || 0).toLocaleString('fr-FR') + ' FCFA';
-  const estDepassement = o.motif === 'depassement_rubrique';
-  const titre  = estDepassement ? 'Montant prévu dépassé' : 'Budget du mois non validé';
-  const raison = estDepassement
-    ? `Le cumul des sorties de la rubrique <strong>${o.rubriqueCode}</strong> dépasse le montant prévu dans la demande de fonds.`
-    : `Le budget de <strong>${o.mois} ${o.annee}</strong> n'est pas encore validé dans la demande de fonds.`;
+  // Valeurs saisies par l'utilisateur : échappées avant insertion dans le HTML.
+  o = { ...o, rubriqueCode: echapper(o.rubriqueCode), intitule: echapper(o.intitule),
+        beneficiaire: echapper(o.beneficiaire), caissierNom: echapper(o.caissierNom),
+        dirNom: echapper(o.dirNom), tenantNom: echapper(o.tenantNom) };
+  // Un texte par motif de blocage, y compris ceux de la réforme hebdomadaire.
+  const estDepassement = o.motif === 'depassement_rubrique' || o.motif === 'depassement_journal';
+  const periode = o.semaine ? `la semaine ${o.semaine} de ${o.mois} ${o.annee}` : `${o.mois} ${o.annee}`;
+  const MOTIFS = {
+    depassement_rubrique:   ['Montant prévu dépassé',
+      `Le cumul des sorties de la rubrique <strong>${o.rubriqueCode}</strong> dépasse le montant prévu dans la demande de fonds.`],
+    depassement_journal:    ['Plafond du journal dépassé',
+      `Cette sortie ferait dépasser le plafond de sorties du journal pour <strong>${periode}</strong>.`],
+    rubrique_non_approuvee: ['Rubrique non prévue au budget',
+      `La rubrique <strong>${o.rubriqueCode}</strong> ne figure pas dans le budget approuvé de <strong>${periode}</strong>.`],
+    semaine_non_validee:    ['Budget de la semaine non validé',
+      `Le budget de <strong>${periode}</strong> n'est pas encore validé dans la demande de fonds.`],
+    mois_non_valide:        ['Budget du mois non validé',
+      `Le budget de <strong>${o.mois} ${o.annee}</strong> n'est pas encore validé dans la demande de fonds.`],
+  };
+  const [titre, raison] = MOTIFS[o.motif] || ['Autorisation requise',
+    `Cette sortie de <strong>${periode}</strong> nécessite votre autorisation.`];
 
   const depassementRow = estDepassement ? `
         <tr><td>Montant prévu</td><td>${fmtN(o.montantPrevu)}</td></tr>
@@ -262,7 +280,7 @@ const sendMouvementAttenteAlert = async (o) => {
     await transporter.sendMail({
       from:    `"CaissePro — ${o.tenantNom}" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
       to:      o.dirEmail,
-      subject: `⏳ Dépense en attente — ${o.rubriqueCode} (${o.mois} ${o.annee})`,
+      subject: `⏳ Dépense en attente — ${o.rubriqueCode} (${o.semaine ? `S${o.semaine} ` : ''}${o.mois} ${o.annee})`,
       html,
     });
     console.log(`[Email] Alerte attente envoyée à ${o.dirEmail}`);
@@ -271,6 +289,14 @@ const sendMouvementAttenteAlert = async (o) => {
     console.error('[Email] Erreur envoi (attente) :', err.message);
     return { sent: false, reason: err.message };
   }
+};
+
+// Diagnostic : la connexion et l'authentification SMTP fonctionnent-elles ?
+const verifierSmtp = async () => {
+  const transporter = createTransporter();
+  if (!transporter) return { ok: false, reason: 'SMTP_HOST vide dans le .env' };
+  try { await transporter.verify(); return { ok: true }; }
+  catch (err) { return { ok: false, reason: err.message }; }
 };
 
 // ── Prospects / démonstration (réforme prospects) ─────────────────────────
@@ -304,7 +330,33 @@ const envoyer = async ({ to, subject, html }) => {
   }
 };
 
-const contenuInvitation = ({ nom, lien, debut, fin, contact }) => ({
+// Encadré « catalogue des formations » : lien de téléchargement hébergé sur le
+// site du cabinet (CATALOGUE_FORMATIONS_URL). Absent si l'adresse n'est pas
+// configurée ou n'est pas une URL http(s).
+const urlSure = (u) => /^https?:\/\/[^\s"'<>]+$/i.test(String(u || ''));
+const blocCatalogue = (url, site) => {
+  if (!urlSure(url)) return '';
+  const cabinet = process.env.CABINET_NAME || 'du cabinet';
+  const titre = process.env.CATALOGUE_FORMATIONS_TITRE || 'Catalogue des formations 2027';
+  return `
+    <div style="margin:24px 0;border:1px solid #c7d2fe;border-radius:10px;overflow:hidden">
+      <div style="background:#0000F0;color:white;padding:10px 16px;font-weight:bold;font-size:14px">📘 ${echapper(titre)} — ${echapper(cabinet)}</div>
+      <div style="padding:14px 16px;background:#f5f7ff">
+        <p style="margin:0 0 12px">En complément de votre démonstration, découvrez nos formations pour dirigeants,
+           responsables financiers et équipes comptables — management et finance, comptabilité, juridique et fiscal :
+           programmes, calendrier, fiches techniques, coûts et durées.</p>
+        <p style="text-align:center;margin:0">
+          <a href="${echapper(url)}" style="background:#0000F0;color:white;padding:10px 22px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">Télécharger le catalogue (PDF)</a>
+        </p>
+        ${urlSure(site) ? `<p style="text-align:center;margin:12px 0 0;font-size:13px">
+          <a href="${echapper(site)}" style="color:#0000F0;font-weight:bold;text-decoration:underline">Voir nos formations sur le site du cabinet →</a>
+        </p>` : ''}
+        <p style="margin:10px 0 0;font-size:11px;color:#64748b;word-break:break-all">Lien direct du catalogue : ${echapper(url)}${urlSure(site) ? `<br>Site du cabinet : ${echapper(site)}` : ''}</p>
+      </div>
+    </div>`;
+};
+
+const contenuInvitation = ({ nom, lien, debut, fin, contact, catalogue, siteFormations }) => ({
   subject: `Votre accès de démonstration à ${process.env.APP_NAME || 'NJ Caisse Pro'}`,
   html: gabarit('Accès de démonstration', `
     <p>Bonjour ${echapper(nom)},</p>
@@ -318,8 +370,9 @@ const contenuInvitation = ({ nom, lien, debut, fin, contact }) => ({
     <p><strong>Période de démonstration :</strong> du ${dateFr(debut)} au ${dateFr(fin)}.</p>
     <p><strong>Disponible :</strong> caisses et journaux, saisie des mouvements, report à nouveau, budgets et prévisions,
        appels de fonds, tableau de bord, rapports, plan comptable OHADA de démonstration.</p>
-    <p><strong>Limites :</strong> espace de test isolé, 2 utilisateurs maximum, aucune donnée réelle ; l'accès se ferme
+    <p><strong>Limites :</strong> espace de test isolé, rôles Directeur et Caissier (autant d'utilisateurs que nécessaire), aucune donnée réelle ; l'accès se ferme
        automatiquement à la fin de la période.</p>
+    ${blocCatalogue(catalogue, siteFormations)}
     ${contact ? `<p>Contact : ${echapper(contact)}</p>` : ''}
     <p style="font-size:12px;color:#64748b">Si le bouton ne fonctionne pas, copiez ce lien : ${echapper(lien)}</p>`),
 });
@@ -354,6 +407,25 @@ const sendBienvenueClient = ({ to, nom, client, forfait, debut, fin, compteTrans
     .replace(/Compte de DÉMONSTRATION — données fictives, ne pas y saisir de données réelles\./, ''),
 });
 
+// Réinitialisation du mot de passe (C9) — gabarit sobre, sans la mention démo.
+const sendReinitialisationMotDePasse = ({ to, nom, lien }) => {
+  const app = echapper(process.env.APP_NAME || 'NJ Caisse Pro');
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/></head>
+<body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:0">
+<div style="max-width:600px;margin:30px auto;background:white;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
+  <div style="background:#1a2b4a;padding:22px 30px;text-align:center"><h1 style="color:white;margin:0;font-size:20px">${app}</h1>
+  <p style="color:rgba(255,255,255,.7);margin:6px 0 0;font-size:13px">Réinitialisation du mot de passe</p></div>
+  <div style="padding:26px 30px;font-size:14px;color:#1e293b;line-height:1.6">
+    <p>Bonjour ${echapper(nom)},</p>
+    <p>Une demande de réinitialisation du mot de passe de votre compte a été faite. Pour choisir un nouveau mot de passe, cliquez sur le bouton ci-dessous. Le lien est valable <b>1 heure</b> et ne fonctionne qu'une fois.</p>
+    <p style="text-align:center;margin:26px 0"><a href="${echapper(lien)}" style="background:#1f5fd1;color:white;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold">Choisir un nouveau mot de passe</a></p>
+    <p style="font-size:12px;color:#64748b">Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe actuel reste valable.</p>
+  </div></div></body></html>`;
+  return envoyer({ to, subject: `${process.env.APP_NAME || 'NJ Caisse Pro'} — réinitialisation de votre mot de passe`, html });
+};
+
 module.exports = {
+  verifierSmtp,
+  sendReinitialisationMotDePasse,
   sendBienvenueClient,
   sendInvitationDemo, sendRappelDemo, sendNotificationAdmin, contenuInvitation, sendDepassementAlert, sendMouvementAttenteAlert };

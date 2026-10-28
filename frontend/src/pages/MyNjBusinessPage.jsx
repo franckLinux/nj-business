@@ -26,7 +26,7 @@ const STATUT_DETAIL = {
   PAIEMENT_EN_ATTENTE: 'Paiement en attente', DEMO_ANNULEE: 'Démo annulée', PROSPECT_ABANDONNE: 'Abandonné',
 };
 const ACTIONS_HIST = {
-  CREATION: 'Prospect créé', DEMANDE_WEB: 'Demande reçue (site web)', NOUVELLE_DEMANDE_WEB: 'Nouvelle demande (site web)',
+  CREATION: 'Prospect créé', DEMANDE_WEB: 'Demande reçue (site web)', DEMANDE_WEB_VALIDEE_PAR_CODE: 'Demande validée sur place par le commercial (code)', NOUVELLE_DEMANDE_WEB: 'Nouvelle demande (site web)',
   APPEL: 'Appel effectué', WHATSAPP: 'Message WhatsApp', NOTE: 'Note', RELANCE_PROGRAMMEE: 'Relance programmée',
   RELANCE_TERMINEE: 'Relance faite', CHANGEMENT_STATUT: 'Changement d\'étape', ATTRIBUTION: 'Commercial attribué',
   INVITATION_CREEE: 'Accès démo envoyé', INVITATION_RENVOYEE: 'Accès démo renvoyé', ACTIVATION: 'Démo activée',

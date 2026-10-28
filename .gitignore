@@ -23,3 +23,12 @@ backend/uploads/*
 
 # Copies de la base de production (données clients) — jamais commitées
 sauvegardes/
+
+# PV scannés des arrêtés / inventaires (046) : stockage privé, jamais commité
+backend/prive/
+
+# Livrables, documents et captures produits par Claude (hors code) — jamais commités
+Claude outputs/
+
+# Corbeille de rangement : à vider à la main après vérification
+_to_delete/

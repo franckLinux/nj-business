@@ -11,8 +11,8 @@
 // cache-first : une fois « / » en cache, le navigateur gardait l'ancien
 // index.html — donc l'ancien bundle JS — indéfiniment, et aucun déploiement
 // n'apparaissait chez les utilisateurs. Changer de nom de cache purge tout.
-const CACHE_STATIC  = 'nj-caisse-pro-static-v5';
-const CACHE_DYNAMIC = 'nj-caisse-pro-dynamic-v5';
+const CACHE_STATIC  = 'nj-caisse-pro-static-v41';   // v41 : catalogue des modules (DSF, REVIS, CG) ; v40 : suppression d'un client (plateforme) ; v39 : passerelle interactive ; v38 : bouton Rafraîchir ; v37 : NJ BUSINESS (accueil, modules, logo)
+const CACHE_DYNAMIC = 'nj-caisse-pro-dynamic-v41';
 
 const APP_SHELL = ['/', '/manifest.json'];
 

@@ -26,7 +26,7 @@ const ACTIONS = {
   CREATION: 'Création', MODIFICATION: 'Modification', INVITATION_CREEE: 'Accès de démo créé', INVITATION_RENVOYEE: 'Accès renvoyé',
   EMAIL_ENVOYE: 'E-mail envoyé', EMAIL_RENVOYE: 'E-mail renvoyé', EMAIL_NON_ENVOYE: 'E-mail non envoyé', EMAIL_ADRESSE_INVALIDE: 'Adresse e-mail invalide',
   ACTIVATION: 'Compte activé par le prospect', PROLONGATION: 'Prolongation', EXPIRATION_AUTOMATIQUE: 'Expiration automatique',
-  CHANGEMENT_STATUT: 'Changement de statut', DEMANDE_WEB: 'Demande reçue par le formulaire web',
+  CHANGEMENT_STATUT: 'Changement de statut', DEMANDE_WEB: 'Demande reçue par le formulaire web', DEMANDE_WEB_VALIDEE_PAR_CODE: 'Demande validée sur place par le commercial (code)',
   NOUVELLE_DEMANDE_WEB: 'Nouvelle demande via le formulaire web', PAIEMENT_ENREGISTRE: 'Paiement enregistré',
   PAIEMENT_RECU: 'Réception du paiement confirmée', PAIEMENT_ANNULE: 'Paiement annulé', CONVERSION: 'Conversion en client', RAPPEL_AVANT: 'Rappel avant échéance', RAPPEL_JOUR: 'Rappel jour d\'échéance', RAPPEL_APRES: 'Rappel après échéance',
 };
@@ -75,10 +75,12 @@ function ResultatEnvoi({ r }) {
 }
 
 // ── Formulaire (création / modification) ──────────────────────────────────
+const DUREE_ESSAI_JOURS = 30;
 const VIDE = () => ({
   nom_complet: '', entreprise: '', email: '', telephone: '', pays: 'Cameroun', ville: '', secteur: '', type_entreprise: '',
   nb_utilisateurs: '', nb_points_vente: '', besoins: '', forfait_envisage: '', notes: '', source: '',
-  demo_debut: versInput(new Date()), demo_fin: versInput(new Date(Date.now() + 14 * 864e5)),
+  // Essai de 30 jours par défaut (modifiable dans le formulaire).
+  demo_debut: versInput(new Date()), demo_fin: versInput(new Date(Date.now() + DUREE_ESSAI_JOURS * 864e5)),
 });
 
 function ChampsProspect({ f, set, datesModifiables, emailModifiable }) {
@@ -192,6 +194,9 @@ function NouveauProspect({ onClose, onCree }) {
 // ── Détail d'un prospect ───────────────────────────────────────────────────
 function DetailProspect({ id, envoiInitial, onClose, onChange }) {
   const toast = useToast();
+  const { user } = useApp();
+  const estSuperAdmin = user?.role === 'super_admin';
+  const [supp, setSupp] = useState(null);     // { motif, confirme } — Super Admin
   const [d, setD] = useState(null);
   const [f, setF] = useState(null);
   const [onglet, setOnglet] = useState('infos');
@@ -246,6 +251,17 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
     const r = await api.post(`/prospects/${id}/statut`, chg);
     if (r.error) { setErreur(r.error); return; }
     setChg(null); apres('Statut mis à jour.');
+  };
+
+  const supprimer = async () => {
+    if (!supp.motif.trim()) { setErreur('Le motif de la suppression est obligatoire.'); return; }
+    if (!supp.confirme) { setErreur('Cochez la case pour confirmer la suppression définitive.'); return; }
+    setEnCours(true);
+    const r = await api.post(`/prospects/${id}/suppression`, { motif: supp.motif.trim() });
+    setEnCours(false);
+    if (r.error) { setErreur(r.error); return; }
+    toast(r.espace_demo_ferme ? 'Prospect supprimé ; son espace de démonstration est fermé.' : 'Prospect supprimé.', 'success');
+    onChange(); onClose();
   };
 
   const choix = d ? Object.keys(TRANSITIONS).filter((s) => TRANSITIONS[s].includes(d.statut)) : [];
@@ -349,6 +365,26 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
             </>
           )}
         </div>
+        {d && supp && (
+          <div style={{ border: '1px solid #fecaca', background: '#fef2f2', borderRadius: 10, padding: 12, margin: '0 24px 12px' }}>
+            <strong style={{ fontSize: 13, color: '#b91c1c' }}>🗑 Supprimer définitivement ce prospect</strong>
+            <p style={{ fontSize: 12.5, margin: '6px 0 8px', color: '#7f1d1d' }}>
+              La fiche, son historique et ses liens d'accès seront supprimés.
+              {d.tenant_id ? ' Son espace de démonstration sera fermé et anonymisé (l\'adresse e-mail redevient libre).' : ''}
+              {' '}La suppression est tracée dans le journal d'audit et ne peut pas être annulée.
+            </p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input placeholder="Motif (obligatoire) : doublon, spam, demande du prospect…" value={supp.motif}
+                onChange={(e) => setSupp({ ...supp, motif: e.target.value })} style={{ ...champ, flex: 1, minWidth: 240 }} />
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, color: '#7f1d1d', textTransform: 'none', letterSpacing: 0, margin: 0 }}>
+                <input type="checkbox" checked={supp.confirme} onChange={(e) => setSupp({ ...supp, confirme: e.target.checked })} style={{ width: 'auto' }} />
+                Je confirme la suppression définitive
+              </label>
+              <button className="btn-add" style={{ background: '#dc2626' }} onClick={supprimer} disabled={enCours}>{enCours ? 'Suppression…' : 'Supprimer'}</button>
+              <button className="btn-secondary" onClick={() => setSupp(null)}>Annuler</button>
+            </div>
+          </div>
+        )}
         {d && (
           <div className="modal-foot" style={{ gap: 10, justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -366,7 +402,13 @@ function DetailProspect({ id, envoiInitial, onClose, onChange }) {
                   onClick={() => { setConversion(true); setOnglet('paiements'); }}>✓ Convertir en client</button>
               )}
             </div>
-            {onglet === 'infos' && !ferme && <button className="btn-add" onClick={enregistrer}>Enregistrer</button>}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {estSuperAdmin && d.statut !== 'CLIENT_ACTIF' && !supp && (
+                <button className="btn-secondary" style={{ borderColor: '#fca5a5', color: '#b91c1c' }}
+                  onClick={() => { setErreur(''); setSupp({ motif: '', confirme: false }); }}>🗑 Supprimer</button>
+              )}
+              {onglet === 'infos' && !ferme && <button className="btn-add" onClick={enregistrer}>Enregistrer</button>}
+            </div>
           </div>
         )}
       </div>

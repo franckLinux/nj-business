@@ -5,9 +5,10 @@ import { api } from '@/lib/api';
 import { fmt } from '@/lib/format';
 import { printDemandeFonds } from '@/lib/print';
 import BlocAttente from '@/components/BlocAttente';
+import { usePeriodeBudget, SelecteurSemaine, semaineParDefaut } from '@/lib/budgetPeriode';
 
 // Reprend loadAppelFonds() de legacy/js/app.js (l. 3146-3261).
-function SoldeBanqueInput({ initial, onSave }) {
+function SoldeBanqueInput({ initial, onSave, devise }) {
   const [value, setValue] = useState(initial);
   useEffect(() => { setValue(initial); }, [initial]);
   return (
@@ -21,13 +22,19 @@ function SoldeBanqueInput({ initial, onSave }) {
         }}
         style={{ width: 148, textAlign: 'right', padding: '6px 44px 6px 10px', border: '1.5px solid var(--border)', borderRadius: 8, fontSize: 13, color: 'var(--accent-green)', fontWeight: 600, background: '#f0fff4', outline: 'none' }}
       />
-      <span style={{ position: 'absolute', right: 9, fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', pointerEvents: 'none' }}>FCFA</span>
+      <span style={{ position: 'absolute', right: 9, fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', pointerEvents: 'none' }}>{devise || 'FCFA'}</span>
     </div>
   );
 }
 
 export default function AppelFondsPage() {
-  const { mois, annee, devise, user, can, rubriques } = useApp();
+  const { mois, annee, devise, user, can, rubriques, entite, activeTenantId } = useApp();
+  // Budget hebdomadaire (040) : une demande de fonds par semaine. `semaine` =
+  // semaine EN COURS ; la demande finance la semaine suivante.
+  const periode = usePeriodeBudget(mois, annee, activeTenantId || user?.tenantId || '');
+  const hebdo = periode.periodicite === 'hebdomadaire';
+  const [semaine, setSemaine] = useState(null);
+  useEffect(() => { setSemaine(hebdo ? semaineParDefaut(periode.semaines) : null); }, [hebdo, periode.semaines]);
   const toast = useToast();
   const [s, setS] = useState(null);
   const [banque, setBanque] = useState(null);
@@ -35,11 +42,14 @@ export default function AppelFondsPage() {
 
   const isDirecteur = can('appel_fonds.validate');
   const isCaissiere = can('previsions.edit');
+  // C2 : le solde bancaire manuel se saisit en préparant la demande.
+  const peutSaisirBanque = isCaissiere || can('banque.edit');
 
   const charger = useCallback(async () => {
     setErreur('');
+    if (periode.chargement || (hebdo && !semaine)) return;
     const [synthese, bq] = await Promise.all([
-      api.get(`/appel-fonds/synthese?mois=${mois}&annee=${annee}`),
+      api.get(`/appel-fonds/synthese?mois=${mois}&annee=${annee}${hebdo ? `&semaine=${semaine}` : ''}`),
       api.get(`/banque?mois=${mois}&annee=${annee}`),
     ]);
     if (!synthese || synthese.error) {
@@ -48,7 +58,7 @@ export default function AppelFondsPage() {
     }
     setS(synthese);
     setBanque(bq);
-  }, [mois, annee]);
+  }, [mois, annee, hebdo, semaine, periode.chargement]);
 
   useEffect(() => { setS(null); charger(); }, [charger]);
 
@@ -57,7 +67,7 @@ export default function AppelFondsPage() {
     const montantNum = parseFloat(montant) || 0;
     if (montantNum <= 0) { toast('Montant invalide.', 'error'); return; }
     const path = type === 'dep' ? '/budget/depenses-attente' : '/budget/ressources-attente';
-    const res = await api.post(path, { mois, annee, rubrique_code: rubrique, intitule: intitule || rubrique, montant: montantNum });
+    const res = await api.post(path, { mois, annee, ...(hebdo ? { semaine } : {}), rubrique_code: rubrique, intitule: intitule || rubrique, montant: montantNum });
     if (res.error) { toast(res.error, 'error'); return; }
     toast('Ligne ajoutée ✓', 'success');
     charger();
@@ -84,7 +94,10 @@ export default function AppelFondsPage() {
     const commentaire = statut === 'valide' ? '' : (window.prompt('Commentaire (optionnel) :') || '');
     // La validation porte sur le mois de SAISIE de la demande ; le budget
     // s'applique au mois cible (affiché), et à lui seul.
-    const res = await api.post('/budget/validation', { mois: s.mois_saisie || mois, annee: s.annee_saisie || annee, statut, commentaire });
+    const res = await api.post('/budget/validation', {
+      mois: s.mois_saisie || mois, annee: s.annee_saisie || annee, statut, commentaire,
+      ...(s.semaine_saisie ? { semaine: s.semaine_saisie } : {}),
+    });
     if (res.error) { toast(res.error, 'error'); return; }
     toast(res.message || `Demande ${statut === 'valide' ? 'approuvée' : statut} ✓`, 'success');
     charger();
@@ -94,20 +107,32 @@ export default function AppelFondsPage() {
   if (!s) return <div className="loading-msg">Chargement…</div>;
 
   const tr = s.tresorerie;
+  // Période financée par la demande : un mois, ou une semaine (budget hebdomadaire).
+  const cible = s.semaine_cible ? s.libelle_cible : `${s.mois_cible} ${s.annee_cible}`;
+  const semEnCours = hebdo ? periode.semaines.find((x) => x.num === semaine) : null;
   const dispoApres = s.tresorerie_apres_attente;
   const approuve = s.validation?.statut === 'valide';
 
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Demande de Fonds — {mois} {annee}</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Demande de Fonds — {semEnCours ? `semaine ${semaine} de ` : ''}{mois} {annee}</h2>
         <button
-          onClick={() => printDemandeFonds(s)}
+          onClick={() => printDemandeFonds(s.semaine_cible ? { ...s, mois_cible: s.libelle_cible, annee_cible: '' } : s, entite)}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', background: 'white', border: '1px solid var(--border)', borderRadius: 9, fontSize: 12, fontWeight: 600, color: '#475569', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,.06)' }}
         >
           🖨️ Imprimer
         </button>
       </div>
+
+      {hebdo && (
+        <div style={{ background: 'white', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            Budget hebdomadaire — semaine en cours (la demande finance la semaine suivante : {cible})
+          </div>
+          <SelecteurSemaine semaines={periode.semaines} valeur={semaine} onChange={setSemaine} />
+        </div>
+      )}
 
       <b style={{ color: '#1a365d', display: 'block', marginBottom: 8, fontSize: 13 }}>1. Trésorerie Actuelle</b>
       <div className="table-wrap" style={{ marginBottom: 20 }}>
@@ -139,8 +164,8 @@ export default function AppelFondsPage() {
               <tr>
                 <td>Solde final en banque <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(aucun journal banque : saisie manuelle)</span></td>
                 <td style={{ textAlign: 'right' }}>
-                  {isCaissiere
-                    ? <SoldeBanqueInput initial={banque?.solde_final || 0} onSave={onSaveBanque} />
+                  {peutSaisirBanque
+                    ? <SoldeBanqueInput initial={banque?.solde_final || 0} onSave={onSaveBanque} devise={devise} />
                     : <span style={{ color: 'var(--accent-green)', fontWeight: 600 }}>{fmt(tr.solde_banque, devise)}</span>}
                 </td>
               </tr>
@@ -170,23 +195,25 @@ export default function AppelFondsPage() {
       </div>
 
       <b style={{ color: 'var(--accent-green)', display: 'block', marginBottom: 8, fontSize: 13 }}>
-        4. Prévision des Dépenses — Demande de Fonds pour {s.mois_cible} {s.annee_cible}
+        4. Prévision des Dépenses — Demande de Fonds pour {cible}
       </b>
 
       {s.prevision.length === 0 ? (
         <div style={{ background: '#fffbeb', border: '1px solid #f6e05e', borderRadius: 7, padding: 16, textAlign: 'center', color: '#744210', fontSize: 13 }}>
           <div style={{ fontSize: 22, marginBottom: 6 }}>📋</div>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>Aucune prévision saisie pour {s.mois_cible} {s.annee_cible}</div>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>Aucune prévision saisie pour {cible}</div>
           <small style={{ color: '#718096' }}>
-            La caissière doit saisir la prévision dans l'écran <b>Suivi Budgétaire</b> en choisissant le mois d'application : {s.mois_cible} {s.annee_cible}.
+            Saisissez la prévision dans <b>Prévision de dépenses → Prévisions de dépenses</b>, pour {cible}.
           </small>
         </div>
       ) : (
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
             {approuve
-              ? <span className="statut-badge statut-valide">✅ Approuvé le {(s.validation.validated_at || '').substring(0, 10)} — s'applique en {s.mois_cible} {s.annee_cible}</span>
-              : <span className="statut-badge statut-attente">⏳ En attente — pour {s.mois_cible} {s.annee_cible}</span>}
+              ? <span className="statut-badge statut-valide">✅ Approuvé le {(s.validation.validated_at || '').substring(0, 10)} — s'applique en {cible}</span>
+              : s.validation?.statut === 'rejete'
+                ? <span className="statut-badge statut-rejete">↩ Refusée — pour {cible}</span>
+                : <span className="statut-badge statut-attente">⏳ En attente — pour {cible}</span>}
             {isDirecteur && (
               <div style={{ display: 'flex', gap: 8 }}>
                 {approuve ? (
@@ -201,6 +228,13 @@ export default function AppelFondsPage() {
             )}
           </div>
 
+          {s.validation?.statut === 'rejete' && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: 8, padding: '10px 14px', fontSize: 13, marginBottom: 10 }}>
+              <strong>Demande refusée par le directeur</strong>{s.validation.commentaire ? ` — « ${s.validation.commentaire} »` : ''}.
+              Corrigez les montants dans <b>Prévisions de dépenses</b>, puis demandez au directeur de l'approuver à nouveau.
+              Tant qu'elle n'est pas approuvée, les sorties de {cible} sont mises en attente d'autorisation.
+            </div>
+          )}
           <div className="table-wrap">
             <table>
               <thead><tr><th>Rubrique</th><th>Intitulé</th><th style={{ textAlign: 'right' }}>Montant prévisionnel</th></tr></thead>
@@ -219,13 +253,13 @@ export default function AppelFondsPage() {
 
           {s.besoin > 0 ? (
             <div style={{ background: '#fff5f5', border: '2px solid #e53e3e', borderRadius: 8, padding: 14, textAlign: 'center', marginTop: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#718096', textTransform: 'uppercase' }}>Fonds supplémentaires à demander pour {s.mois_cible}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#718096', textTransform: 'uppercase' }}>Fonds supplémentaires à demander pour {cible}</div>
               <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--accent-red)' }}>{fmt(s.besoin, devise)}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Trésorerie disponible : {fmt(s.tresorerie_disponible, devise)} | Prévision : {fmt(s.total_prevision, devise)}</div>
             </div>
           ) : (
             <div style={{ background: '#f0fff4', border: '2px solid #38a169', borderRadius: 8, padding: 14, textAlign: 'center', marginTop: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#718096', textTransform: 'uppercase' }}>Trésorerie suffisante pour couvrir {s.mois_cible}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#718096', textTransform: 'uppercase' }}>Trésorerie suffisante pour couvrir {cible}</div>
               <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--accent-green)' }}>{fmt(s.excedent, devise)}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Trésorerie disponible : {fmt(s.tresorerie_disponible, devise)} | Prévision : {fmt(s.total_prevision, devise)}</div>
             </div>

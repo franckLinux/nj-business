@@ -6,6 +6,8 @@ import { fmt } from '@/lib/format';
 import MouvementAttenteCard from '@/components/MouvementAttenteCard';
 import BudgetLineModal from '@/components/BudgetLineModal';
 import RubriqueDetailModal from '@/components/RubriqueDetailModal';
+import { exporterExcel, num, STYLE_BOUTON_EXPORT } from '@/lib/export';
+import SuiviHebdomadaire from '@/components/SuiviHebdomadaire';
 
 // Reprend loadBudget() de legacy/js/app.js (l. 2342-2504) : dotations par
 // rubrique vs réalisé, validation mensuelle (directeur), détail par rubrique,
@@ -20,7 +22,7 @@ import RubriqueDetailModal from '@/components/RubriqueDetailModal';
 // l'interface, donc cette section serait en permanence vide. Code mort côté
 // backend inclus (routes/controller demandes_depassement encore présents,
 // jamais atteints) — à signaler séparément, pas à reproduire ici.
-const STATUT_LABEL = { valide: 'valide', rejete: 'rejete', en_attente: 'en attente' };
+const STATUT_LABEL = { valide: 'valide', rejete: 'rejete', en_attente: 'en attente', hebdomadaire: 'budget hebdomadaire' };
 const STATUT_CLASS = { valide: 'statut-valide', rejete: 'statut-rejete', en_attente: 'statut-attente' };
 
 export default function BudgetPage() {
@@ -81,8 +83,18 @@ export default function BudgetPage() {
     charger();
   };
 
+  // Budget hebdomadaire (040) : validation semaine par semaine.
+  const onValiderSemaine = async (semaine, statut) => {
+    const commentaire = statut === 'valide' ? '' : (window.prompt(`Commentaire (optionnel) — semaine ${semaine} :`) || '');
+    const res = await api.post('/budget/validation', { mois, annee, semaine, statut, commentaire });
+    if (res.error) { toast(res.error, 'error', 6000); return; }
+    toast(res.message || 'Semaine mise à jour ✓', 'success');
+    charger();
+  };
+
   if (erreur) return <div className="alert-err">{erreur}</div>;
   if (!budgetData) return <div className="loading-msg">Chargement…</div>;
+  const hebdo = budgetData.periodicite === 'hebdomadaire';
 
   const realisations = {};
   cumuls.forEach((r) => {
@@ -108,10 +120,17 @@ export default function BudgetPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700 }}>Suivi Budgétaire — {mois} {annee}</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {can('rapport.export') && (
+            <button style={STYLE_BOUTON_EXPORT} onClick={() => exporterExcel(`Suivi_budgetaire_${mois}_${annee}`,
+              ['Code', 'Intitulé', `Dotation (${devise})`, `Réalisé (${devise})`, 'Taux (%)', `Écart (${devise})`],
+              [...lignes.map((d) => [d.rubrique_code, d.intitule, num(d.montant), num(d.real), d.pct, num(d.ecart)]),
+                ['', 'TOTAL', num(totalDot), num(totalReal), totalDot > 0 ? Math.round((totalReal / totalDot) * 100) : 0, num(totalEcart)]],
+              [`Suivi budgétaire — ${mois} ${annee}`, `Statut : ${(STATUT_LABEL[v.statut] || v.statut)}`])}>📊 Excel</button>
+          )}
           <span className={`statut-badge ${STATUT_CLASS[v.statut] || ''}`}>{(STATUT_LABEL[v.statut] || v.statut).replace('_', ' ')}</span>
-          {canValidate && (
+          {canValidate && !hebdo && (
             <>
-              <button className="btn-add" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setModalLigne(true)}>+ Dotation</button>
+              {can('budget.edit') && <button className="btn-add" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => setModalLigne(true)}>+ Dotation</button>}
               <button className="btn-ghost" style={{ fontSize: 12 }} onClick={() => onValider('valide')}>✅ Valider</button>
               <button className="btn-ghost" style={{ fontSize: 12, color: 'var(--accent-red)' }} onClick={() => onValider('rejete')}>✕ Rejeter</button>
             </>
@@ -119,6 +138,12 @@ export default function BudgetPage() {
         </div>
       </div>
 
+      {v.statut === 'rejete' && (
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', borderRadius: 8, padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>
+          <strong>Budget rejeté</strong>{v.commentaire ? ` — « ${v.commentaire} »` : ''}. Les prévisions doivent être corrigées
+          (Prévisions de dépenses) puis validées à nouveau ; d'ici là, les sorties de ce mois sont mises en attente d'autorisation.
+        </div>
+      )}
       <div className="kpi-grid" style={{ marginBottom: 16 }}>
         <div className="kpi-card">
           <div className="kpi-icon kpi-blue"><svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg></div>
@@ -140,6 +165,8 @@ export default function BudgetPage() {
           <div className="kpi-body"><p className="kpi-label">Taux exécution</p><p className="kpi-value" style={{ fontSize: 16 }}>{totalDot > 0 ? Math.round((totalReal / totalDot) * 100) : 0}%</p></div>
         </div>
       </div>
+
+      {hebdo && <SuiviHebdomadaire data={budgetData} devise={devise} canValidate={canValidate} onValiderSemaine={onValiderSemaine} />}
 
       <div className="table-wrap">
         <table>

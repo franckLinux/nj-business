@@ -3,7 +3,7 @@ const router = require('express').Router();
 const { authGuard, requireRole, requireCabinet } = require('../middleware/auth');
 const { tenantGuard }             = require('../middleware/tenant');
 const { validate }                = require('../middleware/validate');
-const { requirePermission }       = require('../middleware/permission');
+const { requirePermission, requireAnyPermission } = require('../middleware/permission');
 
 // ── Initialisation de la base (déploiement) ───────────────────────────────
 // Monté en premier, sans authGuard : ces routes servent précisément quand
@@ -23,6 +23,10 @@ const { loginRules, changePasswordRules } = require('../validators/auth.validato
 router.post('/auth/login',           loginRules, validate, authCtrl.login);
 router.get ('/auth/me',              authGuard, authCtrl.me);
 router.post('/auth/change-password', authGuard, changePasswordRules, validate, authCtrl.changePassword);
+// C9 : mot de passe oublié (public, limité en débit dans index.js).
+router.post('/auth/mot-de-passe-oublie', authCtrl.motDePasseOublie);
+router.get ('/auth/reinitialisation/:jeton', authCtrl.verifierReinitialisation);
+router.post('/auth/reinitialisation/:jeton', authCtrl.reinitialiserMotDePasse);
 
 // ── Journaux (dynamique — module de permission "journaux") ────────────────
 // Définition des caisses/journaux, à distinguer du module "journal" qui porte
@@ -65,6 +69,7 @@ router.get   ('/journal/cumuls',  authGuard, tenantGuard, requirePermission('jou
 router.get   ('/journal/ran',     authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getRan);
 router.get   ('/journal/recap',   authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getJournauxRecap);
 router.get   ('/journal/controle-context', authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getControleContext);
+router.get   ('/journal/disponible', authGuard, tenantGuard, requirePermission('journal.view'), jCtrl.getDisponible);
 router.post  ('/journal/ran',     authGuard, tenantGuard, requirePermission('journal.ran'), setRanRules, validate, jCtrl.setRan);
 
 // ── Mouvements en attente (RG-03 / RG-04 — module de permission "journal") ─
@@ -103,9 +108,15 @@ router.delete('/budget-caisse/demande/:id',              authGuard, tenantGuard,
 // décrivait sans être branché nulle part.
 const bCtrl = require('../controllers/budget.controller');
 const { setBudgetLineRules, setValidationRules, attenteLigneRules, batchAttenteRules, budgetIdParamRule } = require('../validators/budget.validator');
+// Budget hebdomadaire (040) : calendrier d'un mois et réglage du client.
+router.get   ('/budget/periode',                  authGuard, tenantGuard, requireAnyPermission('budget.view', 'previsions.view', 'appel_fonds.view', 'journal.view'), bCtrl.getPeriode);
+router.get   ('/budget/periodicite',              authGuard, tenantGuard, requirePermission('config.view'), bCtrl.getPeriodicite);
+router.put   ('/budget/periodicite',              authGuard, tenantGuard, requirePermission('config.edit'), bCtrl.putPeriodicite);
 router.get   ('/budget',                          authGuard, tenantGuard, requirePermission('budget.view'), bCtrl.getBudget);
-router.put   ('/budget',                          authGuard, tenantGuard, requirePermission('budget.edit'), setBudgetLineRules, validate, bCtrl.setBudgetLine);
-router.delete('/budget/:id',                      authGuard, tenantGuard, requirePermission('budget.edit'), budgetIdParamRule, validate, bCtrl.deleteBudgetLine);
+// C1 : les prévisions (Prévisions de dépenses) s'enregistrent aussi avec
+// previsions.edit ; une demande déjà validée reste figée (demandeFigee).
+router.put   ('/budget',                          authGuard, tenantGuard, requireAnyPermission('budget.edit', 'previsions.edit'), setBudgetLineRules, validate, bCtrl.setBudgetLine);
+router.delete('/budget/:id',                      authGuard, tenantGuard, requireAnyPermission('budget.edit', 'previsions.edit'), budgetIdParamRule, validate, bCtrl.deleteBudgetLine);
 router.post  ('/budget/validation',               authGuard, tenantGuard, requirePermission('budget.validate'), setValidationRules, validate, bCtrl.setValidation);
 router.post  ('/budget/depenses-attente',         authGuard, tenantGuard, requirePermission('previsions.edit'), attenteLigneRules, validate, bCtrl.addDepenseAttente);
 router.put   ('/budget/depenses-attente/batch',   authGuard, tenantGuard, requirePermission('previsions.edit'), batchAttenteRules, validate, bCtrl.batchDepenseAttente);
@@ -130,17 +141,86 @@ router.get('/appel-fonds/synthese', authGuard, tenantGuard, requirePermission('a
 const rCtrl = require('../controllers/rubriques.controller');
 const { createRubriqueRules, updateRubriqueRules, rubriqueIdParamRule } = require('../validators/rubriques.validator');
 router.get   ('/rubriques',      authGuard, tenantGuard, requirePermission('rubriques.view'), rCtrl.getRubriques);
-router.post  ('/rubriques',      authGuard, tenantGuard, requirePermission('rubriques.edit'), createRubriqueRules, validate, rCtrl.createRubrique);
+// rubriques.create (044) : ajout sans droit comptable (caissière) — le
+// contrôleur ignore alors le code comptable et le virement interne.
+router.post  ('/rubriques',      authGuard, tenantGuard, requireAnyPermission('rubriques.edit', 'rubriques.create'), createRubriqueRules, validate, rCtrl.createRubrique);
 router.put   ('/rubriques/:id',  authGuard, tenantGuard, requirePermission('rubriques.edit'), updateRubriqueRules, validate, rCtrl.updateRubrique);
 router.delete('/rubriques/:id',  authGuard, tenantGuard, requirePermission('rubriques.edit'), rubriqueIdParamRule, validate, rCtrl.deleteRubrique);
+
+// ── Contrôle comptable des pièces (migration 042) ─────────────────────────
+// Lecture : controle.view ; saisie (tiers, observation, statut) : controle.saisir.
+// N'écrit jamais dans le journal ni dans la passerelle.
+const ctlCtrl = require('../controllers/controle.controller');
+router.get   ('/controle/pieces',     authGuard, tenantGuard, requirePermission('controle.view'), ctlCtrl.getPieces);
+router.put   ('/controle/pieces/:id', authGuard, tenantGuard, requireAnyPermission('controle.saisir', 'controle.compte'), ctlCtrl.putPiece);
+router.get   ('/controle/tiers',      authGuard, tenantGuard, requirePermission('controle.view'), ctlCtrl.getTiers);
+// Régularité formelle (045) : anomalies constatées, validation, réouverture, historique.
+router.post  ('/controle/pieces/:id/anomalies',   authGuard, tenantGuard, requirePermission('controle.saisir'), ctlCtrl.postAnomalie);
+router.put   ('/controle/anomalies/:aid',         authGuard, tenantGuard, requirePermission('controle.saisir'), ctlCtrl.putAnomalie);
+router.post  ('/controle/anomalies/:aid/levee',   authGuard, tenantGuard, requirePermission('controle.saisir'), ctlCtrl.postLevee);
+router.post  ('/controle/pieces/:id/validation',  authGuard, tenantGuard, requirePermission('controle.saisir'), ctlCtrl.postValidation);
+router.post  ('/controle/pieces/:id/reouverture', authGuard, tenantGuard, requirePermission('controle.reouvrir'), ctlCtrl.postReouverture);
+router.get   ('/controle/pieces/:id/historique',  authGuard, tenantGuard, requirePermission('controle.view'), ctlCtrl.getHistorique);
+
+// ── Arrêtés de caisse & inventaires (migration 046) ───────────────────────
+// Validation des arrêtés et des inventaires par le contrôle comptable, sur PV
+// scanné. Lecture : controle.view ; préparation (solde constaté, PV) et
+// inventaires : controle.saisir ; validation / annulation d'un arrêté :
+// arrets.valider (directeur) ; réouverture d'un inventaire : controle.reouvrir. Les PV ne sortent que par
+// GET /controle/pv/... (jamais par le dossier public /uploads).
+const aiCtrl = require('../controllers/arretes_inventaires.controller');
+router.get   ('/controle/arrets',                          authGuard, tenantGuard, requirePermission('controle.view'),     aiCtrl.getArrets);
+router.put   ('/controle/arrets/:journalId',               authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.putArret);
+router.post  ('/controle/arrets/:journalId/pv',            authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.postPvArret);
+// 26/10/2026 : validation (et annulation) de l'arrêté réservée au directeur (arrets.valider, migration 047).
+router.post  ('/controle/arrets/:journalId/validation',    authGuard, tenantGuard, requirePermission('arrets.valider'),    aiCtrl.postValidationArret);
+router.post  ('/controle/arrets/:journalId/annulation',    authGuard, tenantGuard, requirePermission('arrets.valider'),    aiCtrl.postAnnulationArret);
+router.get   ('/controle/inventaires',                     authGuard, tenantGuard, requirePermission('controle.view'),     aiCtrl.getInventaires);
+router.post  ('/controle/inventaires',                     authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.postInventaire);
+router.get   ('/controle/inventaires/:id',                 authGuard, tenantGuard, requirePermission('controle.view'),     aiCtrl.getInventaire);
+router.put   ('/controle/inventaires/:id',                 authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.putInventaire);
+router.delete('/controle/inventaires/:id',                 authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.deleteInventaire);
+router.post  ('/controle/inventaires/:id/pv',              authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.postPvInventaire);
+router.post  ('/controle/inventaires/:id/validation',      authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.postValidationInventaire);
+router.post  ('/controle/inventaires/:id/reouverture',     authGuard, tenantGuard, requirePermission('controle.reouvrir'), aiCtrl.postReouvertureInventaire);
+router.get   ('/controle/pv/:objet/:id',                   authGuard, tenantGuard, requirePermission('controle.view'),     aiCtrl.getPv);
+
+// ── Registre des clients / fournisseurs (migration 043) ───────────────────
+const regCtrl = require('../controllers/registre_tiers.controller');
+router.get   ('/registre-tiers',              authGuard, tenantGuard, requirePermission('controle.view'), regCtrl.getListe);
+// Saisie de caisse (044) : bénéficiaires du registre (NUI, téléphone, compte tiers).
+router.get   ('/registre-tiers/saisie',       authGuard, tenantGuard, requireAnyPermission('journal.create', 'journal.edit'), regCtrl.getSaisie);
+router.post  ('/registre-tiers',              authGuard, tenantGuard, requirePermission('controle.saisir'), regCtrl.post);
+router.post  ('/registre-tiers/import-pieces', authGuard, tenantGuard, requirePermission('controle.saisir'), regCtrl.postImport);
+router.put   ('/registre-tiers/:id',          authGuard, tenantGuard, requirePermission('controle.saisir'), regCtrl.put);
+
+// ── Passerelle comptable — lot 1 : paramétrage (migration 037) ────────────
+// Le directeur PROPOSE les comptes des rubriques, le cabinet VALIDE
+// (passerelle.valider : validation directe de ses propres saisies).
+// Comptes de trésorerie des journaux et paramètres : cabinet uniquement.
+const psCtrl = require('../controllers/passerelle.controller');
+router.get   ('/passerelle',                           authGuard, tenantGuard, requirePermission('passerelle.view'), psCtrl.getEtat);
+router.put   ('/passerelle/parametres',                authGuard, tenantGuard, requirePermission('passerelle.valider'), psCtrl.putParametres);
+router.put   ('/passerelle/journaux/:id',              authGuard, tenantGuard, requirePermission('passerelle.valider'), psCtrl.putJournal);
+router.post  ('/passerelle/equivalences',              authGuard, tenantGuard, requireAnyPermission('passerelle.proposer', 'passerelle.valider'), psCtrl.postEquivalence);
+router.post  ('/passerelle/equivalences/lot',          authGuard, tenantGuard, requireAnyPermission('passerelle.proposer', 'passerelle.valider'), psCtrl.postLot);
+router.patch ('/passerelle/equivalences/:id/decision', authGuard, tenantGuard, requirePermission('passerelle.valider'), psCtrl.patchDecision);
+router.get   ('/passerelle/rubriques/:id/historique',  authGuard, tenantGuard, requirePermission('passerelle.view'), psCtrl.getHistorique);
+// Simulation d'export (balance de contrôle) : lit les écritures du mois, n'exporte rien.
+router.get   ('/passerelle/simulation',                authGuard, tenantGuard, requirePermission('passerelle.view'), psCtrl.getSimulation);
 
 // ── Utilisateurs (module de permission "users") ───────────────────────────
 const uCtrl = require('../controllers/users.controller');
 const { createUserRules, updateUserRules, userIdParamRule, resetPasswordRules } = require('../validators/users.validator');
 router.get   ('/users',               authGuard, tenantGuard, requirePermission('users.view'), uCtrl.getUsers);
+router.get   ('/users/roles-attribuables', authGuard, tenantGuard, requirePermission('users.view'), uCtrl.getRolesAttribuables);
 router.post  ('/users',               authGuard, tenantGuard, requirePermission('users.create'), createUserRules, validate, uCtrl.createUser);
 router.put   ('/users/:id',           authGuard, tenantGuard, requirePermission('users.edit'), updateUserRules, validate, uCtrl.updateUser);
 router.patch ('/users/:id/actif',     authGuard, tenantGuard, requirePermission('users.edit'), userIdParamRule, validate, uCtrl.toggleActif);
+// Rattrapage (033) : le directeur autorise une caissière à saisir des opérations antidatées.
+router.put   ('/users/:id/rattrapage', authGuard, tenantGuard, requirePermission('journal.rattrapage_autoriser'), userIdParamRule, validate, uCtrl.setRattrapage);
+// Activité / projet obligatoire pour une personne (039) : qui gère les activités.
+router.put   ('/users/:id/activite-obligatoire', authGuard, tenantGuard, requirePermission('activites.edit'), userIdParamRule, validate, uCtrl.setActiviteObligatoire);
 router.post  ('/users/:id/password',  authGuard, tenantGuard, requirePermission('users.edit'), resetPasswordRules, validate, uCtrl.resetPassword);
 router.delete('/users/:id',           authGuard, tenantGuard, requirePermission('users.delete'), userIdParamRule, validate, uCtrl.deleteUser);
 
@@ -150,12 +230,25 @@ const { updateConfigRules } = require('../validators/config.validator');
 router.get('/config',             authGuard, tenantGuard, requirePermission('config.view'), cfgCtrl.getConfig);
 router.put('/config',             authGuard, tenantGuard, requirePermission('config.edit'), updateConfigRules, validate, cfgCtrl.updateConfig);
 router.get('/config/referentiel', authGuard,              cfgCtrl.getReferentiel);
+// En-tête des documents imprimés (logo, raison sociale, coordonnées) : lisible
+// par tout utilisateur du client — la caissière imprime des bons sans avoir
+// accès à l'écran de configuration.
+router.get('/config/entete',      authGuard, tenantGuard,           cfgCtrl.getEntete);
 
 // ── Banque (module de permission "banque") ────────────────────────────────
 const banqueCtrl = require('../controllers/banque.controller');
 const { updateBanqueRules } = require('../validators/banque.validator');
 router.get('/banque', authGuard, tenantGuard, requirePermission('banque.view'), banqueCtrl.getBanque);
-router.put('/banque', authGuard, tenantGuard, requirePermission('banque.edit'), updateBanqueRules, validate, banqueCtrl.updateBanque);
+// C2 : solde bancaire manuel de la demande de fonds, saisi par qui prépare la demande.
+router.put('/banque', authGuard, tenantGuard, requireAnyPermission('banque.edit', 'previsions.edit'), updateBanqueRules, validate, banqueCtrl.updateBanque);
+
+// ── Activités / projets (migration 034) ───────────────────────────────────
+const actCtrl = require('../controllers/activites.controller');
+router.get   ('/activites',        authGuard, tenantGuard, requireAnyPermission('activites.view', 'activites.edit', 'journal.create'), actCtrl.lister);
+router.get   ('/activites/suivi',  authGuard, tenantGuard, requirePermission('rapport.view'), actCtrl.suivi);
+router.post  ('/activites',        authGuard, tenantGuard, requirePermission('activites.edit'), actCtrl.creer);
+router.put   ('/activites/:id',    authGuard, tenantGuard, requirePermission('activites.edit'), actCtrl.modifier);
+router.delete('/activites/:id',    authGuard, tenantGuard, requirePermission('activites.edit'), actCtrl.supprimer);
 
 // ── Rapports (module de permission "rapport") ─────────────────────────────
 const rapportCtrl = require('../controllers/rapport.controller');
@@ -263,6 +356,15 @@ router.get   ('/plateforme/clients',            ...admin, pfCtrl.getClients);
 router.get   ('/plateforme/clients/:id',        ...admin, pfCtrl.getClient);
 router.put   ('/plateforme/clients/:id',        ...admin, pfCtrl.putClient);
 router.patch ('/plateforme/clients/:id/actif',  ...admin, pfCtrl.patchActif);
+// Rôles autorisés du client (038) : null = valeur par défaut du type de compte.
+router.get   ('/plateforme/clients/:id/suppression', ...admin, pfCtrl.getSuppression);
+router.post  ('/plateforme/clients/:id/suppression', ...admin, pfCtrl.postSuppression);
+router.get   ('/plateforme/clients/:id/roles',  ...admin, pfCtrl.getRoles);
+router.put   ('/plateforme/clients/:id/roles',  ...admin, pfCtrl.putRoles);
+// NJ BUSINESS (048) : modules activés par client — super_admin uniquement.
+router.get   ('/plateforme/modules',                    ...admin, pfCtrl.getModules);
+router.get   ('/plateforme/clients/:id/modules',        ...admin, pfCtrl.getModulesClient);
+router.put   ('/plateforme/clients/:id/modules/:code',  ...admin, pfCtrl.putModuleClient);
 router.get   ('/plateforme/audit',              ...admin, pfCtrl.getAudit);
 router.get   ('/plateforme/support',            ...admin, pfCtrl.getSupport);
 router.post  ('/plateforme/support',            ...admin, pfCtrl.postSupport);
@@ -282,6 +384,15 @@ router.put   ('/prospects/:id',              ...fiche, prCtrl.modifier);
 router.post  ('/prospects/:id/invitation',   ...fiche, prCtrl.inviter);
 router.post  ('/prospects/:id/prolongation', ...fiche, prCtrl.prolonger);
 router.post  ('/prospects/:id/statut',       ...fiche, prCtrl.statut);
+router.post  ('/prospects/:id/suppression',  authGuard, requireRole('super_admin'), prCtrl.supprimer);
+// Super Admin : codes personnels de validation directe et permission associée.
+router.get   ('/validation-directe',                       authGuard, requireRole('super_admin'), prCtrl.vdLister);
+router.get   ('/validation-directe/historique',            authGuard, requireRole('super_admin'), prCtrl.vdHistorique);
+router.put   ('/validation-directe/:userId/permission',    authGuard, requireRole('super_admin'), prCtrl.vdPermission);
+router.post  ('/validation-directe/:userId/code',          authGuard, requireRole('super_admin'), prCtrl.vdCode);
+router.patch ('/validation-directe/codes/:codeId',         authGuard, requireRole('super_admin'), prCtrl.vdModifier);
+router.post  ('/validation-directe/codes/:codeId/revoquer', authGuard, requireRole('super_admin'), prCtrl.vdRevoquer);
+router.post  ('/validation-directe/codes/:codeId/debloquer', authGuard, requireRole('super_admin'), prCtrl.vdDebloquer);
 // Étape 4 : forfaits (catalogue modifiable par le super_admin seul), paiements, conversion.
 router.get   ('/forfaits',                   ...prospects, prCtrl.forfaits);
 router.post  ('/forfaits',                   ...admin, prCtrl.creerForfait);
@@ -295,6 +406,14 @@ router.get   ('/pipeline/:id',               ...fiche, prCtrl.pipelineFiche);
 router.post  ('/pipeline/:id/action',        ...fiche, prCtrl.pipelineAction);
 // Public : page « Demander une démo » (aucun JWT, débit limité).
 router.post  ('/demande-demo',               prCtrl.demandeWeb);
+// Public : même demande, validée sur place par un commercial autorisé avec son
+// code personnel (débit limité par IP ; blocage du code après 5 échecs).
+const rateLimit = require('express-rate-limit');
+router.post  ('/demande-demo/validation-directe', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.VALIDATION_DIRECTE_RATE_MAX, 10) || 10,
+  message: { error: 'Trop de tentatives de validation depuis cet appareil. Réessayez dans 15 minutes ou envoyez la demande normalement.' },
+}), prCtrl.demandeWebValidee);
 // Public : lien d'activation reçu par le prospect (aucun JWT).
 router.get   ('/activation/:token',          prCtrl.verifierActivation);
 router.post  ('/activation/:token',          prCtrl.activer);

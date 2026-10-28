@@ -79,11 +79,14 @@ const loginLimiter = rateLimit({
 
 app.use('/api/', limiter);
 app.use('/api/auth/login', loginLimiter);
+app.use(['/api/auth/mot-de-passe-oublie', '/api/auth/reinitialisation'], loginLimiter);
 // Lien d'activation des démos et tâche planifiée : publics, donc bridés par IP.
 // Demande de démo publique : 5 envois par heure et par adresse IP.
 app.use('/api/demande-demo', rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
+  // La validation directe par code a son propre limiteur (routes/index.js).
+  skip: (req) => req.path.startsWith('/validation-directe'),
   message: { error: 'Trop de demandes envoyées. Réessayez plus tard ou contactez-nous directement.' },
 }));
 app.use(['/api/activation', '/api/taches'], rateLimit({
@@ -204,12 +207,18 @@ app.use((err, req, res, next) => {
 
 // ── Démarrage ─────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT) || 3000;
-app.listen(PORT, () => {
+// Garde-fou de schéma (colonnes dont dépend le code) avant d'accepter du
+// trafic — plafonné à 15 s pour ne jamais bloquer le démarrage.
+const { ensureSchema } = require('./src/config/schemaGuard');
+Promise.race([
+  ensureSchema().catch((err) => console.error('[Schema] Garde-fou indisponible :', err.message)),
+  new Promise((r) => setTimeout(r, 15000)),
+]).finally(() => app.listen(PORT, () => {
   console.log('\n╔════════════════════════════════════════╗');
   console.log(`║  🏦  CaissePro v2 démarré              ║`);
   console.log(`║  → http://localhost:${PORT}               ║`);
   console.log(`║  ENV: ${(process.env.NODE_ENV||'development').padEnd(32)}║`);
   console.log('╚════════════════════════════════════════╝\n');
-});
+}));
 
 module.exports = app;

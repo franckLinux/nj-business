@@ -1,11 +1,15 @@
 const { sequelize, Journal, ArretCaisse } = require('../models');
 const { userHasPermission } = require('../services/permission.service');
 const { soldeJournal } = require('../services/journal.service');
+const { arretValide } = require('../services/arretes_inventaires.service');
+
+const MSG_VALIDE = (v) => `Cet arrêté de caisse a été validé${v?.valide_le ? ` le ${new Date(v.valide_le).toLocaleDateString('fr-FR')}` : ''} : il ne peut plus être modifié ni rouvert. Le directeur doit d'abord annuler la validation (Contrôle comptable → Arrêtés & inventaires).`;
 
 // ── POST /api/journaux/:id/arreter ────────────────────────────────────────
 // Autorisé au responsable_arret désigné du journal, ou à qui détient
-// journaux.arreter (par défaut : le DIRECTEUR seul — décision du 02/10/2026,
-// migration 015). Le comptable cabinet n'arrête plus les caisses.
+// journaux.arreter : le DIRECTEUR (015) et, depuis le 26/10/2026 (047), le
+// comptable et le comptable cabinet. La VALIDATION de l'arrêté reste au
+// directeur (arrets.valider, Contrôle comptable → Arrêtés & inventaires).
 // super_admin : toujours autorisé (getEffectivePermissions → null).
 const arreter = async (req, res) => {
   const { mois, annee, commentaire, solde_final } = req.body;
@@ -24,6 +28,10 @@ const arreter = async (req, res) => {
     if (!peutArreter) {
       return res.status(403).json({ error: "Vous n'êtes pas le responsable d'arrêt de ce journal." });
     }
+
+    // 046 : un arrêté validé par le contrôle comptable ne se ré-arrête pas.
+    const valide = await arretValide(req.tenantId, journalId, mois, annee);
+    if (valide) return res.status(409).json({ error: MSG_VALIDE(valide) });
 
     const soldeCalcule = (await soldeJournal(req.tenantId, mois, parseInt(annee, 10), journalId)).solde;
     if (solde_final !== undefined && Math.abs((parseFloat(solde_final) || 0) - soldeCalcule) > 0.5) {
@@ -58,11 +66,16 @@ const reouvrir = async (req, res) => {
   const mois = req.query.mois || req.body.mois;
   const annee = req.query.annee || req.body.annee;
   try {
+    // 046 : un arrêté validé par le contrôle comptable ne se rouvre pas
+    // (contrôle doublé par un trigger en base).
+    const valide = await arretValide(req.tenantId, parseInt(req.params.id, 10), mois, annee);
+    if (valide) return res.status(409).json({ error: MSG_VALIDE(valide) });
     await ArretCaisse.destroy({
       where: { tenant_id: req.tenantId, journal_id: parseInt(req.params.id, 10), mois, annee: parseInt(annee, 10) },
     });
     res.json({ message: 'Caisse réouverte.' });
   } catch (err) {
+    if (/contrôle comptable/.test(err.message || '')) return res.status(409).json({ error: MSG_VALIDE(null) });
     console.error('[Arrêt caisse] reouvrir :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });
   }

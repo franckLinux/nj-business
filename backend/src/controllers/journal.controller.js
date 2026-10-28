@@ -4,11 +4,32 @@
 // attente) vivent dans services/journal.service.js — ce fichier ne garde que
 // la validation des entrées HTTP et le mapping requête → réponse.
 const { Op, fn, col } = require('sequelize');
+const { resoudreActivite } = require('./activites.controller');
+const hebdoSvc = require('../services/budget_hebdo.service');
+
+// ── Activité / projet obligatoire (039) ───────────────────────────────────
+// Réglage PERSONNEL (users.activite_obligatoire), posé par le directeur.
+// Exemptés : virements internes. Sans activité active dans le client : sans
+// effet. to_jsonb : neutre tant que la migration 039 n'est pas jouée.
+const exigerActivite = async (req, rubriqueCode, activiteId) => {
+  if (activiteId) return;
+  const [r] = await sequelize.query(
+    `SELECT (to_jsonb(u)->>'activite_obligatoire')::boolean IS TRUE AS obligatoire,
+            EXISTS (SELECT 1 FROM rubriques rb WHERE rb.tenant_id = :t AND rb.code = :code AND rb.est_virement_interne) AS virement,
+            EXISTS (SELECT 1 FROM activites a WHERE a.tenant_id = :t AND a.actif) AS a_des_activites
+       FROM users u WHERE u.id = :u`,
+    { replacements: { u: req.user.id, t: req.tenantId, code: String(rubriqueCode || '') }, type: sequelize.QueryTypes.SELECT });
+  if (r?.obligatoire && !r.virement && r.a_des_activites) {
+    const err = new Error('Activité / projet obligatoire : choisissez l\'activité ou le projet concerné par cette opération.');
+    err.status = 400; err.code = 'ACTIVITE_OBLIGATOIRE';
+    throw err;
+  }
+};
 const { sequelize, Mouvement, Journal, Rubrique, ArretCaisse, User, BudgetCaisse, AppelFonds, Ran, Banque } = require('../models');
 const {
   moisPrecedent, resolveFiltre, calcSoldeFinal, autoRan,
   typeCaisseDuJournal, enregistrerRan, situationJournaux, MOIS: MOIS_VALIDES,
-  mettreEnAttente, controleBudgetSortie, budgetApprouve,
+  mettreEnAttente, controleBudgetSortie, budgetApprouve, disponibleRubrique,
   verifierPeriodeOuverte, verifierSoldeNonNegatif, verifierOrdreChronologique, soldeJournal, ErreurComptable, cle, SQL_CLE, filtreOuverture,
 } = require('../services/journal.service');
 
@@ -90,14 +111,45 @@ const getJournal = async (req, res) => {
   }
 };
 
+// Tiers du registre (044) : identifiant facultatif, vérifié sur le client.
+const resoudreTiers = async (tenantId, valeur) => {
+  if (valeur === undefined || valeur === null || valeur === '') return null;
+  const id = parseInt(valeur, 10);
+  const err = (m) => Object.assign(new Error(m), { status: 400 });
+  if (!Number.isInteger(id) || id <= 0) throw err('Tiers invalide.');
+  const [t] = await sequelize.query('SELECT id FROM registre_tiers WHERE id = :id AND tenant_id = :t AND actif',
+    { replacements: { id, t: tenantId }, type: sequelize.QueryTypes.SELECT });
+  if (!t) throw err('Tiers introuvable dans le registre de ce client.');
+  return id;
+};
+
 // ── POST /api/journal ─────────────────────────────────────────────────────
 const createMouvement = async (req, res) => {
   const { date, mois, annee, journal_id, type_caisse,
           rubrique_code, intitule, objet, beneficiaire,
-          piece_identite, telephone, entree, sortie } = req.body;
+          piece_identite, telephone, entree, sortie, nui } = req.body;
+  // Activité / projet (034) : facultatif, contrôlé avant tout.
+  let activiteId = null;
+  let tiersId = null;
+  try {
+    activiteId = await resoudreActivite(req.tenantId, req.body.activite_id);
+    // Tiers du registre choisi à la saisie (044). Sans choix, la base
+    // rattache l'écriture au tiers de même NUI (ou de même nom).
+    tiersId = await resoudreTiers(req.tenantId, req.body.tiers_id);
+  } catch (e) {
+    return res.status(e.status || 500).json({ error: e.status ? e.message : 'Erreur serveur.' });
+  }
 
   if (!date || !mois || !annee || !rubrique_code) {
     return res.status(400).json({ error: 'Champs obligatoires manquants (date, mois, annee, rubrique_code).' });
+  }
+  // Activité / projet obligatoire pour cette personne (039).
+  try {
+    await exigerActivite(req, rubrique_code, activiteId);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message, code: e.code });
+    console.error('[Journal] contrôle activité obligatoire :', e.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
   }
   if (!journal_id && !type_caisse) {
     return res.status(400).json({ error: 'journal_id ou type_caisse requis.' });
@@ -122,10 +174,15 @@ const createMouvement = async (req, res) => {
   }
 
   // Contrôles comptables : mois ouvert, et caisse jamais négative.
+  // Rattrapage (033) : une personne autorisée par le directeur peut antidater
+  // (date antérieure à la dernière écriture) ; l'écriture est alors marquée.
+  let antidatee = false;
   try {
     await initialisation.verifierInitialise(req.tenantId);
     await verifierPeriodeOuverte(req.tenantId, jid, mois, an);
-    await verifierOrdreChronologique(req.tenantId, jid, date);
+    const chrono = await verifierOrdreChronologique(req.tenantId, jid, date,
+      { rattrapage: await peut(req, 'journal.rattrapage') });
+    antidatee = Boolean(chrono?.antidatee);
     await verifierSoldeNonNegatif(req.tenantId, jid, mois, an, (parseFloat(entree) || 0) - montantSortie);
   } catch (err) {
     if (refusComptable(res, err)) return;
@@ -138,7 +195,7 @@ const createMouvement = async (req, res) => {
     let ctrl;
     try {
       ctrl = await controleBudgetSortie(req.tenantId, {
-        mois, annee: an, journal_id: jid, rubrique_code, sortie: montantSortie,
+        mois, annee: an, journal_id: jid, rubrique_code, sortie: montantSortie, date,
       });
     } catch (budgetErr) {
       // Fail-closed : si le contrôle échoue, on REFUSE la sortie (jamais de dépassement silencieux).
@@ -155,9 +212,9 @@ const createMouvement = async (req, res) => {
         row = await mettreEnAttente(
           { tenantId: req.tenantId, userId: req.user.id, username: req.user.username },
           { date, mois, annee: an, journal_id: jid, type_caisse: resolvedCaisse,
-            rubrique_code, intitule, objet, beneficiaire, piece_identite, telephone,
-            sortie: montantSortie },
-          ctrl.motif, { montant_prevu: ctrl.montant_prevu, cumul: ctrl.cumul });
+            rubrique_code, intitule, objet, beneficiaire, piece_identite, telephone, nui,
+            activite_id: activiteId, sortie: montantSortie },
+          ctrl.motif, { montant_prevu: ctrl.montant_prevu, cumul: ctrl.cumul, semaine: ctrl.semaine });
       } catch (attenteErr) {
         // La mise en attente a échoué (ex. table absente / migration non lancée) :
         // on NE prétend PAS "en attente" et on n'écrit rien dans le journal.
@@ -183,9 +240,19 @@ const createMouvement = async (req, res) => {
       tenant_id: req.tenantId, date, mois, annee: an,
       journal_id: jid, type_caisse: resolvedCaisse,
       rubrique_code, intitule, objet: objet||'', beneficiaire: beneficiaire||'',
-      piece_identite: piece_identite||'', telephone: telephone||'',
+      piece_identite: piece_identite||'', telephone: telephone||'', nui: String(nui||'').slice(0, 30),
       entree: parseFloat(entree)||0, sortie: montantSortie, created_by: req.user.id,
+      ...(antidatee ? { rattrapage: true } : {}),
+      ...(activiteId ? { activite_id: activiteId } : {}),
+      ...(tiersId ? { tiers_id: tiersId } : {}),
     });
+    if (antidatee) {
+      sequelize.query(
+        `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+         VALUES (:t, :u, 'SAISIE_RATTRAPAGE', 'journal', :id, CAST(:v AS jsonb))`,
+        { replacements: { t: req.tenantId, u: req.user.id, id: String(mouvement.id),
+          v: JSON.stringify({ numero: mouvement.numero, date, journal_id: jid }) } }).catch(() => {});
+    }
     res.status(201).json({ ...mouvement.toJSON(), budget_warning: budgetWarning });
   } catch (err) {
     console.error('[Journal] createMouvement :', err.message);
@@ -197,7 +264,7 @@ const createMouvement = async (req, res) => {
 // Écriture intangible (migration 027) : seuls les champs DESCRIPTIFS se
 // corrigent (libellé, objet, bénéficiaire, pièce d'identité, téléphone).
 // Montant, date, rubrique ou caisse erronés → annulation puis nouvelle saisie.
-const CHAMPS_DESCRIPTIFS = ['intitule', 'objet', 'beneficiaire', 'piece_identite', 'telephone'];
+const CHAMPS_DESCRIPTIFS = ['intitule', 'objet', 'beneficiaire', 'piece_identite', 'telephone', 'nui'];
 const updateMouvement = async (req, res) => {
   const id = req.params.id;
   try {
@@ -221,6 +288,20 @@ const updateMouvement = async (req, res) => {
     await verifierPeriodeOuverte(req.tenantId, old.journal_id, old.mois, old.annee);
     const maj = {};
     for (const c of CHAMPS_DESCRIPTIFS) if (b[c] !== undefined) maj[c] = String(b[c] ?? '').slice(0, c === 'intitule' ? 250 : 200);
+    // Le classement par activité / projet (034) se corrige comme un descriptif.
+    if (b.activite_id !== undefined) {
+      const nouv = await resoudreActivite(req.tenantId, b.activite_id);
+      if ((nouv || null) !== (old.activite_id || null)) {
+        if (!nouv) await exigerActivite(req, old.rubrique_code, null);   // 039 : pas de retrait
+        maj.activite_id = nouv;
+      }
+    }
+    // Tiers du registre (044) : choix explicite ; sinon la base ré-identifie
+    // le tiers si le NUI ou le bénéficiaire change.
+    if (b.tiers_id !== undefined) {
+      const t = await resoudreTiers(req.tenantId, b.tiers_id);
+      if ((t || null) !== (old.tiers_id ? Number(old.tiers_id) : null)) maj.tiers_id = t;
+    }
     if (maj.intitule !== undefined && !maj.intitule.trim()) return res.status(400).json({ error: 'Le libellé est obligatoire.' });
     const [, rows] = await Mouvement.update(maj, { where: { id, tenant_id: req.tenantId }, returning: true });
     const avant = Object.fromEntries(Object.keys(maj).map((k) => [k, old[k]]));
@@ -231,6 +312,7 @@ const updateMouvement = async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     if (refusComptable(res, err)) return;
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error('[Journal] updateMouvement :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
   }
@@ -278,12 +360,13 @@ const imprimerBon = async (req, res) => {
     if (!row) return res.status(404).json({ error: 'Écriture introuvable.' });
     const [m] = await sequelize.query(
       `SELECT j.id, j.numero, j.date, j.mois, j.annee, j.type_caisse, j.rubrique_code, j.intitule, j.objet,
-              j.beneficiaire, j.piece_identite, j.telephone, j.entree, j.sortie, j.annule, j.annulation_de_id,
-              j.motif_annulation, j.nb_impressions, j.created_at,
+              j.beneficiaire, j.piece_identite, j.telephone, to_jsonb(j)->>'nui' AS nui, j.entree, j.sortie, j.annule, j.annulation_de_id,
+              j.motif_annulation, j.nb_impressions, j.created_at, to_jsonb(j)->>'rattrapage' AS rattrapage,
               jx.nom AS journal_nom, jx.code AS journal_code, jx.type AS journal_type,
               r.intitule AS rubrique_libelle, u.username AS saisi_par,
               o.numero AS numero_origine, a.numero AS numero_annulation, t.nom AS tenant_nom, t.sigle AS tenant_sigle, t.adresse AS tenant_adresse, t.boite_postale AS tenant_bp,
               t.nui AS tenant_nui, t.registre_commerce AS tenant_rc, t.logo_url AS tenant_logo, t.devise,
+              to_jsonb(t)->>'telephone' AS tenant_tel, to_jsonb(t)->>'email' AS tenant_email,
               t.caissier_nom, t.directeur_nom
          FROM journal j
          LEFT JOIN journaux jx ON jx.id = j.journal_id
@@ -542,6 +625,21 @@ const getCumuls = async (req, res) => {
 // ── GET /api/journal/controle-context?journal_id=&mois=&annee= ──────────
 // Snapshot des données nécessaires au pré-contrôle budgétaire hors-ligne
 // (miroir de controleBudgetSortie, mais pour toutes les rubriques du mois).
+// ── GET /api/journal/disponible?date=&mois=&annee=&rubrique_code=&journal_id= ──
+// Reste disponible d'une rubrique, affiché pendant la saisie d'une sortie
+// (semaine en cours avec report pour un budget hebdomadaire, sinon le mois).
+const getDisponible = async (req, res) => {
+  const { date, mois, annee, rubrique_code, journal_id } = req.query;
+  if (!date || !mois || !annee || !rubrique_code) return res.status(400).json({ error: 'date, mois, annee et rubrique_code requis.' });
+  try {
+    res.json(await disponibleRubrique(req.tenantId, { date, mois, annee, rubrique_code, journal_id }));
+  } catch (err) {
+    if (err instanceof hebdoSvc.ErreurMetier) return res.status(err.status).json({ error: err.message });
+    console.error('[Journal] disponible :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+
 const getControleContext = async (req, res) => {
   const { journal_id, mois, annee } = req.query;
   if (!mois || !annee) return res.status(400).json({ error: 'mois et annee requis.' });
@@ -572,8 +670,36 @@ const getControleContext = async (req, res) => {
     const sorties_by_rubrique  = {};
     srRows.forEach(r  => { sorties_by_rubrique[r.rubrique_code] = parseFloat(r.v) || 0; });
 
+    // Budget hebdomadaire (040) : cumuls par semaine pour le pré-contrôle hors ligne.
+    let hebdoCtx = null;
+    if (await hebdoSvc.estHebdo(req.tenantId, mois, an)) {
+      const semaines = hebdoSvc.semainesDuMois(mois, an);
+      const [parJour, plafonds, valides] = await Promise.all([
+        sequelize.query(
+          `SELECT rubrique_code, journal_id, date::text AS date, COALESCE(SUM(sortie), 0) AS v
+             FROM journal WHERE tenant_id = :t AND mois = :m AND annee = :a AND sortie > 0
+            GROUP BY rubrique_code, journal_id, date`,
+          { replacements: { t: req.tenantId, m: mois, a: an }, type: sequelize.QueryTypes.SELECT }),
+        jid ? BudgetCaisse.findAll({ where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an }, attributes: ['semaine', 'montant'], raw: true }) : [],
+        Promise.all(semaines.map((x) => budgetApprouve(req.tenantId, mois, an, { semaine: x.num }))),
+      ]);
+      hebdoCtx = { semaines: semaines.map((x, i) => {
+        const jusque = parJour.filter((r) => r.date.slice(0, 10) <= x.fin);
+        const sorties = {};
+        jusque.forEach((r) => { sorties[r.rubrique_code] = (sorties[r.rubrique_code] || 0) + (parseFloat(r.v) || 0); });
+        return {
+          num: x.num, debut: x.debut, fin: x.fin, valide: valides[i].valide,
+          approuve_cumul: Object.fromEntries(valides[i].parRubrique),
+          sorties_cumul: sorties,
+          plafond_cumul: plafonds.filter((b) => b.semaine && b.semaine <= x.num).reduce((t, b) => t + (parseFloat(b.montant) || 0), 0),
+          sorties_journal_cumul: jusque.filter((r) => jid && Number(r.journal_id) === jid).reduce((t, r) => t + (parseFloat(r.v) || 0), 0),
+        };
+      }) };
+    }
+
     res.json({
       journal_id: jid, mois, annee: an,
+      hebdo: hebdoCtx,
       plafond:            parseFloat(plafondVal) || 0,
       sorties_journal:    parseFloat(sjVal) || 0,
       approuve_by_rubrique,
@@ -589,5 +715,5 @@ const getControleContext = async (req, res) => {
 
 module.exports = {
   getJournal, createMouvement, updateMouvement, deleteMouvement, annulerMouvement, listerAnnulations, deciderAnnulation, imprimerBon, getInitialisation, postInitialisation,
-  getSoldes, getRan, setRan, getCumuls, getJournauxRecap, getControleContext,
+  getSoldes, getRan, setRan, getCumuls, getJournauxRecap, getControleContext, getDisponible,
 };

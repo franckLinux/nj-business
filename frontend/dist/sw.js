@@ -7,8 +7,12 @@
 // sont récupérés avec succès (cacheFirstStatic), plutôt que pré-listés.
 // =====================================================================
 
-const CACHE_STATIC  = 'nj-caisse-pro-static-v4';
-const CACHE_DYNAMIC = 'nj-caisse-pro-dynamic-v4';
+// v5 : la page HTML passe en NETWORK-FIRST. En v4 elle était servie
+// cache-first : une fois « / » en cache, le navigateur gardait l'ancien
+// index.html — donc l'ancien bundle JS — indéfiniment, et aucun déploiement
+// n'apparaissait chez les utilisateurs. Changer de nom de cache purge tout.
+const CACHE_STATIC  = 'nj-caisse-pro-static-v41';   // v41 : catalogue des modules (DSF, REVIS, CG) ; v40 : suppression d'un client (plateforme) ; v39 : passerelle interactive ; v38 : bouton Rafraîchir ; v37 : NJ BUSINESS (accueil, modules, logo)
+const CACHE_DYNAMIC = 'nj-caisse-pro-dynamic-v41';
 
 const APP_SHELL = ['/', '/manifest.json'];
 
@@ -49,8 +53,46 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(cacheFirstStatic(event.request));
+  if (event.request.method !== 'GET') return;
+
+  // Page HTML (navigation) : toujours le réseau d'abord, cache si hors ligne.
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
+    event.respondWith(networkFirstPage(event.request));
+    return;
+  }
+
+  // Ressources d'un autre domaine (polices, CDN…) : pas d'interception.
+  if (url.origin !== self.location.origin) return;
+
+  // Bundles Vite hashés (/assets/index-XXXX.js) : immuables → cache-first.
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(cacheFirstStatic(event.request));
+    return;
+  }
+
+  // Le reste (manifest, icônes…) : réseau d'abord, cache en secours.
+  event.respondWith(networkFirstPage(event.request));
 });
+
+const networkFirstPage = async (request) => {
+  try {
+    let networkResponse = await fetch(request);
+    // Route React (/demande-demo, /activation/…, /prospects…) inconnue du
+    // serveur statique : on sert l'application (index.html), qui affiche la page.
+    if (request.mode === 'navigate' && networkResponse.status === 404) {
+      networkResponse = await fetch('/', { cache: 'no-store' });
+    }
+    if (networkResponse.ok) {
+      const cache = await caches.open(CACHE_STATIC);
+      cache.put(request.mode === 'navigate' ? '/' : request, networkResponse.clone());
+    }
+    return networkResponse;
+  } catch (err) {
+    const cached = await caches.match(request.mode === 'navigate' ? '/' : request);
+    if (cached) return cached;
+    return new Response('Hors ligne', { status: 503 });
+  }
+};
 
 const networkFirstApi = async (request) => {
   const url = new URL(request.url);

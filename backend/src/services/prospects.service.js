@@ -24,7 +24,6 @@ const STATUTS = ['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE', 'DEM
 const ETAPES_AVANT_DEMO = ['PROSPECT', 'CONTACTE', 'INTERESSE'];
 const STATUTS_FERMES = ['DEMO_ANNULEE', 'PROSPECT_ABANDONNE', 'CLIENT_ACTIF'];
 const VALIDITE_LIEN_H = 72;
-const MAX_USERS_DEMO = 2;
 const CONSERVATION_JOURS = parseInt(process.env.DEMO_CONSERVATION_JOURS, 10) || 90;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 // Le prospect ne peut pas créer de profils métier dans son espace de test.
@@ -33,6 +32,14 @@ const PERMISSIONS_EXCLUES_DEMO = ['roles.edit'];
 const hash = (jeton) => crypto.createHash('sha256').update(String(jeton)).digest('hex');
 const urlFront = () => (process.env.APP_URL || 'http://localhost:5173').split(',')[0].trim().replace(/\/+$/, '');
 const contactCabinet = () => process.env.DEMO_CONTACT || process.env.SMTP_FROM || '';
+// Catalogue des formations du cabinet (PDF sur le site internet), joint en lien au mail d'activation.
+// Adresse par défaut : PDF publié dans la médiathèque WordPress du site du cabinet.
+// CATALOGUE_FORMATIONS_URL la remplace ; mise à vide, elle retire l'encadré du mail.
+const CATALOGUE_DEFAUT = 'https://cabinet-nganjean.com/wp-content/uploads/2026/10/Catalogue-formations-2027-CNJ.pdf';
+const catalogueFormations = () => String(process.env.CATALOGUE_FORMATIONS_URL ?? CATALOGUE_DEFAUT).trim();
+// Page « Formation continue » du site du cabinet, en lien sous le bouton du catalogue.
+const SITE_FORMATIONS_DEFAUT = 'https://cabinet-nganjean.com/formation-continue';
+const siteFormations = () => String(process.env.SITE_FORMATIONS_URL ?? SITE_FORMATIONS_DEFAUT).trim();
 const q = (sql, replacements, opts = {}) => sequelize.query(sql, { replacements, type: SELECT, ...opts });
 const ex = (sql, replacements, opts = {}) => sequelize.query(sql, { replacements, ...opts });
 
@@ -290,53 +297,58 @@ const creerEspaceDemo = async (t, p, userId) => {
 };
 
 // ── Invitation (création de l'espace + lien d'activation + e-mail) ────────
-const inviter = async ({ id, userId }) => {
-  const r = await sequelize.transaction(async (t) => {
-    const p = await charger(id, t, true);
-    if (!['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE'].includes(p.statut)) {
-      throw new ErreurMetier(409, `Envoi impossible au statut ${p.statut}.`
-        + (p.statut === 'DEMO_EXPIREE' ? ' Prolongez d\'abord la démonstration.' : ''));
-    }
-    if (!p.email) throw new ErreurMetier(400, 'Renseignez l\'adresse e-mail du prospect : elle sert d\'identifiant de connexion à la démo.');
-    // Démo pas encore ouverte et dates dépassées (prospect suivi depuis
-    // longtemps) : la période démarre aujourd'hui.
-    if (!p.tenant_id && new Date(p.demo_fin) <= new Date(Date.now() + 864e5)) {
-      const debut = new Date();
-      const fin = new Date(debut.getTime() + DUREE_DEMO_JOURS * 864e5);
-      await ex('UPDATE prospects SET demo_debut = :d, demo_fin = :f WHERE id = :id',
-        { d: debut.toISOString(), f: fin.toISOString(), id }, { transaction: t });
-      p.demo_debut = debut.toISOString(); p.demo_fin = fin.toISOString();
-    } else if (new Date(p.demo_fin) <= new Date()) {
-      throw new ErreurMetier(409, 'La période de démonstration est déjà terminée : prolongez-la avant l\'envoi.');
-    }
-    let { tenant_id: tenantId, user_id: prospectUserId } = p;
-    if (!tenantId) {
-      const [compte] = await q('SELECT 1 FROM users WHERE lower(username) = :m LIMIT 1', { m: p.email }, { transaction: t });
-      if (compte) throw new ErreurMetier(409, 'Cette adresse e-mail est déjà l\'identifiant d\'un compte existant.');
-      ({ tenantId, userIdProspect: prospectUserId } = await creerEspaceDemo(t, p, userId));
-    }
-    const estRenvoi = (await q('SELECT 1 FROM prospect_invitations WHERE prospect_id = :id LIMIT 1', { id }, { transaction: t })).length > 0;
-    await ex(`UPDATE prospect_invitations SET annule_le = NOW()
-               WHERE prospect_id = :id AND utilise_le IS NULL AND annule_le IS NULL`, { id }, { transaction: t });
-    const jeton = crypto.randomBytes(32).toString('base64url');
-    const expire = new Date(Math.min(Date.now() + VALIDITE_LIEN_H * 3600e3, new Date(p.demo_fin).getTime()));
-    const [inv] = await q(
-      `INSERT INTO prospect_invitations (prospect_id, token_hash, expire_le, est_renvoi, created_by)
-       VALUES (:id, :h, :exp, :renvoi, :userId) RETURNING id`,
-      { id, h: hash(jeton), exp: expire.toISOString(), renvoi: estRenvoi, userId }, { transaction: t });
-    await ex(`UPDATE prospects SET statut = 'INVITATION_ENVOYEE', tenant_id = :tid, user_id = :uid, demande_traitee = true, updated_at = NOW()
-               WHERE id = :id`, { id, tid: tenantId, uid: prospectUserId }, { transaction: t });
-    await ex('UPDATE tenants SET actif = true, demo_expire_le = :fin WHERE id = :tid', { tid: tenantId, fin: p.demo_fin }, { transaction: t });
-    await historiser(t, { prospectId: id, ancien: p.statut, nouveau: 'INVITATION_ENVOYEE',
-      action: estRenvoi ? 'INVITATION_RENVOYEE' : 'INVITATION_CREEE', details: { expire_le: expire }, userId });
-    return { p, jeton, invId: inv.id, estRenvoi, expire };
-  });
+// Découpée en deux temps pour être partagée par toutes les voies d'ouverture
+// d'une démonstration (Direction, code de validation directe, renvoi) :
+//   preparerInvitation(t, …) — DANS la transaction de l'appelant ;
+//   envoyerInvitation(r, …)  — APRÈS validation (e-mail).
+const preparerInvitation = async (t, { id, userId }) => {
+  const p = await charger(id, t, true);
+  if (!['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE'].includes(p.statut)) {
+    throw new ErreurMetier(409, `Envoi impossible au statut ${p.statut}.`
+      + (p.statut === 'DEMO_EXPIREE' ? ' Prolongez d\'abord la démonstration.' : ''));
+  }
+  if (!p.email) throw new ErreurMetier(400, 'Renseignez l\'adresse e-mail du prospect : elle sert d\'identifiant de connexion à la démo.');
+  // Démo pas encore ouverte et dates dépassées (prospect suivi depuis
+  // longtemps) : la période démarre aujourd'hui.
+  if (!p.tenant_id && new Date(p.demo_fin) <= new Date(Date.now() + 864e5)) {
+    const debut = new Date();
+    const fin = new Date(debut.getTime() + DUREE_DEMO_JOURS * 864e5);
+    await ex('UPDATE prospects SET demo_debut = :d, demo_fin = :f WHERE id = :id',
+      { d: debut.toISOString(), f: fin.toISOString(), id }, { transaction: t });
+    p.demo_debut = debut.toISOString(); p.demo_fin = fin.toISOString();
+  } else if (new Date(p.demo_fin) <= new Date()) {
+    throw new ErreurMetier(409, 'La période de démonstration est déjà terminée : prolongez-la avant l\'envoi.');
+  }
+  let { tenant_id: tenantId, user_id: prospectUserId } = p;
+  if (!tenantId) {
+    const [compte] = await q('SELECT 1 FROM users WHERE lower(username) = :m LIMIT 1', { m: p.email }, { transaction: t });
+    if (compte) throw new ErreurMetier(409, 'Cette adresse e-mail est déjà l\'identifiant d\'un compte existant.');
+    ({ tenantId, userIdProspect: prospectUserId } = await creerEspaceDemo(t, p, userId));
+  }
+  const estRenvoi = (await q('SELECT 1 FROM prospect_invitations WHERE prospect_id = :id LIMIT 1', { id }, { transaction: t })).length > 0;
+  await ex(`UPDATE prospect_invitations SET annule_le = NOW()
+             WHERE prospect_id = :id AND utilise_le IS NULL AND annule_le IS NULL`, { id }, { transaction: t });
+  const jeton = crypto.randomBytes(32).toString('base64url');
+  const expire = new Date(Math.min(Date.now() + VALIDITE_LIEN_H * 3600e3, new Date(p.demo_fin).getTime()));
+  const [inv] = await q(
+    `INSERT INTO prospect_invitations (prospect_id, token_hash, expire_le, est_renvoi, created_by)
+     VALUES (:id, :h, :exp, :renvoi, :userId) RETURNING id`,
+    { id, h: hash(jeton), exp: expire.toISOString(), renvoi: estRenvoi, userId }, { transaction: t });
+  await ex(`UPDATE prospects SET statut = 'INVITATION_ENVOYEE', tenant_id = :tid, user_id = :uid, demande_traitee = true, updated_at = NOW()
+             WHERE id = :id`, { id, tid: tenantId, uid: prospectUserId }, { transaction: t });
+  await ex('UPDATE tenants SET actif = true, demo_expire_le = :fin WHERE id = :tid', { tid: tenantId, fin: p.demo_fin }, { transaction: t });
+  await historiser(t, { prospectId: id, ancien: p.statut, nouveau: 'INVITATION_ENVOYEE',
+    action: estRenvoi ? 'INVITATION_RENVOYEE' : 'INVITATION_CREEE', details: { expire_le: expire }, userId });
+  return { p, jeton, invId: inv.id, estRenvoi, expire };
+};
 
+const envoyerInvitation = async (r, { id, userId }) => {
   // Envoi APRÈS validation : un échec SMTP n'annule pas l'espace créé.
   const lien = `${urlFront()}/activation/${r.jeton}`;
   const envoi = await email.sendInvitationDemo({
     to: r.p.email, nom: r.p.nom_complet || r.p.entreprise, lien,
-    debut: r.p.demo_debut, fin: r.p.demo_fin, contact: contactCabinet(),
+    debut: r.p.demo_debut, fin: r.p.demo_fin, contact: contactCabinet(), catalogue: catalogueFormations(),
+    siteFormations: siteFormations(),
   });
   const statutEmail = envoi.statut === 'envoye' && r.estRenvoi ? 'renvoye' : envoi.statut;
   await ex(`UPDATE prospect_invitations SET statut_email = :s, erreur_email = :e,
@@ -354,9 +366,15 @@ const inviter = async ({ id, userId }) => {
   };
 };
 
+const inviter = async ({ id, userId }) => {
+  const r = await sequelize.transaction((t) => preparerInvitation(t, { id, userId }));
+  return envoyerInvitation(r, { id, userId });
+};
+
 const apercuEmail = ({ nom, debut, fin }) => email.contenuInvitation({
   nom: nom || 'Madame, Monsieur', lien: `${urlFront()}/activation/…`,
-  debut: debut || new Date(), fin: fin || new Date(Date.now() + 14 * 864e5), contact: contactCabinet(),
+  debut: debut || new Date(), fin: fin || new Date(Date.now() + DUREE_DEMO_JOURS * 864e5), contact: contactCabinet(),
+  catalogue: catalogueFormations(), siteFormations: siteFormations(),
 });
 
 // ── Activation (public, par le prospect) ──────────────────────────────────
@@ -474,12 +492,61 @@ const changerStatut = async ({ id, statut, motif, userId }) => sequelize.transac
   return charger(id, t);
 });
 
+// ── Suppression (Super Admin) ─────────────────────────────────────────────
+// La fiche prospect et son historique sont supprimés. Un client (converti, ou
+// avec paiement / abonnement) ne se supprime pas : ses traces comptables
+// doivent rester. L'espace de démo éventuel n'est pas effacé (écritures
+// protégées) : il est fermé et anonymisé, ce qui libère l'adresse e-mail.
+const supprimer = async ({ id, motif, user }) => {
+  if (user?.role !== 'super_admin') throw new ErreurMetier(403, 'Seul le Super Admin peut supprimer un prospect.');
+  const m = String(motif || '').trim();
+  if (!m) throw new ErreurMetier(400, 'Le motif de la suppression est obligatoire.');
+  return sequelize.transaction(async (t) => {
+    const p = await charger(id, t, true);
+    if (p.statut === 'CLIENT_ACTIF' || p.client_tenant_id) {
+      throw new ErreurMetier(409, 'Ce prospect est devenu client : il ne peut pas être supprimé.');
+    }
+    const [{ n }] = await q(`SELECT (SELECT COUNT(*) FROM paiements WHERE prospect_id = :id)
+                                  + (SELECT COUNT(*) FROM abonnements WHERE prospect_id = :id) AS n`, { id }, { transaction: t });
+    if (Number(n) > 0) {
+      throw new ErreurMetier(409, 'Des paiements ou un abonnement sont enregistrés pour ce prospect : il ne peut pas être supprimé. Passez-le en « Abandonné ».');
+    }
+    let demoFermee = false;
+    if (p.tenant_id) {
+      const [tn] = await q('SELECT id, type_compte FROM tenants WHERE id = :tid FOR UPDATE', { tid: p.tenant_id }, { transaction: t });
+      if (tn && tn.type_compte !== 'demo') throw new ErreurMetier(409, 'L\'espace rattaché n\'est pas un espace de démonstration : suppression impossible.');
+      if (tn) {
+        const court = String(p.tenant_id).slice(0, 8);
+        await ex(`UPDATE tenants SET actif = false, nom = :nom, suspension_motif = :mo,
+                    donnees_conservees_jusqu_au = NOW() WHERE id = :tid`,
+        { tid: p.tenant_id, nom: `Démo supprimée ${court}`, mo: `Prospect supprimé : ${m}`.slice(0, 300) }, { transaction: t });
+        await ex('DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE tenant_id = :tid)', { tid: p.tenant_id }, { transaction: t });
+        await ex(`UPDATE users SET actif = false, email = NULL, password_hash = '!supprime',
+                    username = 'supprime-' || substr(id::text, 1, 8) WHERE tenant_id = :tid`, { tid: p.tenant_id }, { transaction: t });
+        demoFermee = true;
+      }
+    }
+    if (p.user_id) {
+      await ex(`UPDATE users SET actif = false, email = NULL, password_hash = '!supprime',
+                  username = 'supprime-' || substr(id::text, 1, 8) WHERE id = :u AND role NOT IN ('super_admin', 'comptable_cabinet')`,
+      { u: p.user_id }, { transaction: t });
+    }
+    await auditer(t, { tenantId: p.tenant_id, userId: user.id, action: 'PROSPECT_SUPPRIME', entiteId: id,
+      avant: { nom_complet: p.nom_complet, entreprise: p.entreprise, email: p.email, telephone: p.telephone,
+        statut: p.statut, created_at: p.created_at, espace_demo: p.tenant_id },
+      apres: { motif: m, espace_demo_ferme: demoFermee } });
+    await ex('DELETE FROM prospects WHERE id = :id', { id }, { transaction: t });
+    return { ok: true, supprime: true, espace_demo_ferme: demoFermee };
+  });
+};
+
 // ── Demande de démo depuis la page publique ───────────────────────────────
 // Rien n'est créé côté accès : la demande arrive en PROSPECT « à traiter » et
 // le cabinet décide d'envoyer (ou non) l'accès. Réponse identique dans tous
 // les cas (nouvelle demande, doublon, compte existant) : la page publique ne
 // doit pas permettre de savoir si une adresse est connue.
-const DUREE_DEMO_JOURS = parseInt(process.env.DEMO_DUREE_JOURS, 10) || 14;
+// Durée d'essai par défaut : 30 jours (DEMO_DUREE_JOURS pour la changer).
+const DUREE_DEMO_JOURS = parseInt(process.env.DEMO_DUREE_JOURS, 10) || 30;
 const CHAMPS_WEB = ['nom_complet', 'entreprise', 'email', 'telephone', 'pays', 'ville', 'secteur',
   'type_entreprise', 'nb_utilisateurs', 'nb_points_vente', 'besoins'];
 
@@ -490,14 +557,21 @@ const notifierCabinet = async (sujet, lignes) => {
   return (await email.sendNotificationAdmin({ to: dest, sujet, lignes })).statut;
 };
 
-const demandeWeb = async (corps) => {
+// Lecture et contrôle d'une demande du formulaire public (partagée avec la
+// validation directe par code). Renvoie null pour un robot (champ piège rempli).
+const lireDemandeWeb = (corps) => {
   // Champ piège invisible pour les humains : un robot le remplit.
-  if (String(corps.site_web || '').trim()) return { ok: true };
+  if (String(corps.site_web || '').trim()) return null;
   if (corps.consentement !== true) throw new ErreurMetier(400, 'Merci d\'accepter d\'être recontacté(e) par le cabinet.');
   if (!String(corps.telephone || '').trim()) throw new ErreurMetier(400, 'Le téléphone est obligatoire.');
   const d = Object.fromEntries(CHAMPS_WEB.filter((c) => corps[c] !== undefined).map((c) => [c, corps[c]]));
   const debut = new Date();
-  const v = nettoyer({ ...d, demo_debut: debut, demo_fin: new Date(debut.getTime() + DUREE_DEMO_JOURS * 864e5) });
+  return nettoyer({ ...d, demo_debut: debut, demo_fin: new Date(debut.getTime() + DUREE_DEMO_JOURS * 864e5) });
+};
+
+const demandeWeb = async (corps) => {
+  const v = lireDemandeWeb(corps);
+  if (!v) return { ok: true };
 
   const res = await sequelize.transaction(async (t) => {
     const [existant] = await q('SELECT id, statut FROM prospects WHERE lower(btrim(email)) = :m FOR UPDATE',
@@ -528,15 +602,13 @@ const demandeWeb = async (corps) => {
   return { ok: true };
 };
 
-// ── Limite d'utilisateurs d'un espace de démo (users.controller) ──────────
-const verifierLimiteUtilisateursDemo = async (tenantId) => {
-  if (!tenantId) return;
-  const [t] = await q(
-    `SELECT t.type_compte, (SELECT COUNT(*)::int FROM users u WHERE u.tenant_id = t.id) AS n
-       FROM tenants t WHERE t.id = :id`, { id: tenantId }).catch(() => []);
-  if (t && t.type_compte === 'demo' && t.n >= MAX_USERS_DEMO) {
-    throw new ErreurMetier(403, `Espace de démonstration : ${MAX_USERS_DEMO} utilisateurs maximum.`);
-  }
+// ── Espace de démonstration ────────────────────────────────────────────────
+// Les rôles disponibles en démo (directeur + caissier par défaut, utilisateurs
+// en nombre illimité) sont gérés par services/roles_client.service.js (038).
+const estEspaceDemo = async (tenantId) => {
+  if (!tenantId) return false;
+  const [t] = await q('SELECT type_compte FROM tenants WHERE id = :id', { id: tenantId }).catch(() => []);
+  return t?.type_compte === 'demo';
 };
 
 // ── Tâche quotidienne (cron cPanel → /api/taches/quotidiennes) ───────────
@@ -571,10 +643,17 @@ const tachesQuotidiennes = async () => {
     bilan.notification_admin = await notifierCabinet(`${expires.length} démonstration(s) expirée(s)`,
       expires.map((p) => `${p.entreprise || p.nom_complet} <${p.email}> — fin le ${new Date(p.demo_fin).toLocaleDateString('fr-FR')}`));
   }
+  // Budget hebdomadaire (040) : le vendredi, rappel des semaines suivantes non validées.
+  try {
+    bilan.rappels_budget_hebdo = await require('./budget_hebdo.service').rappelsVendredi();
+  } catch (e) {
+    console.error('[Taches] rappels budget hebdomadaire :', e.message);
+    bilan.rappels_budget_hebdo = { erreur: e.message };
+  }
   return bilan;
 };
 
 module.exports = {
-  STATUTS, ErreurMetier, lister, detail, creer, modifier, inviter, apercuEmail, verifierActivation, activer,
-  prolonger, changerStatut, marquerExpires, demandeWeb, notifierCabinet, historiser, auditer, charger, CONSERVATION_JOURS, tachesQuotidiennes, verifierLimiteUtilisateursDemo,
+  STATUTS, ErreurMetier, lister, detail, creer, modifier, inviter, preparerInvitation, envoyerInvitation, apercuEmail, verifierActivation, activer,
+  prolonger, changerStatut, supprimer, marquerExpires, demandeWeb, lireDemandeWeb, verifierTelephoneLibre, notifierCabinet, historiser, auditer, charger, CONSERVATION_JOURS, tachesQuotidiennes, estEspaceDemo,
 };

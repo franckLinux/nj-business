@@ -141,7 +141,9 @@ export function AppProvider({ children }) {
         setUser((precedent) => {
           if (!precedent) return precedent;
           const suivant = { ...precedent, role: me.role, permissions: me.permissions, permissionsAccordees: me.permissionsAccordees || [],
-            type_compte: me.type_compte || 'client', demo_expire_le: me.demo_expire_le || null };
+            type_compte: me.type_compte || 'client', demo_expire_le: me.demo_expire_le || null,
+            activite_obligatoire: Boolean(me.activite_obligatoire),
+            modules: Array.isArray(me.modules) ? me.modules : null }; // 048 : modules de l'espace
           try { localStorage.setItem(USER_KEY, JSON.stringify(suivant)); } catch { /* stockage plein ou indisponible */ }
           return suivant;
         });
@@ -157,6 +159,58 @@ export function AppProvider({ children }) {
       window.removeEventListener('focus', onVisible);
     };
   }, [token, activeTenantId]);
+
+  // NJ BUSINESS (048) : le serveur a refusé un module désactivé pendant la
+  // session (403 MODULE_INACTIF). On relit aussitôt les modules de l'espace,
+  // sans attendre le rafraîchissement périodique ; App ramène à l'accueil.
+  useEffect(() => {
+    if (!token) return undefined;
+    let dernier = 0; // plusieurs appels refusés en même temps → une seule relecture
+    const surModuleInactif = () => {
+      if (Date.now() - dernier < 3000) return;
+      dernier = Date.now();
+      api.get('/auth/me').then((me) => {
+        if (!me || me.error) return;
+        setUser((precedent) => {
+          if (!precedent) return precedent;
+          const suivant = { ...precedent, modules: Array.isArray(me.modules) ? me.modules : null };
+          try { localStorage.setItem(USER_KEY, JSON.stringify(suivant)); } catch { /* stockage indisponible */ }
+          return suivant;
+        });
+      });
+    };
+    window.addEventListener('module-inactif', surModuleInactif);
+    // Bouton « Rafraîchir » : droits et modules relus aussi (sans délai minimum).
+    const surRafraichir = () => {
+      api.get('/auth/me').then((me) => {
+        if (!me || me.error) return;
+        setUser((precedent) => {
+          if (!precedent) return precedent;
+          const suivant = { ...precedent, role: me.role, permissions: me.permissions, permissionsAccordees: me.permissionsAccordees || [],
+            modules: Array.isArray(me.modules) ? me.modules : null };
+          try { localStorage.setItem(USER_KEY, JSON.stringify(suivant)); } catch { /* stockage indisponible */ }
+          return suivant;
+        });
+      });
+    };
+    window.addEventListener('njb-rafraichir', surRafraichir);
+    return () => {
+      window.removeEventListener('module-inactif', surModuleInactif);
+      window.removeEventListener('njb-rafraichir', surRafraichir);
+    };
+  }, [token]);
+
+  // En-tête des documents imprimés (logo, raison sociale, coordonnées) du
+  // client consulté. Chargé à l'avance : les fenêtres d'impression doivent
+  // s'ouvrir dans le clic, sans attendre le réseau (bloqueur de pop-up).
+  const [entite, setEntite] = useState(null);
+  const tenantCourant = activeTenantId || user?.tenantId || null;
+  const rechargerEntite = useCallback(async () => {
+    if (!token || !tenantCourant) { setEntite(null); return; }
+    const r = await api.get('/config/entete');
+    if (r && !r.error) setEntite(r);
+  }, [token, tenantCourant]);
+  useEffect(() => { setEntite(null); rechargerEntite(); }, [rechargerEntite]);
 
   const selectTenant = useCallback((id, nom, dev) => {
     setActiveTenantId(id);
@@ -207,7 +261,8 @@ export function AppProvider({ children }) {
     mois, setMois, annee, setAnnee, MOIS,
     journaux, journauxGrouped, loadJournaux,
     rubriques, loadRubriques,
-  }), [token, user, login, logout, can, isAdmin, peutVoirAttente, activeTenantId,
+    entite, rechargerEntite,
+  }), [entite, rechargerEntite, token, user, login, logout, can, isAdmin, peutVoirAttente, activeTenantId,
        activeTenantNom, tenantLabel, selectTenant, tenantSelectorOpen,
        openTenantSelector, closeTenantSelector, devise, mois, annee,
        journaux, journauxGrouped, loadJournaux, rubriques, loadRubriques]);

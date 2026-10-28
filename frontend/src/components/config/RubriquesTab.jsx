@@ -14,7 +14,9 @@ function VirementBadge({ oui }) {
   );
 }
 
-function RubriqueModal({ rubrique, defaultType, onClose, onSaved }) {
+// `simple` (044) : ajout par la caissière (rubriques.create sans rubriques.edit) :
+// ni code comptable ni virement interne, qui relèvent du comptable.
+export function RubriqueModal({ rubrique, defaultType, onClose, onSaved, simple = false }) {
   const isEdit = !!rubrique;
   const [code, setCode] = useState(rubrique?.code || '');
   const [type, setType] = useState(rubrique?.type || defaultType || 'entree');
@@ -32,13 +34,16 @@ function RubriqueModal({ rubrique, defaultType, onClose, onSaved }) {
 
     const body = isEdit
       ? { intitule: intituleMaj, code_comptable: codeComptable.trim() || null, est_virement_interne: virement, ordre: 0, actif: true }
-      : { code: codeMaj, intitule: intituleMaj, type, code_comptable: codeComptable.trim() || null, est_virement_interne: virement, ordre: 0 };
+      : simple
+        ? { code: codeMaj, intitule: intituleMaj, type, ordre: 0 }
+        : { code: codeMaj, intitule: intituleMaj, type, code_comptable: codeComptable.trim() || null, est_virement_interne: virement, ordre: 0 };
 
     setSaving(true);
     const res = isEdit ? await api.put(`/rubriques/${rubrique.id}`, body) : await api.post('/rubriques', body);
     setSaving(false);
     if (res.error) { setErreur(res.error); return; }
-    onSaved(isEdit ? 'Rubrique modifiée ✓' : 'Rubrique créée ✓');
+    // Compte déjà validé par le cabinet : le nouveau code devient une proposition.
+    onSaved(res.passerelle_message || res.message || (isEdit ? 'Rubrique modifiée ✓' : 'Rubrique créée ✓'), res);
   };
 
   return (
@@ -69,6 +74,11 @@ function RubriqueModal({ rubrique, defaultType, onClose, onSaved }) {
           <label>Intitulé *</label>
           <input type="text" value={intitule} onChange={(e) => setIntitule(e.target.value)} placeholder="Ex: FRAIS DE TRANSPORT DIVERS" />
 
+          {simple ? (
+            <div style={{ marginTop: 12, background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e3a8a', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
+              Le code comptable de la rubrique sera défini par le comptable (Contrôle comptable → Contrôle de régularité formelle).
+            </div>
+          ) : (<>
           <label>Code comptable
             <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 4 }}>(optionnel — SYSCOHADA / SAGE i7)</span>
           </label>
@@ -86,6 +96,7 @@ function RubriqueModal({ rubrique, defaultType, onClose, onSaved }) {
                 : <span style={{ color: '#166534', fontWeight: 600 }}>Non — inclure dans le budget</span>}
             </span>
           </div>
+          </>)}
 
           {erreur && <div className="alert-err" style={{ marginTop: 12 }}>{erreur}</div>}
         </div>
@@ -98,12 +109,12 @@ function RubriqueModal({ rubrique, defaultType, onClose, onSaved }) {
   );
 }
 
-function Section({ titre, liste, type, canEdit, onAdd, onEdit, onDelete }) {
+function Section({ titre, liste, type, canEdit, canAdd = canEdit, onAdd, onEdit, onDelete }) {
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
         <h4 style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5, color: 'var(--text-muted)' }}>{titre} ({liste.length})</h4>
-        {canEdit && <button className="btn-add" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => onAdd(type)}>+ Ajouter</button>}
+        {canAdd && <button className="btn-add" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => onAdd(type)}>+ Ajouter</button>}
       </div>
       <div className="table-wrap">
         <table>
@@ -148,6 +159,8 @@ export default function RubriquesTab() {
   const [modal, setModal] = useState(null); // null | { type } | rubrique
 
   const peutGerer = can('rubriques.edit');
+  // 044 : la caissière ajoute des rubriques pour sa saisie, sans les modifier.
+  const peutAjouter = peutGerer || can('rubriques.create');
 
   const onDelete = async (id) => {
     if (!window.confirm('Désactiver cette rubrique ?')) return;
@@ -160,15 +173,18 @@ export default function RubriquesTab() {
     <>
       <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Rubriques</h3>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18 }}>
-        Le code comptable est facultatif — il sera utilisé pour les exports SAGE i7.
+        {peutGerer
+          ? 'Le code comptable est facultatif. Une fois validé par le cabinet (menu Contrôle comptable → Contrôle de régularité formelle), il ne change plus qu\'après une nouvelle validation.'
+          : 'Vous pouvez ajouter les rubriques utiles à votre saisie. Leur code comptable est défini par le comptable.'}
       </p>
-      <Section titre="Entrées" liste={rubriques.entrees || []} type="entree" canEdit={peutGerer} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />
-      <Section titre="Dépenses" liste={rubriques.depenses || []} type="depense" canEdit={peutGerer} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />
+      <Section titre="Entrées" liste={rubriques.entrees || []} type="entree" canEdit={peutGerer} canAdd={peutAjouter} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />
+      <Section titre="Dépenses" liste={rubriques.depenses || []} type="depense" canEdit={peutGerer} canAdd={peutAjouter} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />
 
       {modal && (
         <RubriqueModal
           rubrique={modal.type ? null : modal}
           defaultType={modal.type}
+          simple={!peutGerer}
           onClose={() => setModal(null)}
           onSaved={(msg) => { setModal(null); toast(msg, 'success'); loadRubriques(); }}
         />

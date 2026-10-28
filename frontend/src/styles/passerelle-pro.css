@@ -1,0 +1,132 @@
+/* =====================================================================
+   Passerelle comptable — rubriques interactives (28/10/2026)
+   Classes préfixées pp- : aucun style existant n'est modifié.
+   ===================================================================== */
+.pp { margin-bottom: 28px; }
+.pp-entete { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.pp-titre { font-size: 15px; font-weight: 800; color: var(--brand); margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.pp-titre span { font-size: 12px; font-weight: 700; background: #e2e8f0; color: #334155; border-radius: 999px; padding: 1px 9px; }
+.pp-progression { display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: var(--text-muted); }
+.pp-progression b { color: var(--text); }
+.pp-barre { width: 220px; max-width: 45vw; height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+.pp-barre > div { height: 100%; background: var(--accent); border-radius: 999px; transition: width .4s ease; }
+.pp-barre > div.complet { background: #16a34a; }
+.pp-outils { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pp-recherche {
+  height: 38px; min-width: 260px; padding: 0 12px; border: 1.5px solid var(--border); border-radius: 9px;
+  font-size: 13px; font-family: inherit; background: #fff;
+}
+.pp-recherche:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, .15); }
+
+.pp-filtres { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.pp-filtre {
+  border: 1.5px solid var(--border); background: #fff; color: var(--text); border-radius: 999px;
+  height: 34px; padding: 0 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 8px; transition: background .15s, border-color .15s;
+}
+.pp-filtre:hover { border-color: #93c5fd; }
+.pp-filtre.actif { background: var(--brand); border-color: var(--brand); color: #fff; }
+.pp-filtre:focus-visible { outline: 3px solid rgba(59, 130, 246, .4); outline-offset: 2px; }
+.pp-compte { font-size: 11.5px; background: rgba(15, 23, 42, .08); border-radius: 999px; padding: 0 7px; line-height: 18px; }
+.pp-filtre.actif .pp-compte { background: rgba(255, 255, 255, .2); }
+
+.pp-serie {
+  position: sticky; top: 64px; z-index: 6; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--brand); color: #fff; border-radius: 12px; padding: 10px 14px; margin-bottom: 10px;
+  box-shadow: 0 8px 24px rgba(26, 43, 74, .25); font-size: 13.5px;
+}
+.pp-serie .pp-lien { color: #cbd5e1; }
+.pp-serie-avance { font-weight: 700; }
+
+.pp-table-wrap { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 14px; overflow-x: auto; }
+.pp-table { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 760px; }
+.pp-table th {
+  text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted); background: #f8fafc; padding: 10px 12px; border-bottom: 1px solid var(--border);
+}
+.pp-table td { padding: 12px; border-bottom: 1px solid #f1f5f9; vertical-align: top; transition: background .3s; }
+.pp-table tbody tr:last-child td { border-bottom: 0; }
+.pp-table tbody tr:hover td { background: #fafcff; }
+.pp-col-check { width: 36px; text-align: center; }
+.pp-col-check input { width: 16px; height: 16px; margin-top: 10px; accent-color: var(--accent); cursor: pointer; }
+.pp-col-compte { width: 38%; min-width: 280px; }
+.pp-col-action { width: 1%; white-space: nowrap; }
+.pp-ligne-choisie td { background: #f0f7ff; }
+.pp-ligne-faite td { background: #f0fdf4; }
+.pp-ligne-erreur td { background: #fef2f2; }
+
+.pp-rubrique { display: flex; gap: 10px; align-items: flex-start; }
+.pp-code {
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px; font-weight: 700; background: #eef2ff; color: #3730a3;
+  border-radius: 6px; padding: 3px 8px; margin-top: 2px; flex: none;
+}
+.pp-intitule { font-weight: 600; font-size: 14px; color: var(--text); }
+.pp-pastille { margin-left: 6px; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 8px; background: #f1f5f9; color: #475569; }
+.pp-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.pp-sens { font-weight: 600; }
+.pp-entree { color: #15803d; }
+.pp-depense { color: #b45309; }
+
+.pp-sous-champ { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; min-height: 16px; }
+.pp-libelle { font-size: 12.5px; color: var(--text); font-weight: 500; }
+.pp-info { font-size: 11.5px; color: var(--text-muted); }
+.pp-suggere { color: #7c3aed; }
+.pp-fixe { font-size: 13px; padding-top: 8px; }
+.pp-fixe code { font-weight: 700; }
+.pp-fixe span { color: var(--text-muted); font-size: 12px; margin-left: 4px; }
+.pp-msg { font-size: 12px; margin-top: 6px; line-height: 1.45; border-radius: 7px; padding: 5px 8px; }
+.pp-msg-erreur { background: #fee2e2; color: #991b1b; }
+.pp-msg-alerte { background: #fffbeb; color: #92400e; }
+
+.pp-etat { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; margin-top: 6px; }
+.pp-ok { background: #dcfce7; color: #166534; }
+.pp-attente { background: #fef3c7; color: #92400e; }
+.pp-neutre { background: #f1f5f9; color: #475569; }
+.pp-alerte { background: #ffedd5; color: #9a3412; }
+.pp-erreur { background: #fee2e2; color: #991b1b; }
+.pp-violet { background: #ede9fe; color: #5b21b6; }
+
+.pp-actions { display: flex; gap: 6px; align-items: center; padding-top: 2px; }
+.pp-btn {
+  border: 0; border-radius: 9px; height: 38px; padding: 0 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+  font-family: inherit; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  transition: background .15s, transform .05s, box-shadow .15s;
+}
+.pp-btn:active:not(:disabled) { transform: translateY(1px); }
+.pp-btn:disabled { opacity: .45; cursor: not-allowed; }
+.pp-btn:focus-visible { outline: 3px solid rgba(59, 130, 246, .45); outline-offset: 2px; }
+.pp-petit { height: 36px; padding: 0 12px; }
+.pp-primaire { background: var(--accent); color: #fff; }
+.pp-primaire:hover:not(:disabled) { background: #2563eb; box-shadow: 0 4px 12px rgba(37, 99, 235, .25); }
+.pp-secondaire { background: #fff; color: var(--text); border: 1.5px solid var(--border); }
+.pp-secondaire:hover { border-color: #93c5fd; background: #f8fbff; }
+.pp-danger { background: #fff; color: #b91c1c; border: 1.5px solid #fecaca; }
+.pp-danger:hover:not(:disabled) { background: #fef2f2; }
+.pp-icone { background: transparent; padding: 0 8px; font-size: 15px; }
+.pp-icone:hover { background: #f1f5f9; }
+.pp-lien { background: none; color: #1d4ed8; padding: 0 6px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.pp-spin {
+  width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .45); border-top-color: #fff;
+  animation: pp-tourne .8s linear infinite;
+}
+@keyframes pp-tourne { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pp-spin { animation: none; } .pp-barre > div, .pp-table td { transition: none; } }
+
+.pp-rejet { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.pp-rejet input {
+  height: 36px; width: 220px; padding: 0 10px; border: 1.5px solid #fca5a5; border-radius: 8px; font-size: 13px; font-family: inherit;
+}
+.pp-rejet input:focus { outline: none; box-shadow: 0 0 0 3px rgba(248, 113, 113, .2); }
+.pp-vide { text-align: center; padding: 32px 12px !important; color: var(--text-muted); font-size: 14px; }
+.pp-aide { font-size: 12px; color: var(--text-muted); margin: 8px 2px 0; }
+.pp-aide kbd {
+  font-family: inherit; font-size: 11px; font-weight: 700; border: 1px solid #cbd5e1; border-bottom-width: 2px;
+  border-radius: 5px; padding: 0 5px; background: #fff; color: var(--text);
+}
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+
+@media (max-width: 760px) {
+  .pp-recherche { min-width: 0; width: 100%; }
+  .pp-outils { width: 100%; }
+  .pp-serie { top: 58px; }
+}
