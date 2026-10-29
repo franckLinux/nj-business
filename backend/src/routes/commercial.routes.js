@@ -60,4 +60,26 @@ router.post  ('/demandes/:id/pieces',           ...P('com.documents.ajouter'), c
 router.post  ('/demandes/:id/pieces/:doc/retrait', ...P('com.documents.ajouter'), c.postRetraitPiece);
 router.get   ('/demandes/:id/pieces/:doc',      ...DA, c.getPiece);
 
+// ── Livraison C : bons de commande (contrôles fins dans le service) ─────────
+const BC_VUE = [...base, requireAnyPermission('com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir')];
+router.get   ('/bons-commande',                          ...BC_VUE, c.getBons);
+router.get   ('/bons-commande/a-commander',              ...P('com.bc.preparer'), c.getACommander);
+router.get   ('/bons-commande/proposition/:id',          ...P('com.bc.preparer'), c.getProposition);
+router.get   ('/bons-commande/:id',                      ...BC_VUE, c.getBon);
+router.get   ('/bons-commande/:id/pdf',                  ...BC_VUE, c.getPdfBon);
+router.post  ('/bons-commande',                          ...P('com.bc.preparer'), c.postBon);
+router.put   ('/bons-commande/:id',                      ...P('com.bc.preparer'), c.putBon);
+router.delete('/bons-commande/:id',                      ...P('com.bc.preparer'), c.deleteBon);
+router.post  ('/bons-commande/:id/revalidation',         ...P('com.bc.preparer'), c.postRevalidation);
+router.post  ('/bons-commande/:id/emission',             ...P('com.bc.emettre'), c.postEmission);
+router.post  ('/bons-commande/:id/annulation',           ...P('com.bc.annuler'), c.postAnnulationBon);
+router.post  ('/bons-commande/:id/revision',             ...P('com.bc.annuler'), c.postRevision);
+router.post  ('/bons-commande/:id/proformas',            ...P('com.bc.preparer'), c.postProforma);
+router.post  ('/bons-commande/:id/proformas/:doc/retrait', ...P('com.bc.preparer'), c.postRetraitProforma);
+router.get   ('/bons-commande/:id/pieces/:doc',          ...BC_VUE, c.getPieceBon);
+
+router.get   ('/tableau-bord',                           ...P('com.tableau_bord.voir'), c.getTableau);
+router.get   ('/documents',                              ...BC_VUE, c.getDocuments);
+router.get   ('/historique',                             ...[...base, requireAnyPermission('com.da.voir_tout', 'com.tableau_bord.voir')], c.getHistorique);
+
 module.exports = router;

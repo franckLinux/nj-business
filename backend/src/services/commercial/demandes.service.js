@@ -93,7 +93,14 @@ const SQL_DEMANDE = `
   SELECT d.*, u.username AS demandeur_nom, m.code AS magasin_code, m.nom AS magasin_nom, m.actif AS magasin_actif,
          f.nom AS fournisseur_nom,
          (SELECT COUNT(*)::int FROM com_demande_lignes l WHERE l.demande_id = d.id) AS nb_lignes,
-         (SELECT COUNT(*)::int FROM com_documents x WHERE x.objet_type = 'demande' AND x.objet_id = d.id AND NOT x.retire) AS nb_documents
+         (SELECT COUNT(*)::int FROM com_documents x WHERE x.objet_type = 'demande' AND x.objet_id = d.id AND NOT x.retire) AS nb_documents,
+         -- Livraison C : avancement de la commande (bons émis) d'une demande approuvée.
+         CASE WHEN d.statut <> 'approuvee' THEN NULL
+              WHEN NOT EXISTS (SELECT 1 FROM com_demande_lignes l WHERE l.demande_id = d.id AND l.quantite > COALESCE((
+                     SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id
+                      WHERE bl.demande_ligne_id = l.id AND b.statut = 'emis'), 0)) THEN 'commandee'
+              WHEN EXISTS (SELECT 1 FROM com_bons_commande b WHERE b.demande_id = d.id AND b.statut = 'emis') THEN 'partielle'
+              ELSE 'a_commander' END AS etat_commande
     FROM com_demandes d
     JOIN users u ON u.id = d.demandeur_id
     JOIN com_magasins m ON m.id = d.magasin_id
@@ -158,7 +165,13 @@ const compteurs = async (ctx) => {
   const [c] = await Q(
     "SELECT COUNT(*)::int AS n FROM com_demandes WHERE tenant_id = :t AND demandeur_id = :moi AND statut = 'a_corriger'",
     { t: ctx.tenantId, moi: ctx.userId });
-  return { a_examiner: a.n, a_corriger: c.n };
+  // Préparateur des bons : demandes approuvées dont une quantité n'est sur aucun bon actif.
+  const [k] = ctx.peut('com.bc.preparer') ? await Q(
+    `SELECT COUNT(*)::int AS n FROM com_demandes d WHERE d.tenant_id = :t AND d.statut = 'approuvee'
+        AND EXISTS (SELECT 1 FROM com_demande_lignes l WHERE l.demande_id = d.id AND l.quantite > COALESCE((
+              SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id
+               WHERE bl.demande_ligne_id = l.id AND b.statut IN ('brouillon', 'emis')), 0))`, { t: ctx.tenantId }) : [{ n: 0 }];
+  return { a_examiner: a.n, a_corriger: c.n, a_commander: k.n };
 };
 
 const charger = async (ctx, id, tr, verrou = false) => {
@@ -223,12 +236,15 @@ const lire = async (ctx, id) => {
        FROM com_documents x LEFT JOIN users u ON u.id = x.ajoute_par
       WHERE x.tenant_id = :t AND x.objet_type = 'demande' AND x.objet_id = :id ORDER BY x.ajoute_le`,
     { t: ctx.tenantId, id: d.id });
+  const bons = await require('./bons.service').bonsDeDemande(ctx.tenantId, d.id);
+  const resteACommander = d.statut === 'approuvee' && out.some((l) => l.quantite > 0)
+    && (await require('./bons.service').restes(ctx.tenantId, d.id)).some((l) => l.reste > 0);
   return {
-    ...d, lignes: out,
+    ...d, lignes: out, bons,
     decisions: decisions.map((x) => ({ ...x, id: Number(x.id), montant: x.montant === null ? null : Number(x.montant) })),
     historique,
     documents: documents.map((x) => ({ ...x, id: Number(x.id), taille: Number(x.taille) })),
-    droits: droits(ctx, d),
+    droits: { ...droits(ctx, d), preparer_bc: resteACommander && ctx.peut('com.bc.preparer') },
   };
 };
 
@@ -428,6 +444,9 @@ const annuler = async (ctx, id, body = {}) => {
   const res = await sequelize.transaction(async (tr) => {
     const d = await charger(ctx, id, tr, true);
     if (!droits(ctx, d).annuler) throw new ErreurDemande(409, `Demande ${STATUTS[d.statut].toLowerCase()} : vous ne pouvez pas l'annuler.`);
+    const [bc] = await Q("SELECT numero_complet, statut FROM com_bons_commande WHERE demande_id = :d AND statut IN ('brouillon', 'emis') LIMIT 1", { d: d.id }, tr);
+    if (bc) throw new ErreurDemande(409, bc.statut === 'emis'
+      ? `Le bon de commande ${bc.numero_complet} a été émis : annulez d'abord le bon.` : 'Un bon de commande est en préparation pour cette demande : supprimez-le d\'abord.');
     if (motif.length < 3) throw new ErreurDemande(400, 'Indiquez le motif de l\'annulation.');
     if (motif.length > 2000) throw new ErreurDemande(400, 'Motif : 2000 caractères au plus.');
     await X(`UPDATE com_demandes SET statut = 'annulee', decidee_le = NOW(), modifie_le = NOW() WHERE id = :id`, { id: d.id }, tr);

@@ -420,6 +420,14 @@ router.post  ('/activation/:token',          prCtrl.activer);
 // Tâche quotidienne (cron cPanel) : rappels, expirations, notification interne.
 router.all   ('/taches/quotidiennes',        prCtrl.requireTacheToken, prCtrl.taches);
 
+// ── NJ COMMERCIAL (052) : vérification PUBLIQUE d'un bon de commande (QR code) ──
+// Hors du préfixe /commercial : reste joignable même si le module est désactivé
+// chez le client. Débit limité ; ni session, ni prix, ni lignes.
+router.get('/verification/bc/:jeton', rateLimit({
+  windowMs: 60 * 1000, max: parseInt(process.env.VERIFICATION_RATE_MAX, 10) || 30,
+  message: { error: 'Trop de vérifications depuis cet appareil. Réessayez dans une minute.' },
+}), require('../controllers/commercial.controller').getVerification);
+
 // ── NJ COMMERCIAL (migration 050) : /api/commercial/* ─────────────────────
 router.use('/commercial', require('./commercial.routes'));
 

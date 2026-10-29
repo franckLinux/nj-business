@@ -24,10 +24,17 @@ const TITRES = {
   '/commercial/demandes': 'Achats — Demandes d\'achat',
   '/commercial/demandes/nouvelle': 'Achats — Nouvelle demande',
   '/commercial/autorisations': 'Achats — Autorisations',
+  '/commercial/bons': 'Achats — Bons de commande',
+  '/commercial/bons/nouveau': 'Achats — Préparer un bon de commande',
+  '/commercial/tableau-bord': 'Achats — Tableau de bord',
+  '/commercial/documents': 'Achats — Documents justificatifs',
+  '/commercial/historique': 'Achats — Historique',
 };
 const titre = (chemin) => TITRES[chemin]
   || (/^\/commercial\/demandes\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier la demande'
-    : /^\/commercial\/demandes\/\d+$/.test(chemin) ? 'Achats — Demande d\'achat' : 'NJ COMMERCIAL');
+    : /^\/commercial\/demandes\/\d+$/.test(chemin) ? 'Achats — Demande d\'achat'
+      : /^\/commercial\/bons\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier le bon de commande'
+        : /^\/commercial\/bons\/\d+$/.test(chemin) ? 'Achats — Bon de commande' : 'NJ COMMERCIAL');
 
 // Entrées du menu : [chemin, libellé, permission(s) — une suffit, icône]
 const PARAMETRAGE = [
@@ -43,16 +50,18 @@ const PARAMETRAGE = [
 
 export const peutUn = (can, codes) => codes.some((c) => can(c));
 
-// Achats (livraison B). Les bons de commande et documents arrivent avec la livraison C.
+// Achats : demandes et autorisations (livraison B) ; bons, tableau de bord, documents, historique (C).
 export const DROITS_DEMANDES = ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'];
 export const DROITS_AUTORISATIONS = ['com.da.approuver', 'com.da.approuver_direction'];
+export const DROITS_BONS = ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'];
+export const DROITS_HISTORIQUE = ['com.da.voir_tout', 'com.tableau_bord.voir'];
 
 const navClass = ({ isActive }) => 'nav-item' + (isActive ? ' active' : '');
 
 function CommercialSidebar({ open, onClose }) {
   const { user, can, logout } = useApp();
   const location = useLocation();
-  const [badge, setBadge] = useState({ a_examiner: 0, a_corriger: 0 });
+  const [badge, setBadge] = useState({ a_examiner: 0, a_corriger: 0, a_commander: 0 });
   useEffect(() => {
     if (!peutUn(can, DROITS_DEMANDES)) return;
     api.get('/commercial/demandes/compteurs').then((r) => { if (r && !r.error) setBadge(r); });
@@ -77,8 +86,14 @@ function CommercialSidebar({ open, onClose }) {
           <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
           Démarrage
         </NavLink>
+        {peutUn(can, [...DROITS_DEMANDES, ...DROITS_BONS]) && <div className="cm-sidebar-label">Achats</div>}
+        {can('com.tableau_bord.voir') && (
+          <NavLink to="/commercial/tableau-bord" className={navClass}>
+            <svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="13" /><line x1="12" y1="20" x2="12" y2="6" /><line x1="18" y1="20" x2="18" y2="10" /><line x1="3" y1="20" x2="21" y2="20" /></svg>
+            Tableau de bord
+          </NavLink>
+        )}
         {peutUn(can, DROITS_DEMANDES) && (<>
-          <div className="cm-sidebar-label">Achats</div>
           <NavLink to="/commercial/demandes" className={navClass}>
             <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="9" y1="13" x2="15" y2="13" /><line x1="9" y1="17" x2="13" y2="17" /></svg>
             <span style={{ flex: 1 }}>Demandes d'achat</span>
@@ -92,6 +107,23 @@ function CommercialSidebar({ open, onClose }) {
             </NavLink>
           )}
         </>)}
+        {peutUn(can, DROITS_BONS) && (<>
+          <NavLink to="/commercial/bons" className={navClass}>
+            <svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z" /><polyline points="14 2 14 8 20 8" /><path d="M9 13h6M9 17h6M9 9h2" /></svg>
+            <span style={{ flex: 1 }}>Bons de commande</span>
+            {badge.a_commander > 0 && <span className="cm-badge-menu" title="Demandes approuvées à commander">{badge.a_commander}</span>}
+          </NavLink>
+          <NavLink to="/commercial/documents" className={navClass}>
+            <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+            Documents justificatifs
+          </NavLink>
+        </>)}
+        {peutUn(can, DROITS_HISTORIQUE) && (
+          <NavLink to="/commercial/historique" className={navClass}>
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg>
+            Historique
+          </NavLink>
+        )}
         <div className="cm-sidebar-label">Paramétrage</div>
         {PARAMETRAGE.filter(([, , codes]) => peutUn(can, codes)).map(([to, libelle, , d]) => (
           <NavLink key={to} to={to} className={navClass}>

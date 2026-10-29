@@ -68,4 +68,14 @@ const ecrire = async (tenantId, objet, objetId, { buffer, mime }) => {
   return rel;
 };
 
-module.exports = { ErreurDocument, preparer, ecrire, resoudre, MAX };
+// Document produit par le serveur (PDF du bon de commande émis) : jamais réécrit.
+const ecrireBrut = async (tenantId, objet, objetId, buffer, ext) => {
+  const rel = path.posix.join(seg(tenantId), 'commercial', seg(objet), seg(objetId),
+    `${Date.now()}_${crypto.randomBytes(6).toString('hex')}.${seg(ext)}`);
+  const full = resoudre(rel);
+  await fs.mkdir(path.dirname(full), { recursive: true });
+  await fs.writeFile(full, buffer, { flag: 'wx' });
+  return rel;
+};
+
+module.exports = { ErreurDocument, preparer, ecrire, ecrireBrut, resoudre, MAX };

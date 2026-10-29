@@ -5,13 +5,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { Section, fmtMontant } from '@/components/commercial/ui';
-import { StatutDemande, Priorite, EncartStock, dateFr, STATUTS } from '@/components/commercial/achats';
+import { StatutDemande, Priorite, EncartStock, dateFr, STATUTS, StatutBon, EtatCommande } from '@/components/commercial/achats';
 
 const DECISIONS = {
   soumise: ['Soumise', 'cm-f-info'], approuvee: ['Approuvée', 'cm-f-ok'], renvoyee: ['Renvoyée pour correction', 'cm-f-info'],
   rejetee: ['Rejetée', 'cm-f-ko'], annulee: ['Annulée', 'cm-f-ko'],
 };
-const ETAPES = { demandeur: 'demandeur', achats: 'étape achats', direction: 'étape direction', achats_direction: 'achats et direction', valideur: 'valideur' };
+const ETAPES = { gestionnaire: 'revalidation demandée par les achats', demandeur: 'demandeur', achats: 'étape achats', direction: 'étape direction', achats_direction: 'achats et direction', valideur: 'valideur' };
 const ACTIONS = {
   COM_DA_CREATION: 'Demande créée', COM_DA_MODIFICATION: 'Demande modifiée', COM_DA_PIECE_AJOUT: 'Pièce jointe ajoutée', COM_DA_PIECE_RETRAIT: 'Pièce retirée',
 };
@@ -163,13 +163,14 @@ export default function DemandePage() {
       <Link to="/commercial/demandes" className="cm-retour">‹ Demandes d'achat</Link>
       <div className="cm-fiche-tete">
         <div>
-          <h2><span className="cm-code" style={{ fontSize: 15 }}>{d.numero}</span> Demande d'achat <StatutDemande statut={d.statut} /></h2>
+          <h2><span className="cm-code" style={{ fontSize: 15 }}>{d.numero}</span> Demande d'achat <StatutDemande statut={d.statut} /> <EtatCommande etat={d.etat_commande} /></h2>
           <span className="cm-sous">Créée le {dateFr(d.cree_le, true)} par {d.demandeur_nom}{d.soumise_le ? ` · soumise le ${dateFr(d.soumise_le, true)}` : ''}</span>
         </div>
         <div className="cm-actions">
           {d.droits.supprimer && <button type="button" className="cm-btn cm-danger" onClick={supprimer}>Supprimer</button>}
           {d.droits.annuler && <button type="button" className="cm-btn cm-danger" onClick={annuler}>Annuler la demande</button>}
           {d.droits.modifier && <button type="button" className="cm-btn cm-secondaire" onClick={() => navigate(`/commercial/demandes/${d.id}/modifier`)}>Modifier</button>}
+          {d.droits.preparer_bc && <button type="button" className="cm-btn cm-primaire" onClick={() => navigate(`/commercial/bons/nouveau?demande=${d.id}`)}>Préparer un bon de commande</button>}
           {d.droits.soumettre && <button type="button" className="cm-btn cm-primaire" onClick={soumettre}>{d.statut === 'a_corriger' ? 'Soumettre à nouveau' : 'Soumettre pour autorisation'}</button>}
         </div>
       </div>
@@ -231,6 +232,23 @@ export default function DemandePage() {
             </ol>
             <p className="cm-aide">Statut actuel : {STATUTS[d.statut]?.[0]}. Cet historique ne peut être ni modifié ni effacé.</p>
           </Section>
+          {(d.bons?.length > 0 || d.statut === 'approuvee') && (
+            <Section titre={`Bons de commande (${d.bons?.length || 0})`}>
+              {!d.bons?.length ? <p className="cm-aide">Aucun bon de commande pour l'instant.</p> : (
+                <ul className="cm-pieces">
+                  {d.bons.map((b) => (
+                    <li key={b.id}>
+                      <span className="cm-nom">
+                        <Link to={`/commercial/bons/${b.id}`}>{b.statut === 'brouillon' ? 'Brouillon' : b.numero_complet}</Link>
+                        <span className="cm-sous">{b.fournisseur_nom} · {fmtMontant(b.total_ttc, b.devise)} TTC</span>
+                      </span>
+                      <StatutBon statut={b.statut} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Section>
+          )}
           <Pieces d={d} onMaj={setD} />
         </div>
       </div>

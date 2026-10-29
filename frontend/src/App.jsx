@@ -31,7 +31,7 @@ import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
 import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
 import AccueilPage from '@/pages/AccueilPage';
-import CommercialLayout, { peutUn, DROITS_DEMANDES, DROITS_AUTORISATIONS } from '@/components/commercial/CommercialLayout';
+import CommercialLayout, { peutUn, DROITS_DEMANDES, DROITS_AUTORISATIONS, DROITS_BONS, DROITS_HISTORIQUE } from '@/components/commercial/CommercialLayout';
 import DemandesPage from '@/pages/commercial/DemandesPage';
 import DemandeFormPage from '@/pages/commercial/DemandeFormPage';
 import DemandePage from '@/pages/commercial/DemandePage';
@@ -43,6 +43,13 @@ import ArticlesPage from '@/pages/commercial/ArticlesPage';
 import TiersPage from '@/pages/commercial/TiersPage';
 import TaxesPage from '@/pages/commercial/TaxesPage';
 import UtilisateursPage from '@/pages/commercial/UtilisateursPage';
+import BonsPage from '@/pages/commercial/BonsPage';
+import BonFormPage from '@/pages/commercial/BonFormPage';
+import BonPage from '@/pages/commercial/BonPage';
+import TableauBordPage from '@/pages/commercial/TableauBordPage';
+import DocumentsPage from '@/pages/commercial/DocumentsPage';
+import HistoriquePage from '@/pages/commercial/HistoriquePage';
+import VerificationBcPage from '@/pages/VerificationBcPage';
 import { consommerEntree, moduleActif, routeApresConnexion, systemeInstalle, utiliseAccueil } from '@/lib/modules';
 
 // Toutes les pages listées dans MIGRATION.md sont désormais portées.
@@ -56,6 +63,9 @@ export default function App() {
   // Lien « mot de passe oublié » reçu par e-mail (C9).
   const reinit = window.location.pathname.match(/^\/reinitialisation\/([A-Za-z0-9_-]+)\/?$/);
   if (reinit) return <ReinitialisationPage token={reinit[1]} />;
+  // QR code d'un bon de commande : vérification publique, sans session.
+  const verif = window.location.pathname.match(/^\/verifier\/([A-Za-z0-9_-]+)\/?$/);
+  if (verif) return <VerificationBcPage jeton={verif[1]} />;
 
   return (
     <>
@@ -146,6 +156,13 @@ function AuthenticatedApp() {
         <Route path="demandes/:id"          element={<AutoriseCm codes={DROITS_DEMANDES}><DemandePage /></AutoriseCm>} />
         <Route path="demandes/:id/modifier" element={<AutoriseCm codes={['com.da.creer']}><DemandeFormPage key="m" /></AutoriseCm>} />
         <Route path="autorisations"         element={<AutoriseCm codes={DROITS_AUTORISATIONS}><DemandesPage key="a" autorisations /></AutoriseCm>} />
+        <Route path="bons"                  element={<AutoriseCm codes={DROITS_BONS}><BonsPage /></AutoriseCm>} />
+        <Route path="bons/nouveau"          element={<AutoriseCm codes={['com.bc.preparer']}><BonFormPage key="n" /></AutoriseCm>} />
+        <Route path="bons/:id"              element={<AutoriseCm codes={DROITS_BONS}><BonPage /></AutoriseCm>} />
+        <Route path="bons/:id/modifier"     element={<AutoriseCm codes={['com.bc.preparer']}><BonFormPage key="m" /></AutoriseCm>} />
+        <Route path="tableau-bord"          element={<AutoriseCm codes={['com.tableau_bord.voir']}><TableauBordPage /></AutoriseCm>} />
+        <Route path="documents"             element={<AutoriseCm codes={DROITS_BONS}><DocumentsPage /></AutoriseCm>} />
+        <Route path="historique"            element={<AutoriseCm codes={DROITS_HISTORIQUE}><HistoriquePage /></AutoriseCm>} />
         <Route path="*"            element={<Navigate to="/commercial" replace />} />
       </Route>
       <Route element={<GardeCaisse><Layout /></GardeCaisse>}>
