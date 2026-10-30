@@ -61,6 +61,7 @@ const repondreDa = (quoi, fn, statut = 200) => async (req, res) => {
     res.status(statut).json(await fn(ctx, req));
   } catch (err) {
     if (err instanceof da.ErreurDemande || err instanceof ErreurDocument || err instanceof svc.ErreurCom) return res.status(err.status).json({ error: err.message });
+    if (err.status === 503) return res.status(503).json({ error: err.message });
     if (/INTANGIBLE/.test(err.message || '')) return res.status(409).json({ error: err.message.replace(/^.*?: /, '') });
     if (err?.original?.code === '23514' || err?.parent?.code === '23514') return res.status(400).json({ error: 'Donnée refusée par les règles de la base.' });
     console.error(`[Commercial] ${quoi} :`, err.message);
@@ -137,7 +138,7 @@ const fichierBc = (lire) => async (req, res) => {
     }
     return await envoyerFichier(res, f, f.mime || 'application/pdf');
   } catch (err) {
-    if (err instanceof bc.ErreurBon) return res.status(err.status).json({ error: err.message });
+    if (err instanceof bc.ErreurBon || err.status === 503) return res.status(err.status).json({ error: err.message });
     console.error('[Commercial] fichier bon :', err.message);
     return res.status(500).json({ error: 'Erreur serveur.' });
   }

@@ -2,8 +2,18 @@
 // NJ COMMERCIAL — mise en page PDF du bon de commande (pdfkit, sans binaire système).
 // Un bon émis est rendu UNE fois, archivé, et son empreinte SHA-256 publiée sur la
 // page de vérification ; un brouillon n'est rendu qu'en aperçu filigrané, sans QR code.
-const PDFDocument = require('pdfkit');
-const QRCode = require('qrcode');
+// Chargées à la demande : si « npm install » n'a pas été lancé après la mise à jour,
+// le serveur démarre quand même (connexion, caisse…) ; seuls l'aperçu et l'émission
+// des bons répondent alors une erreur claire.
+const dependances = () => {
+  try {
+    return { PDFDocument: require('pdfkit'), QRCode: require('qrcode') };
+  } catch (e) {
+    const err = new Error('Génération du PDF indisponible sur le serveur : lancez « npm install » dans le dossier du backend, puis redémarrez l\'application.');
+    err.status = 503;
+    throw err;
+  }
+};
 
 const BLEU = '#1a2b4a';
 const GRIS = '#64748b';
@@ -72,6 +82,7 @@ const logoBuffer = (dataUrl) => {
  * @returns {Promise<Buffer>}
  */
 const rendre = async (o) => {
+  const { PDFDocument, QRCode } = dependances();
   const { societe: s, fournisseur: f, magasin: m, bc, lignes } = o;
   const qr = o.verificationUrl ? await QRCode.toBuffer(o.verificationUrl, { errorCorrectionLevel: 'M', margin: 1, width: 220 }) : null;
   const doc = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 60, left: 40, right: 40 }, bufferPages: true,
