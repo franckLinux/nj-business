@@ -44,7 +44,12 @@ export const utiliseAccueil = (user) => Boolean(user?.tenantId) && !['super_admi
 export const routeApresConnexion = (user) => {
   if (!utiliseAccueil(user) || !systemeInstalle(user)) return null;
   const actifs = modulesActifs(user);
-  if (actifs.length === 1) return actifs[0].route_accueil || '/';
+  // Directeur : un module activé pour l'espace mais sans droit pour lui passe par
+  // l'accueil, qui explique la situation (sinon le module resterait invisible).
+  // Les autres personnes gardent l'entrée directe ; l'accueil (logo du menu) le leur explique aussi.
+  const sansDroits = user.role === 'directeur'
+    && user.modules.some((m) => m.code !== 'caisse' && m.actif && m.statut === 'operationnel' && !accesModule(user, m.code));
+  if (actifs.length === 1 && !sansDroits) return actifs[0].route_accueil || '/';
   return '/accueil';
 };
 

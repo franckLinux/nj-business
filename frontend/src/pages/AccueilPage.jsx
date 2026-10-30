@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import NjMarque from '@/components/NjMarque';
 import MonCompteModal from '@/components/MonCompteModal';
-import { CONTACT_CABINET, modulesActifs, systemeInstalle } from '@/lib/modules';
+import { CONTACT_CABINET, modulesActifs, systemeInstalle, accesModule } from '@/lib/modules';
 
 // Accueil NJ BUSINESS (26/10/2026) : point d'entrée vers les modules de l'espace.
 // Présente seulement : l'accès réel est contrôlé par le serveur (403 MODULE_INACTIF).
@@ -30,8 +30,12 @@ export default function AccueilPage() {
   }];
   const actifs = systemeInstalle(user) ? modulesActifs(user) : tous;
   // Modules en préparation : présentés comme « bientôt disponibles », jamais accessibles (décision D2).
-  // Un module opérationnel mais désactivé pour ce client n'est pas affiché.
   const aVenir = tous.filter((m) => m.statut === 'en_preparation');
+  // Modules opérationnels que la personne ne peut pas ouvrir : on dit pourquoi au lieu de les cacher.
+  //   • activé pour l'espace, mais aucun droit attribué à cette personne ;
+  //   • pas encore activé pour l'espace (l'activation se fait par le cabinet).
+  const sansDroits = systemeInstalle(user) ? tous.filter((m) => m.code !== 'caisse' && m.statut === 'operationnel' && m.actif && !accesModule(user, m.code)) : [];
+  const nonActives = systemeInstalle(user) ? tous.filter((m) => m.statut === 'operationnel' && !m.actif) : [];
 
   const deconnexion = () => {
     if (window.confirm('Se déconnecter ?')) { logout(); navigate('/', { replace: true }); }
@@ -79,6 +83,33 @@ export default function AccueilPage() {
                   <p>{m.description}</p>
                   <span className="njb-badge ok">Activé</span>
                   <button type="button" className="njb-bouton" onClick={() => navigate(m.route_accueil || '/')}>Accéder au module</button>
+                </article>
+              ))}
+            </div>
+          </>
+        )}
+
+        {(sansDroits.length > 0 || nonActives.length > 0) && (
+          <>
+            <p className="njb-surtitre">Autres modules</p>
+            <div className="njb-grille">
+              {sansDroits.map((m) => (
+                <article key={m.code} className="njb-carte a-venir" aria-label={`${m.nom}, accès non attribué`}>
+                  <span className="njb-ico-vide" aria-hidden="true">{INITIALES[m.code] || m.code.slice(0, 2).toUpperCase()}</span>
+                  <h2>{m.nom}</h2>
+                  <p>{m.description}</p>
+                  <span className="njb-badge bientot">Activé · accès non attribué</span>
+                  <span className="njb-contact">Le module est activé pour votre espace, mais aucun droit ne vous y est encore attribué.
+                    {user?.role === 'directeur' ? ' Contactez le cabinet.' : ' Demandez à votre directeur de vous attribuer un profil achats.'}</span>
+                </article>
+              ))}
+              {nonActives.map((m) => (
+                <article key={m.code} className="njb-carte a-venir" aria-label={`${m.nom}, non activé`}>
+                  <span className="njb-ico-vide" aria-hidden="true">{INITIALES[m.code] || m.code.slice(0, 2).toUpperCase()}</span>
+                  <h2>{m.nom}</h2>
+                  <p>{m.description}</p>
+                  <span className="njb-badge bientot">Disponible · non activé</span>
+                  <span className="njb-contact">Pas encore activé pour votre espace. <a href={`mailto:${CONTACT_CABINET}?subject=${encodeURIComponent(`Activation du module ${m.nom}`)}`}>Demander l'activation</a></span>
                 </article>
               ))}
             </div>

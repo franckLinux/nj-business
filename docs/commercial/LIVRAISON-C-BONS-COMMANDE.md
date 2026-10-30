@@ -100,3 +100,26 @@ Additive et rejouable. Retour arrière : `052_retour_arriere.sql`. Il refuse de 
   - Tableau de bord sans montant inventé, documents, historique.
   - Téléphone sans débordement.
 - **Non-régression** : les parcours des livraisons A (24) et B (21) passent toujours.
+
+## Correctif du 30/10/2026 : NJ COMMERCIAL invisible chez le client (migration 053, frontend v45)
+
+**Causes trouvées :**
+- **Profil métier** : il remplaçait *tout* le rôle. Un directeur doté d'un profil de caisse, créé avant NJ COMMERCIAL, n'avait donc aucune permission `com.*`, et le module restait caché. De même, un caissier doté d'un profil achats perdait sa caisse.
+- **Plafond de permissions** : un plafond enregistré sans aucune permission `com.*` rend le module inutilisable par tout le client, même quand le module est activé.
+- **Accueil** : un module activé mais sans droits, ou non activé, n'était pas affiché du tout. Le client ne voyait donc rien et ne savait pas pourquoi.
+
+**Corrections :**
+- **Règle des profils** (`permission.service.js`) : un profil ne remplace plus que les droits de **son** module. Pour un module où le profil n'a aucune permission, ce sont les droits du rôle qui s'appliquent. Un profil de caisse restreint toujours la caisse comme avant.
+- **Migration 053** : elle complète le plafond des seuls clients où NJ COMMERCIAL est activé et dont le plafond ne contient aucune permission `com.*`.
+  - Un plafond qui en contient déjà au moins une est un choix du cabinet ; il n'est pas touché.
+  - Les ajouts sont tracés dans `com_acces_053`. Retour arrière : `053_retour_arriere.sql`.
+- **Accueil client**, rubrique « Autres modules » :
+  - « Activé · accès non attribué » : le module est activé pour l'espace, mais la personne n'a pas de droits.
+  - « Disponible · non activé » : le module n'est pas activé, avec un lien pour demander l'activation.
+  - Un directeur dans le premier cas passe par l'accueil à la connexion, au lieu d'entrer directement dans la caisse.
+- **Diagnostic** : `node tools/diag-commercial.js <slug>` affiche, en lecture seule, les migrations jouées, le statut du module, son activation pour le client, le plafond et, pour chaque utilisateur, le nombre de droits `com.*` et s'il voit le module.
+
+**Tests :**
+- `tests/commercial-acces.test.js` : 4 tests. Ils échouent avec l'ancienne règle et passent avec la nouvelle.
+- Suite complète : 126 tests, tous passés.
+- Parcours navigateur : paramétrage 24/24, achats 21/21.

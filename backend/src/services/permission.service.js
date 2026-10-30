@@ -3,9 +3,13 @@
 //
 // Modèle (depuis la migration 014) — tout est EN BASE, plus rien en dur :
 //
-//   base        = permissions du profil métier (users.custom_role_id) s'il en
+//   base        = MODULE PAR MODULE : les permissions du profil métier
+//                 (users.custom_role_id) pour chaque module où le profil en
 //                 porte au moins une, sinon celles du rôle système
-//                 (roles.is_system, code = users.role) ;
+//                 (roles.is_system, code = users.role) pour ce module.
+//                 (Avant la 053 : un profil remplaçait TOUT le rôle ; un directeur
+//                 doté d'un profil de caisse perdait ainsi NJ COMMERCIAL, et un
+//                 caissier doté d'un profil achats perdait sa caisse.)
 //   effectives  = (base ∪ exceptions 'grant') − exceptions 'deny'
 //                 ∩ plafond du client (tenant_permissions), s'il en a un.
 //   super_admin = aucune restriction (null).
@@ -15,22 +19,27 @@
 // catalogue profite donc aussi aux personnes qui ont des exceptions.
 const { sequelize, Permission, TenantPermission } = require('../models');
 
+// Groupe d'une permission = module NJ BUSINESS auquel elle appartient. Toutes
+// les permissions historiques (journal, budget, contrôle…) forment « caisse ».
+const GROUPE = `CASE WHEN p.module IN ('commercial', 'dsf', 'revis', 'cg') THEN p.module ELSE 'caisse' END`;
 const SQL_BASE = `
   WITH u AS (
     SELECT id, role, custom_role_id FROM users WHERE id = :userId
   ),
   profil AS (
-    SELECT rp.permission_code FROM role_permissions rp JOIN u ON rp.role_id = u.custom_role_id
+    SELECT rp.permission_code, ${GROUPE} AS groupe
+      FROM role_permissions rp JOIN permissions p ON p.code = rp.permission_code
+      JOIN u ON rp.role_id = u.custom_role_id
   ),
   systeme AS (
-    SELECT rp.permission_code
-      FROM role_permissions rp
+    SELECT rp.permission_code, ${GROUPE} AS groupe
+      FROM role_permissions rp JOIN permissions p ON p.code = rp.permission_code
       JOIN roles r ON r.id = rp.role_id AND r.tenant_id IS NULL AND r.is_system
       JOIN u ON r.code = u.role
   )
   SELECT permission_code FROM profil
   UNION
-  SELECT permission_code FROM systeme WHERE NOT EXISTS (SELECT 1 FROM profil)
+  SELECT permission_code FROM systeme WHERE groupe NOT IN (SELECT groupe FROM profil)
 `;
 
 const SQL_EFFECTIVES = `
