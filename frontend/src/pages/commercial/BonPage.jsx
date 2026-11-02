@@ -102,6 +102,37 @@ function Proformas({ b, onMaj }) {
   );
 }
 
+// Lot 5 : ce qui a été reçu sur ce bon, et par quelles réceptions.
+const ETATS_REC = { a_recevoir: ['À recevoir', 'cm-alerte'], partiel: ['Reçu en partie', 'cm-info'], recu: ['Entièrement reçu', 'cm-ok'] };
+function EtatReception({ b }) {
+  const [l, c] = ETATS_REC[b.reception.etat] || ETATS_REC.a_recevoir;
+  return (
+    <Section titre="Réception">
+      <p style={{ marginTop: 0 }}><span className={`cm-pastille ${c}`}>{l}</span></p>
+      <table className="cm-lignes cm-bc-lecture">
+        <tbody>
+          {b.lignes.map((x) => {
+            const r = b.reception.par_ligne[x.id] || { recu: 0, en_cours: 0 };
+            return (
+              <tr key={x.id}>
+                <td>{x.designation}</td>
+                <td className="cm-num">{fmtQte(r.recu)} / {fmtQte(x.quantite)} {x.unite}{r.en_cours > 0 && <span className="cm-sous">+ {fmtQte(r.en_cours)} en cours</span>}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {b.reception.receptions.length > 0 && (
+        <ul className="cm-pieces" style={{ marginTop: 8 }}>
+          {b.reception.receptions.map((r) => (
+            <li key={r.id}><Link to={`/commercial/receptions/${r.id}`}>{r.numero}</Link><span className="cm-sous">{dateFr(r.date_reception)}{r.bl_numero ? ` · BL ${r.bl_numero}` : ''} · {{ brouillon: 'Brouillon', a_valider: 'À valider', valide: 'Validée', annule: 'Annulée' }[r.statut]}</span></li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
 function Verification({ b }) {
   const toast = useToast();
   if (b.statut === 'brouillon') return null;
@@ -199,6 +230,9 @@ export default function BonPage() {
           {brouillon && b.droits.modifier && <button type="button" className="cm-btn cm-danger" onClick={supprimer} disabled={Boolean(enCours)}>Supprimer</button>}
           {b.droits.annuler && <button type="button" className="cm-btn cm-danger" onClick={annuler} disabled={Boolean(enCours)}>Annuler le bon</button>}
           {b.droits.reviser && <button type="button" className="cm-btn cm-secondaire" onClick={reviser} disabled={Boolean(enCours)}>Réviser</button>}
+          {b.droits.receptionner && b.reception?.etat !== 'recu' && (
+            <button type="button" className="cm-btn cm-primaire" onClick={() => navigate(`/commercial/receptions/nouvelle?bc=${b.id}`)}>Réceptionner</button>
+          )}
           <button type="button" className="cm-btn cm-secondaire" onClick={pdf}>{brouillon ? 'Aperçu PDF' : 'Ouvrir le PDF'}</button>
           {brouillon && b.droits.modifier && <button type="button" className="cm-btn cm-secondaire" onClick={() => navigate(`/commercial/bons/${b.id}/modifier`)}>Modifier</button>}
           {brouillon && b.droits.emettre_permission && (
@@ -257,6 +291,7 @@ export default function BonPage() {
           </Section>
         </div>
         <div>
+          {b.reception && <EtatReception b={b} />}
           <Verification b={b} />
           <Proformas b={b} onMaj={setB} />
           <Section titre="Historique">

@@ -344,6 +344,28 @@ const controler = async (ctx, b, tr) => {
   return c;
 };
 
+// Lot 5 : un bon qui a des réceptions (non annulées) ne s'annule ni ne se révise plus.
+const sansReception = async (bcId, tr) => {
+  const [r] = await Q("SELECT numero FROM com_receptions WHERE bc_id = :b AND statut <> 'annule' ORDER BY id LIMIT 1", { b: bcId }, tr);
+  if (r) throw new ErreurBon(409, `Ce bon a déjà des réceptions (${r.numero}) : il ne peut plus être annulé ni révisé. Annulez d'abord les réceptions.`);
+};
+// État de réception d'un bon émis : quantités reçues (réceptions validées) par ligne.
+const etatReception = async (bcId) => {
+  const rows = await Q(`SELECT l.id, l.quantite, COALESCE(SUM(rl.quantite) FILTER (WHERE r.statut = 'valide'), 0) AS recu,
+                               COALESCE(SUM(rl.quantite) FILTER (WHERE r.statut IN ('brouillon', 'a_valider')), 0) AS en_cours
+                          FROM com_bc_lignes l LEFT JOIN com_reception_lignes rl ON rl.bc_ligne_id = l.id
+                          LEFT JOIN com_receptions r ON r.id = rl.reception_id
+                         WHERE l.bc_id = :b GROUP BY l.id`, { b: bcId });
+  const receptions = await Q(`SELECT id, numero, statut, date_reception, bl_numero FROM com_receptions WHERE bc_id = :b ORDER BY id`, { b: bcId });
+  const recu = rows.reduce((t, r) => t + Number(r.recu), 0);
+  const solde = rows.length > 0 && rows.every((r) => Number(r.recu) >= Number(r.quantite));
+  return {
+    etat: solde ? 'recu' : recu > 0 ? 'partiel' : 'a_recevoir',
+    par_ligne: Object.fromEntries(rows.map((r) => [Number(r.id), { recu: Number(r.recu), en_cours: Number(r.en_cours) }])),
+    receptions: receptions.map((x) => ({ ...x, id: Number(x.id) })),
+  };
+};
+
 const lire = async (ctx, id) => {
   exigerVue(ctx);
   const b = await charger(ctx, id);
@@ -369,7 +391,9 @@ const lire = async (ctx, id) => {
       quantite_stock: Math.round(Number(l.quantite) * Number(l.coefficient || 1) * 1000) / 1000,
       montant_ht: Number(l.montant_ht), montant_taxe: Number(l.montant_taxe), montant_ttc: Number(l.montant_ttc) })),
     disponibles, controles, documents: documents.map((x) => ({ ...x, id: Number(x.id), taille: Number(x.taille) })), historique,
+    reception: b.statut === 'emis' || b.statut === 'annule' || b.statut === 'remplace' ? await etatReception(b.id) : null,
     droits: {
+      receptionner: b.statut === 'emis' && ctx.peut('com.receptions.saisir'),
       modifier: b.statut === 'brouillon' && ctx.peut('com.bc.preparer'),
       emettre: b.statut === 'brouillon' && ctx.peut('com.bc.emettre') && !bloque,
       emettre_permission: ctx.peut('com.bc.emettre'),
@@ -504,6 +528,7 @@ const annuler = async (ctx, id, body = {}) => {
     if (b.statut !== 'emis') throw new ErreurBon(409, `Bon ${STATUTS[b.statut].toLowerCase()} : seul un bon émis s'annule.`);
     const [rev] = await Q("SELECT numero_complet FROM com_bons_commande WHERE remplace_id = :b AND statut = 'brouillon'", { b: b.id }, tr);
     if (rev) throw new ErreurBon(409, 'Une révision de ce bon est en préparation : supprimez-la ou émettez-la.');
+    await sansReception(b.id, tr);
     await X(`UPDATE com_bons_commande SET statut = 'annule', motif_annulation = :m, annule_par = :u, annule_le = NOW() WHERE id = :id`,
       { m: motif, u: ctx.userId, id: b.id }, tr);
     await auditer(tr, ctx, 'COM_BC_ANNULATION', b.id, { numero: b.numero_complet, motif });
@@ -519,6 +544,7 @@ const reviser = async (ctx, id) => {
     if (b.statut !== 'emis') throw new ErreurBon(409, 'Seul un bon émis peut être révisé.');
     const [deja] = await Q("SELECT id FROM com_bons_commande WHERE remplace_id = :b AND statut IN ('brouillon', 'emis')", { b: b.id }, tr);
     if (deja) throw new ErreurBon(409, 'Une révision de ce bon existe déjà.');
+    await sansReception(b.id, tr);
     const [r] = await Q(
       `INSERT INTO com_bons_commande (tenant_id, numero, revision, numero_complet, demande_id, fournisseur_id, magasin_id, devise,
          conditions_paiement, delai_livraison, observations, total_ht, total_taxes, total_ttc, remplace_id, prepare_par)
@@ -644,5 +670,5 @@ const bonsDeDemande = async (tenantId, demandeId) => (await Q(
 module.exports = {
   ErreurBon, STATUTS, lister, aCommander, proposition, creer, modifier, supprimer, lire, revalider, emettre, annuler, reviser,
   lirePdf, joindreProforma, retirerProforma, lirePiece, verifier, notifierEmission, notifierRevalidation,
-  restes, etatCommande, bonsDeDemande, baseVerification,
+  restes, etatCommande, bonsDeDemande, baseVerification, etatReception,
 };

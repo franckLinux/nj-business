@@ -43,6 +43,11 @@ const ACHATS = [
   ['com.da.approuver_direction', 'Approuve (direction)'], ['com.bc.preparer', 'Prépare BC'], ['com.bc.emettre', 'Émet BC'],
   ['com.articles.modifier', 'Articles'], ['com.parametrage.modifier', 'Paramétrage'], ['com.tiers.banque', 'Banque'],
 ];
+const DOCS_ACHAT = [
+  ['com.receptions.saisir', 'Saisit réceptions'], ['com.receptions.valider', 'Valide réceptions'], ['com.receptions.annuler', 'Annule réceptions'],
+  ['com.retours_fourn.saisir', 'Saisit retours'], ['com.retours_fourn.valider', 'Valide retours'], ['com.factures_fourn.voir', 'Voit factures'],
+  ['com.factures_fourn.saisir', 'Saisit factures'], ['com.factures_fourn.valider', 'Valide factures'], ['com.factures_fourn.annuler', 'Annule factures'],
+];
 const STOCK = [
   ['com.stock.voir', 'État'], ['com.stock.initial', 'Ouverture'], ['com.stock.entree', 'Entrées'], ['com.stock.sortie', 'Sorties'],
   ['com.stock.transfert', 'Transferts'], ['com.stock.inventaire', 'Inventaires'], ['com.stock.valider', 'Valide'],
@@ -65,7 +70,7 @@ export default function UtilisateursPage() {
   const liste = donnees?.utilisateurs || [];
   const agences = donnees?.agences || [];
   const [vue, setVue] = useState('achats');
-  const COLONNES = vue === 'stock' ? STOCK : ACHATS;
+  const COLONNES = vue === 'stock' ? STOCK : vue === 'docs' ? DOCS_ACHAT : ACHATS;
   const codes = (ids) => (ids.length ? agences.filter((a) => ids.includes(a.id)).map((a) => a.code).join(', ') : 'Toutes');
   return (
     <div className="cm-page">
@@ -82,6 +87,7 @@ export default function UtilisateursPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-onglets" role="tablist">
         <button type="button" role="tab" aria-selected={vue === 'achats'} onClick={() => setVue('achats')}>Droits achats</button>
+        <button type="button" role="tab" aria-selected={vue === 'docs'} onClick={() => setVue('docs')}>Réceptions et factures</button>
         <button type="button" role="tab" aria-selected={vue === 'stock'} onClick={() => setVue('stock')}>Droits stock</button>
       </div>
       <div className="cm-table-wrap">

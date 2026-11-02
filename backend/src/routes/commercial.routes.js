@@ -108,6 +108,53 @@ router.post  ('/stock/documents/:id/annulation',         ...P('com.stock.annuler
 router.post  ('/stock/documents/:id/pieces',             ...STOCK, c.postStockPiece);
 router.get   ('/stock/documents/:id/pieces/:doc',        ...STOCK, c.getStockPiece);
 
+// ── Lot 5 : documents d'achat (contrôles fins — auteur, périmètre, plafonds — dans le service) ──
+const RC_VUE = [...base, requireAnyPermission('com.receptions.saisir', 'com.receptions.valider', 'com.receptions.annuler', 'com.retours_fourn.saisir',
+  'com.retours_fourn.valider', 'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir',
+  'com.factures_fourn.valider', 'com.stock.journal')];
+const FF_VUE = [...base, requireAnyPermission('com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler')];
+router.get   ('/achats/compteurs',                       ...RC_VUE, c.getAchatsCompteurs);
+router.get   ('/receptions/a-recevoir',                  ...[...base, requireAnyPermission('com.receptions.saisir', 'com.receptions.valider')], c.getARecevoir);
+router.get   ('/receptions/proposition/:bc',             ...P('com.receptions.saisir'), c.getPropositionReception);
+router.get   ('/receptions',                             ...RC_VUE, c.listerDoc('reception'));
+router.get   ('/receptions/:id',                         ...RC_VUE, c.getReception);
+router.post  ('/receptions',                             ...P('com.receptions.saisir'), c.postReception);
+router.put   ('/receptions/:id',                         ...P('com.receptions.saisir'), c.putReception);
+router.delete('/receptions/:id',                         ...P('com.receptions.saisir'), c.supprimerDoc('reception'));
+router.post  ('/receptions/:id/soumission',              ...P('com.receptions.saisir'), c.soumettreDoc('reception'));
+router.post  ('/receptions/:id/renvoi',                  ...P('com.receptions.valider'), c.renvoyerDoc('reception'));
+router.post  ('/receptions/:id/validation',              ...P('com.receptions.valider'), c.postValidationReception);
+router.post  ('/receptions/:id/annulation',              ...P('com.receptions.annuler'), c.postAnnulationReception);
+router.post  ('/receptions/:id/pieces',                  ...RC_VUE, c.joindreDoc('reception'));
+router.get   ('/receptions/:id/pieces/:doc',             ...RC_VUE, c.pieceDoc('reception'));
+
+router.get   ('/retours-fournisseurs/proposition/:rec',  ...P('com.retours_fourn.saisir'), c.getPropositionRetour);
+router.get   ('/retours-fournisseurs',                   ...RC_VUE, c.listerDoc('retour'));
+router.get   ('/retours-fournisseurs/:id',               ...RC_VUE, c.getRetour);
+router.post  ('/retours-fournisseurs',                   ...P('com.retours_fourn.saisir'), c.postRetour);
+router.put   ('/retours-fournisseurs/:id',               ...P('com.retours_fourn.saisir'), c.putRetour);
+router.delete('/retours-fournisseurs/:id',               ...P('com.retours_fourn.saisir'), c.supprimerDoc('retour'));
+router.post  ('/retours-fournisseurs/:id/soumission',    ...P('com.retours_fourn.saisir'), c.soumettreDoc('retour'));
+router.post  ('/retours-fournisseurs/:id/renvoi',        ...P('com.retours_fourn.valider'), c.renvoyerDoc('retour'));
+router.post  ('/retours-fournisseurs/:id/validation',    ...P('com.retours_fourn.valider'), c.postValidationRetour);
+router.post  ('/retours-fournisseurs/:id/annulation',    ...P('com.receptions.annuler'), c.postAnnulationRetour);
+router.post  ('/retours-fournisseurs/:id/pieces',        ...RC_VUE, c.joindreDoc('retour'));
+router.get   ('/retours-fournisseurs/:id/pieces/:doc',   ...RC_VUE, c.pieceDoc('retour'));
+
+router.get   ('/factures-fournisseurs/a-facturer',       ...P('com.factures_fourn.saisir'), c.getFournisseursAFacturer);
+router.get   ('/factures-fournisseurs/a-facturer/:f',    ...P('com.factures_fourn.saisir'), c.getAFacturer);
+router.get   ('/factures-fournisseurs',                  ...FF_VUE, c.listerDoc('facture'));
+router.get   ('/factures-fournisseurs/:id',              ...FF_VUE, c.getFacture);
+router.post  ('/factures-fournisseurs',                  ...P('com.factures_fourn.saisir'), c.postFacture);
+router.put   ('/factures-fournisseurs/:id',              ...P('com.factures_fourn.saisir'), c.putFacture);
+router.delete('/factures-fournisseurs/:id',              ...P('com.factures_fourn.saisir'), c.supprimerDoc('facture'));
+router.post  ('/factures-fournisseurs/:id/soumission',   ...P('com.factures_fourn.saisir'), c.soumettreDoc('facture'));
+router.post  ('/factures-fournisseurs/:id/renvoi',       ...P('com.factures_fourn.valider'), c.renvoyerDoc('facture'));
+router.post  ('/factures-fournisseurs/:id/validation',   ...P('com.factures_fourn.valider'), c.postValidationFacture);
+router.post  ('/factures-fournisseurs/:id/annulation',   ...P('com.factures_fourn.annuler'), c.postAnnulationFacture);
+router.post  ('/factures-fournisseurs/:id/pieces',       ...FF_VUE, c.joindreDoc('facture'));
+router.get   ('/factures-fournisseurs/:id/pieces/:doc',  ...FF_VUE, c.pieceDoc('facture'));
+
 router.get   ('/tableau-bord',                           ...P('com.tableau_bord.voir'), c.getTableau);
 router.get   ('/documents',                              ...BC_VUE, c.getDocuments);
 router.get   ('/historique',                             ...[...base, requireAnyPermission('com.da.voir_tout', 'com.tableau_bord.voir')], c.getHistorique);

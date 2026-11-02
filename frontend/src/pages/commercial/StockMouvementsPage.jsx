@@ -5,6 +5,8 @@ import { Entete, useListe, useDiffere, fmtMontant, fmtQte } from '@/components/c
 import { dateFr } from '@/components/commercial/achats';
 import { MOUVEMENTS } from '@/components/commercial/stock';
 
+const LIENS = { reception: '/commercial/receptions/', retour_fournisseur: '/commercial/retours-fournisseurs/' };
+
 export function StockMouvementsPage() {
   const [params] = useSearchParams();
   const [q, setQ] = useState('');
@@ -56,7 +58,7 @@ export function StockMouvementsPage() {
                     {valeurs && <td className="cm-num">{m.cout_unitaire === null ? <span className="cm-pastille cm-info">à valoriser</span> : fmtMontant(Math.round(m.cout_unitaire * 100) / 100, '')}</td>}
                     {valeurs && <td className="cm-num">{fmtMontant(m.valeur, '')}</td>}
                     <td>
-                      {m.document_numero ? <Link to={`/commercial/stock/documents/${m.document_id}`} onClick={(e) => e.stopPropagation()}>{m.document_numero}</Link> : (m.piece || '—')}
+                      {m.document_numero ? <Link to={`${LIENS[m.document_type] || '/commercial/stock/documents/'}${m.document_id}`} onClick={(e) => e.stopPropagation()}>{m.document_numero}</Link> : (m.piece || '—')}
                       {m.par_nom && <span className="cm-sous">{m.par_nom}</span>}
                     </td>
                   </tr>

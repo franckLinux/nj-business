@@ -62,8 +62,8 @@ export default function DemarragePage() {
         ))}
       </div>
       <div className="cm-avenir">
-        <strong>Disponible :</strong> demandes d'achat avec consultation du stock, circuit d'autorisation, bons de commande (PDF avec QR code de vérification, proformas, révision et annulation), tableau de bord, documents justificatifs et historique (menu Achats) ; stock valorisé en CMUP ou FIFO avec entrées et sorties diverses, transferts entre magasins, inventaires, validation, mouvements et valorisation (menu Stock).
-        <br /><strong>Pas encore développé :</strong> réception des marchandises sur bon de commande, rapprochement des factures fournisseurs, règlements, écritures comptables et ventes.
+        <strong>Disponible :</strong> demandes d'achat avec consultation du stock, circuit d'autorisation, bons de commande (PDF avec QR code de vérification, proformas, révision et annulation), réceptions partielles, retours et factures fournisseurs rapprochées avec leurs avoirs, tableau de bord, documents justificatifs et historique (menu Achats) ; stock valorisé en CMUP ou FIFO avec entrées et sorties diverses, transferts entre magasins, inventaires, validation, mouvements et valorisation (menu Stock).
+        <br /><strong>Pas encore développé :</strong> ventes et écritures comptables. Les règlements des fournisseurs se saisissent dans NJ CAISSE PRO.
       </div>
     </div>
   );

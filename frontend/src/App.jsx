@@ -57,6 +57,13 @@ import StockDocFormPage from '@/pages/commercial/StockDocFormPage';
 import StockDocPage from '@/pages/commercial/StockDocPage';
 import { StockMouvementsPage, StockValorisationPage } from '@/pages/commercial/StockMouvementsPage';
 import { DROITS_STOCK, DROITS_SAISIE } from '@/components/commercial/stock';
+import { ReceptionsPage, ReceptionFormPage, ReceptionPage } from '@/pages/commercial/ReceptionsPages';
+import { RetoursFournPage, RetourFournFormPage, RetourFournPage } from '@/pages/commercial/RetoursFournPages';
+import { FacturesFournPage, FactureFournFormPage, FactureFournPage, ValidationAchatsPage } from '@/pages/commercial/FacturesFournPages';
+// Lot 5 : qui voit les documents d'achat.
+const DROITS_RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'com.receptions.annuler', 'com.retours_fourn.saisir', 'com.retours_fourn.valider',
+  'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
+const DROITS_FACTURES = ['com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler'];
 import VerificationBcPage from '@/pages/VerificationBcPage';
 import { consommerEntree, moduleActif, routeApresConnexion, systemeInstalle, utiliseAccueil } from '@/lib/modules';
 
@@ -124,6 +131,8 @@ function EntreeCommercial() {
   if (can('com.tableau_bord.voir')) return <Navigate to="/commercial/tableau-bord" replace />;
   if (can('com.da.creer') || can('com.da.voir_tout')) return <Navigate to="/commercial/demandes" replace />;
   if (can('com.stock.voir')) return <Navigate to="/commercial/stock" replace />;
+  if (can('com.receptions.saisir')) return <Navigate to="/commercial/receptions" replace />;
+  if (can('com.factures_fourn.saisir') || can('com.factures_fourn.voir')) return <Navigate to="/commercial/factures-fournisseurs" replace />;
   if (can('com.stock.valider')) return <Navigate to="/commercial/stock/validation" replace />;
   const saisie = [['com.stock.entree', 'entrees'], ['com.stock.sortie', 'sorties'], ['com.stock.transfert', 'transferts'], ['com.stock.inventaire', 'inventaires']].find(([c]) => can(c));
   if (saisie) return <Navigate to={`/commercial/stock/${saisie[1]}`} replace />;
@@ -198,6 +207,19 @@ function AuthenticatedApp() {
         <Route path="stock/documents/:id"   element={<AutoriseCm codes={DROITS_STOCK}><StockDocPage /></AutoriseCm>} />
         <Route path="stock/documents/:id/modifier" element={<AutoriseCm codes={DROITS_SAISIE}><StockDocFormPage key="m" /></AutoriseCm>} />
         <Route path="stock/:route"          element={<AutoriseCm codes={DROITS_STOCK}><StockDocsPage key="l" /></AutoriseCm>} />
+        <Route path="receptions"                   element={<AutoriseCm codes={DROITS_RECEPTIONS}><ReceptionsPage /></AutoriseCm>} />
+        <Route path="receptions/nouvelle"          element={<AutoriseCm codes={['com.receptions.saisir']}><ReceptionFormPage key="n" /></AutoriseCm>} />
+        <Route path="receptions/:id"               element={<AutoriseCm codes={DROITS_RECEPTIONS}><ReceptionPage /></AutoriseCm>} />
+        <Route path="receptions/:id/modifier"      element={<AutoriseCm codes={['com.receptions.saisir']}><ReceptionFormPage key="m" /></AutoriseCm>} />
+        <Route path="retours-fournisseurs"         element={<AutoriseCm codes={DROITS_RECEPTIONS}><RetoursFournPage /></AutoriseCm>} />
+        <Route path="retours-fournisseurs/nouveau" element={<AutoriseCm codes={['com.retours_fourn.saisir']}><RetourFournFormPage key="n" /></AutoriseCm>} />
+        <Route path="retours-fournisseurs/:id"     element={<AutoriseCm codes={DROITS_RECEPTIONS}><RetourFournPage /></AutoriseCm>} />
+        <Route path="retours-fournisseurs/:id/modifier" element={<AutoriseCm codes={['com.retours_fourn.saisir']}><RetourFournFormPage key="m" /></AutoriseCm>} />
+        <Route path="factures-fournisseurs"        element={<AutoriseCm codes={DROITS_FACTURES}><FacturesFournPage /></AutoriseCm>} />
+        <Route path="factures-fournisseurs/nouvelle" element={<AutoriseCm codes={['com.factures_fourn.saisir']}><FactureFournFormPage key="n" /></AutoriseCm>} />
+        <Route path="factures-fournisseurs/:id"    element={<AutoriseCm codes={DROITS_FACTURES}><FactureFournPage /></AutoriseCm>} />
+        <Route path="factures-fournisseurs/:id/modifier" element={<AutoriseCm codes={['com.factures_fourn.saisir']}><FactureFournFormPage key="m" /></AutoriseCm>} />
+        <Route path="validation-achats"            element={<AutoriseCm codes={['com.receptions.valider', 'com.retours_fourn.valider', 'com.factures_fourn.valider']}><ValidationAchatsPage /></AutoriseCm>} />
         <Route path="*"            element={<Navigate to="/commercial" replace />} />
       </Route>
       <Route element={<GardeCaisse><Layout /></GardeCaisse>}>

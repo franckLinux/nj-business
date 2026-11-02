@@ -14,6 +14,8 @@
 //     départ de transfert) : CMUP du moment, ou lots FIFO du plus ancien au plus récent ;
 //   • arrivée de transfert : exactement le coût de sortie du magasin de départ
 //     (aucun coût d'acquisition n'est créé par un transfert) ;
+//   • retour fournisseur : le coût de la réception d'origine (mouvement lié) ; en
+//     FIFO, le lot de cette réception est consommé en premier ;
 //   • excédent d'inventaire : dernier coût connu de l'article dans le magasin.
 // La méthode est celle de l'article ; elle ne change plus dès qu'un mouvement valorisé existe.
 const { sequelize } = require('../../models');
@@ -69,6 +71,7 @@ const rejouer = async (tr, tenantId, articleId) => {
     return etats.get(mag);
   };
   const coutSortie = new Map();     // mouvement → coût unitaire de sortie (pour l'arrivée d'un transfert)
+  const coutEntree = new Map();     // mouvement d'entrée → son coût (pour le retour fournisseur)
   const resultats = [];             // [id, cout, valeur]
   const consommations = [];         // [mouvementId, lotIndex(magasin, i), quantite, cout]
   for (const m of mvts) {
@@ -88,7 +91,28 @@ const rejouer = async (tr, tenantId, articleId) => {
       s.cmup = nq > 0 ? s.v / nq : (cout ?? s.cmup);
       s.q = nq;
       if (cout !== null) s.dernier = cout;
+      coutEntree.set(Number(m.id), cout);
       resultats.push([Number(m.id), cout, cout === null ? null : m2(qte * cout)]);
+    } else if (m.type === 'retour_fournisseur' && coutEntree.has(Number(m.mouvement_lie_id))) {
+      // Retour : au coût de la réception d'origine, jamais au CMUP du moment.
+      const cout = coutEntree.get(Number(m.mouvement_lie_id));
+      if (fifo) {
+        let reste = qte;
+        const ordre = [...s.lots.filter((l) => l.mouvement === Number(m.mouvement_lie_id)), ...s.lots.filter((l) => l.mouvement !== Number(m.mouvement_lie_id))];
+        for (const l of ordre) {
+          if (reste <= 0) break;
+          if (l.qr <= 0) continue;
+          const pris = Math.min(l.qr, reste);
+          l.qr = q3(l.qr - pris); reste = q3(reste - pris);
+          consommations.push({ mouvement: Number(m.id), lot: l, quantite: pris, cout: l.cout });
+        }
+      }
+      s.v -= qte * (cout ?? 0);
+      s.q = q3(s.q - qte);
+      if (!fifo) s.cmup = s.q > 0 ? s.v / s.q : s.cmup;
+      if (s.q <= 0) { s.v = s.q < 0 ? s.q * (s.cmup ?? 0) : 0; if (s.q === 0 && !fifo) s.aValoriser = false; }
+      coutSortie.set(Number(m.id), cout === null ? null : c6(cout));
+      resultats.push([Number(m.id), cout === null ? null : c6(cout), cout === null ? null : m2(qte * cout)]);
     } else {
       let cout; let valeur;
       if (fifo) {
@@ -190,7 +214,11 @@ const mouvements = async (ctx, { article_id = '', magasin_id = '', type = '', du
             s.piece, s.observation, a.reference, a.designation, a.unite, m.code AS magasin_code, d.numero AS document_numero, u.username AS par_nom
        FROM com_stock_mouvements s
        JOIN com_articles a ON a.id = s.article_id JOIN com_magasins m ON m.id = s.magasin_id
-       LEFT JOIN com_stock_documents d ON s.document_type IN ('entree', 'sortie', 'transfert', 'inventaire') AND d.id = s.document_id
+       LEFT JOIN LATERAL (
+         SELECT x.numero FROM com_stock_documents x WHERE s.document_type IN ('entree', 'sortie', 'transfert', 'inventaire') AND x.id = s.document_id
+         UNION ALL SELECT x.numero FROM com_receptions x WHERE s.document_type = 'reception' AND x.id = s.document_id
+         UNION ALL SELECT x.numero FROM com_retours_fournisseurs x WHERE s.document_type = 'retour_fournisseur' AND x.id = s.document_id
+       ) d ON true
        LEFT JOIN users u ON u.id = s.cree_par
       WHERE s.tenant_id = :t
         AND (CAST(:mags AS BIGINT[]) IS NULL OR s.magasin_id = ANY(CAST(:mags AS BIGINT[])))

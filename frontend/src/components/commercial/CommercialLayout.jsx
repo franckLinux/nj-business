@@ -32,6 +32,13 @@ const TITRES = {
   '/commercial/documents': 'Contrôles — Documents justificatifs',
   '/commercial/historique': 'Contrôles — Historique',
   '/commercial/stock': 'Stock — État du stock',
+  '/commercial/receptions': 'Achats — Réceptions',
+  '/commercial/receptions/nouvelle': 'Achats — Nouvelle réception',
+  '/commercial/retours-fournisseurs': 'Achats — Retours fournisseurs',
+  '/commercial/retours-fournisseurs/nouveau': 'Achats — Retour au fournisseur',
+  '/commercial/factures-fournisseurs': 'Achats — Factures fournisseurs',
+  '/commercial/factures-fournisseurs/nouvelle': 'Achats — Saisie d\'une facture fournisseur',
+  '/commercial/validation-achats': 'Contrôles — Validation des achats',
   '/commercial/stock/nouveau': 'Stock — Nouveau document',
   '/commercial/stock/entrees': 'Stock — Entrées en stock',
   '/commercial/stock/sorties': 'Stock — Sorties diverses',
@@ -46,7 +53,10 @@ const titre = (chemin) => TITRES[chemin]
     : /^\/commercial\/demandes\/\d+$/.test(chemin) ? 'Achats — Demande d\'achat'
       : /^\/commercial\/bons\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier le bon de commande'
         : /^\/commercial\/bons\/\d+$/.test(chemin) ? 'Achats — Bon de commande'
-        : /^\/commercial\/stock\/documents\//.test(chemin) ? 'Stock — Document de stock' : 'NJ COMMERCIAL');
+        : /^\/commercial\/stock\/documents\//.test(chemin) ? 'Stock — Document de stock'
+        : /^\/commercial\/receptions\/\d+/.test(chemin) ? 'Achats — Réception'
+          : /^\/commercial\/retours-fournisseurs\/\d+/.test(chemin) ? 'Achats — Retour fournisseur'
+            : /^\/commercial\/factures-fournisseurs\/\d+/.test(chemin) ? 'Achats — Facture fournisseur' : 'NJ COMMERCIAL');
 
 // Menu en quatre rubriques (lot 1) : la saisie dans « Traitements », la décision
 // et le suivi dans « Contrôles et reporting ». Une entrée n'apparaît qu'avec une
@@ -77,8 +87,15 @@ const I = {
   valider: 'M20 6L9 17l-5-5',
   mouvements: 'M4 6h16M4 12h16M4 18h10',
   valeur: 'M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  reception: 'M3 7l9-4 9 4v10l-9 4-9-4zM12 11v6M9 14l3 3 3-3',
+  retour: 'M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3',
+  facture: 'M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4',
+  valideAchat: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
 };
 const STOCK = ['com.stock.voir', 'com.stock.entree', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.inventaire', 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation'];
+const RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'com.receptions.annuler', 'com.retours_fourn.saisir', 'com.retours_fourn.valider',
+  'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
+const FACTURES = ['com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler'];
 const LISTE = (code) => [code, 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal'];
 const RUBRIQUES = [
   { titre: 'Tableau de bord', groupes: [{ entrees: [
@@ -100,6 +117,9 @@ const RUBRIQUES = [
   { titre: 'Traitements', groupes: [{ titre: 'Achats', entrees: [
     { to: '/commercial/demandes', libelle: 'Expressions de besoin', codes: ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'], icone: I.besoin, badge: 'a_corriger', badgeTitre: 'Vos demandes à corriger' },
     { to: '/commercial/bons', libelle: 'Bons de commande', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.bon, badge: 'a_commander', badgeTitre: 'Demandes approuvées à commander' },
+    { to: '/commercial/receptions', libelle: 'Réceptions', codes: RECEPTIONS, icone: I.reception, badge: 'bons_a_recevoir', badgeTitre: 'Bons de commande à recevoir' },
+    { to: '/commercial/retours-fournisseurs', libelle: 'Retours fournisseurs', codes: RECEPTIONS, icone: I.retour },
+    { to: '/commercial/factures-fournisseurs', libelle: 'Factures fournisseurs', codes: FACTURES, icone: I.facture },
   ] }, { titre: 'Stock', entrees: [
     { to: '/commercial/stock', end: true, libelle: 'État du stock', codes: ['com.stock.voir'], icone: I.stock, badge: 'sous_seuil', badgeTitre: 'Articles sous le seuil d\'alerte' },
     { to: '/commercial/stock/entrees', libelle: 'Entrées en stock', codes: LISTE('com.stock.entree'), icone: I.entree },
@@ -109,6 +129,7 @@ const RUBRIQUES = [
   ] }] },
   { titre: 'Contrôles et reporting', groupes: [{ entrees: [
     { to: '/commercial/autorisations', libelle: 'Autorisations d\'achat', codes: ['com.da.approuver', 'com.da.approuver_direction'], icone: I.autorisation, badge: 'a_examiner', badgeTitre: 'Demandes qui attendent votre décision' },
+    { to: '/commercial/validation-achats', libelle: 'Validation des achats', codes: ['com.receptions.valider', 'com.retours_fourn.valider', 'com.factures_fourn.valider'], icone: I.valideAchat, badge: 'achats_a_valider', badgeTitre: 'Réceptions, retours et factures à valider' },
     { to: '/commercial/stock/validation', libelle: 'Validation des stocks', codes: ['com.stock.valider'], icone: I.valider, badge: 'a_valider', badgeTitre: 'Documents de stock à valider' },
     { to: '/commercial/stock/mouvements', libelle: 'Mouvements de stock', codes: ['com.stock.journal'], icone: I.mouvements },
     { to: '/commercial/stock/valorisation', libelle: 'Valorisation du stock', codes: ['com.stock.valorisation'], icone: I.valeur },
@@ -134,6 +155,11 @@ function CommercialSidebar({ open, onClose }) {
   useEffect(() => {
     if (peutUn(can, DROITS_DEMANDES)) api.get('/commercial/demandes/compteurs').then((r) => { if (r && !r.error) setBadge((b) => ({ ...b, ...r })); });
     if (peutUn(can, STOCK)) api.get('/commercial/stock/compteurs').then((r) => { if (r && !r.error) setBadge((b) => ({ ...b, ...r })); });
+    if (peutUn(can, RECEPTIONS)) {
+      api.get('/commercial/achats/compteurs').then((r) => {
+        if (r && !r.error) setBadge((b) => ({ ...b, bons_a_recevoir: r.bons_a_recevoir, achats_a_valider: r.receptions_a_valider + r.retours_a_valider + r.factures_a_valider }));
+      });
+    }
   }, [can, location.pathname]);
   const navigate = useNavigate();
   const [monCompte, setMonCompte] = useState(false);

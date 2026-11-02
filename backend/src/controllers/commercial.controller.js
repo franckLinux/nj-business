@@ -244,3 +244,61 @@ Object.assign(module.exports, {
     }
   },
 });
+
+// ── Lot 5 : documents d'achat (services/commercial/achats_docs.service.js) ──
+const ad = require('../services/commercial/achats_docs.service');
+const repondreAd = (quoi, fn, statut = 200) => async (req, res) => {
+  try {
+    const ctx = await da.contexte(req);
+    res.status(statut).json(await fn(ctx, req));
+  } catch (err) {
+    if (err instanceof ad.ErreurAchat || err instanceof ErreurDocument || err instanceof da.ErreurDemande) return res.status(err.status).json({ error: err.message });
+    if (err.status === 503) return res.status(503).json({ error: err.message });
+    if (/INTANGIBLE/.test(err.message || '')) return res.status(409).json({ error: err.message.replace(/^.*?: /, '') });
+    if (err?.original?.code === '23505' || err?.parent?.code === '23505') {
+      return res.status(409).json({ error: /uq_com_ff_reference/.test(err.original?.constraint || err.parent?.constraint || err.message || '')
+        ? 'Cette pièce du fournisseur (même numéro) est déjà enregistrée.' : 'Enregistrement en double refusé.' });
+    }
+    if (err?.original?.code === '23514' || err?.parent?.code === '23514') return res.status(400).json({ error: 'Donnée refusée par les règles de la base.' });
+    console.error(`[Commercial] ${quoi} :`, err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+Object.assign(module.exports, {
+  getAchatsCompteurs:       repondreAd('achats.compteurs', (ctx) => ad.compteurs(ctx)),
+  getARecevoir:             repondreAd('réceptions.à recevoir', (ctx) => ad.aRecevoir(ctx)),
+  getPropositionReception:  repondreAd('réception.proposition', (ctx, req) => ad.propositionReception(ctx, req.params.bc)),
+  getReception:             repondreAd('réception', (ctx, req) => ad.lireReception(ctx, req.params.id)),
+  postReception:            repondreAd('réception.création', (ctx, req) => ad.creerReception(ctx, req.body || {}), 201),
+  putReception:             repondreAd('réception.modif', (ctx, req) => ad.modifierReception(ctx, req.params.id, req.body || {})),
+  postValidationReception:  repondreAd('réception.validation', (ctx, req) => ad.validerReception(ctx, req.params.id)),
+  postAnnulationReception:  repondreAd('réception.annulation', (ctx, req) => ad.annulerReception(ctx, req.params.id, req.body || {})),
+  getPropositionRetour:     repondreAd('retour.proposition', (ctx, req) => ad.propositionRetour(ctx, req.params.rec)),
+  getRetour:                repondreAd('retour', (ctx, req) => ad.lireRetour(ctx, req.params.id)),
+  postRetour:               repondreAd('retour.création', (ctx, req) => ad.creerRetour(ctx, req.body || {}), 201),
+  putRetour:                repondreAd('retour.modif', (ctx, req) => ad.modifierRetour(ctx, req.params.id, req.body || {})),
+  postValidationRetour:     repondreAd('retour.validation', (ctx, req) => ad.validerRetour(ctx, req.params.id)),
+  postAnnulationRetour:     repondreAd('retour.annulation', (ctx, req) => ad.annulerRetour(ctx, req.params.id, req.body || {})),
+  getFournisseursAFacturer: repondreAd('factures.à facturer', (ctx) => ad.fournisseursAFacturer(ctx)),
+  getAFacturer:             repondreAd('factures.lignes', (ctx, req) => ad.listeAFacturer(ctx, req.params.f)),
+  getFacture:               repondreAd('facture', (ctx, req) => ad.lireFacture(ctx, req.params.id)),
+  postFacture:              repondreAd('facture.création', (ctx, req) => ad.creerFacture(ctx, req.body || {}), 201),
+  putFacture:               repondreAd('facture.modif', (ctx, req) => ad.modifierFacture(ctx, req.params.id, req.body || {})),
+  postValidationFacture:    repondreAd('facture.validation', (ctx, req) => ad.validerFacture(ctx, req.params.id)),
+  postAnnulationFacture:    repondreAd('facture.annulation', (ctx, req) => ad.annulerFacture(ctx, req.params.id, req.body || {})),
+  listerDoc:    (sorte) => repondreAd(`${sorte}s`, (ctx, req) => ad.lister(ctx, sorte, req.query)),
+  supprimerDoc: (sorte) => repondreAd(`${sorte}.suppression`, (ctx, req) => ad.supprimer(ctx, sorte, req.params.id)),
+  soumettreDoc: (sorte) => repondreAd(`${sorte}.soumission`, (ctx, req) => ad.soumettre(ctx, sorte, req.params.id, req.body || {})),
+  renvoyerDoc:  (sorte) => repondreAd(`${sorte}.renvoi`, (ctx, req) => ad.renvoyer(ctx, sorte, req.params.id, req.body || {})),
+  joindreDoc:   (sorte) => repondreAd(`${sorte}.pièce`, (ctx, req) => ad.joindre(ctx, sorte, req.params.id, req.body || {}), 201),
+  pieceDoc:     (sorte) => async (req, res) => {
+    try {
+      const ctx = await da.contexte(req);
+      await envoyerFichier(res, await ad.lirePiece(ctx, sorte, req.params.id, req.params.doc));
+    } catch (err) {
+      if (err instanceof ad.ErreurAchat || err instanceof bc.ErreurBon) return res.status(err.status).json({ error: err.message });
+      console.error('[Commercial] pièce achat :', err.message);
+      return res.status(500).json({ error: 'Erreur serveur.' });
+    }
+  },
+});

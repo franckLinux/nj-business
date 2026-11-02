@@ -292,3 +292,12 @@ a.cm-tuile:hover { border-color: #93c5fd; box-shadow: 0 6px 18px rgba(37, 99, 23
 .cm-conversion input { width: 84px !important; text-align: right; }
 .cm-conv { display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 3px; white-space: nowrap; }
 .cm-lignes select.cm-unite-ligne { width: 110px; margin-top: 4px; display: block; margin-left: auto; height: 32px; }
+
+/* Histogramme du tableau de bord sur téléphone : il reste dans sa carte. */
+.cm-deux > *, .cm-section { min-width: 0; }
+.cm-histo-lib, .cm-histo-val { max-width: 100%; overflow: hidden; text-overflow: clip; }
+@media (max-width: 600px) {
+  .cm-histo { gap: 2px; }
+  .cm-histo-lib { font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg); height: 38px; }
+  .cm-histo-val { display: none; }
+}

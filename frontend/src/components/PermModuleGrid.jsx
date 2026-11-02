@@ -31,7 +31,7 @@ const ORDRE_STOCK = ['voir', 'initial', 'entree', 'sortie', 'transfert', 'invent
 export const groupeDe = (p) => {
   if (p.module !== 'commercial') return p.module;
   if (p.code.startsWith('com.stock.')) return 'commercial:stock';
-  if (/^com\.(da|bc|documents|tableau_bord)\./.test(p.code)) return 'commercial:achats';
+  if (/^com\.(da|bc|documents|tableau_bord|receptions|retours_fourn|factures_fourn)\./.test(p.code)) return 'commercial:achats';
   return 'commercial:config';
 };
 // Permissions regroupées par bloc, dans l'ordre de lecture (le stock suit le circuit).
