@@ -25,7 +25,12 @@ export const MOUVEMENTS = {
   reception: 'Réception fournisseur', retour_fournisseur: 'Retour fournisseur', livraison: 'Livraison client', retour_client: 'Retour client',
 };
 
-export const DROITS_STOCK = ['com.stock.voir', 'com.stock.mouvements', 'com.stock.valider'];
+// Droits fins (migration 057) : une permission par fonction.
+export const SAISIE_STOCK = { entree: 'com.stock.entree', sortie: 'com.stock.sortie', transfert: 'com.stock.transfert', inventaire: 'com.stock.inventaire' };
+export const DROITS_SAISIE = Object.values(SAISIE_STOCK);
+export const DROITS_STOCK = ['com.stock.voir', ...DROITS_SAISIE, 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation'];
+// Listes d'un type : qui le saisit, qui valide ou annule, qui consulte le journal.
+export const droitsListe = (type) => [SAISIE_STOCK[type], 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal'];
 
 // Nombre saisi à la française (« 1 234,5 ») → nombre, ou null si vide.
 export const lireNombre = (v) => {

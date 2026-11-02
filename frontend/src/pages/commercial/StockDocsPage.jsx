@@ -5,7 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Entete, useListe, useDiffere } from '@/components/commercial/ui';
 import { dateFr } from '@/components/commercial/achats';
-import { TYPES_STOCK, TYPE_PAR_ROUTE, STATUTS_STOCK, StatutStock } from '@/components/commercial/stock';
+import { TYPES_STOCK, TYPE_PAR_ROUTE, STATUTS_STOCK, StatutStock, SAISIE_STOCK } from '@/components/commercial/stock';
 
 export default function StockDocsPage({ validation = false }) {
   const { route } = useParams();
@@ -26,7 +26,7 @@ export default function StockDocsPage({ validation = false }) {
         description={validation
           ? 'Documents soumis qui attendent une validation. Le stock ne bouge qu\'à la validation, et jamais par la personne qui a saisi le document.'
           : t.aide}>
-        {!validation && can('com.stock.mouvements') && (
+        {!validation && can(SAISIE_STOCK[type]) && (
           <button type="button" className="cm-btn cm-primaire" onClick={() => navigate(`/commercial/stock/nouveau?type=${type}`)}>+ {t.libelle}</button>
         )}
       </Entete>

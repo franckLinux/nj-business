@@ -17,6 +17,7 @@ export function StockMouvementsPage() {
   const { donnees: magasins } = useListe('/commercial/magasins?perimetre=1');
   const { donnees, erreur } = useListe(`/commercial/stock/mouvements?article_id=${article}&magasin_id=${magasin}&type=${type}&du=${du}&au=${au}&q=${encodeURIComponent(qd)}`);
   const liste = donnees || [];
+  const valeurs = !liste.some((m) => m.valeurs_masquees);
   return (
     <div className="cm-page">
       <Entete titre="Mouvements de stock"
@@ -41,7 +42,7 @@ export function StockMouvementsPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table" style={{ minWidth: 900 }}>
-          <thead><tr><th>Date</th><th>Mouvement</th><th>Article</th><th>Magasin</th><th className="cm-num">Quantité</th><th className="cm-num">Coût unitaire</th><th className="cm-num">Valeur</th><th>Document</th></tr></thead>
+          <thead><tr><th>Date</th><th>Mouvement</th><th>Article</th><th>Magasin</th><th className="cm-num">Quantité</th>{valeurs && <><th className="cm-num">Coût unitaire</th><th className="cm-num">Valeur</th></>}<th>Document</th></tr></thead>
           <tbody>
             {!donnees ? <tr><td colSpan={8} className="cm-vide">Chargement…</td></tr>
               : liste.length === 0 ? <tr><td colSpan={8} className="cm-vide"><strong>Aucun mouvement</strong>Aucun mouvement pour ces critères.</td></tr>
@@ -52,8 +53,8 @@ export function StockMouvementsPage() {
                     <td><strong>{m.designation}</strong><span className="cm-sous">{m.reference}</span></td>
                     <td>{m.magasin_code}</td>
                     <td className="cm-num" style={{ color: m.sens > 0 ? '#047857' : '#b91c1c' }}>{m.sens > 0 ? '+' : '−'}{fmtQte(m.quantite)} {m.unite}</td>
-                    <td className="cm-num">{m.cout_unitaire === null ? <span className="cm-pastille cm-info">à valoriser</span> : fmtMontant(Math.round(m.cout_unitaire * 100) / 100, '')}</td>
-                    <td className="cm-num">{fmtMontant(m.valeur, '')}</td>
+                    {valeurs && <td className="cm-num">{m.cout_unitaire === null ? <span className="cm-pastille cm-info">à valoriser</span> : fmtMontant(Math.round(m.cout_unitaire * 100) / 100, '')}</td>}
+                    {valeurs && <td className="cm-num">{fmtMontant(m.valeur, '')}</td>}
                     <td>
                       {m.document_numero ? <Link to={`/commercial/stock/documents/${m.document_id}`} onClick={(e) => e.stopPropagation()}>{m.document_numero}</Link> : (m.piece || '—')}
                       {m.par_nom && <span className="cm-sous">{m.par_nom}</span>}

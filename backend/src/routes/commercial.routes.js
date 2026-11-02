@@ -86,21 +86,25 @@ router.post  ('/bons-commande/:id/proformas/:doc/retrait', ...P('com.bc.preparer
 router.get   ('/bons-commande/:id/pieces/:doc',          ...BC_VUE, c.getPieceBon);
 
 // ── Lot 4 : moteur de stock (contrôles fins — auteur, périmètre — dans le service) ──
-const STOCK = [...base, requireAnyPermission('com.stock.voir', 'com.stock.mouvements', 'com.stock.valider')];
+// Droits fins (057) : une permission par fonction ; le service contrôle le type du document.
+const DROITS_STOCK = ['com.stock.voir', 'com.stock.entree', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.inventaire',
+  'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation'];
+const STOCK = [...base, requireAnyPermission(...DROITS_STOCK)];
+const SAISIE = [...base, requireAnyPermission('com.stock.entree', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.inventaire')];
 router.get   ('/stock/etat',                             ...STOCK, c.getStockEtat);
 router.get   ('/stock/mouvements',                       ...STOCK, c.getStockMouvements);
 router.get   ('/stock/valorisation',                     ...STOCK, c.getStockValorisation);
 router.get   ('/stock/compteurs',                        ...STOCK, c.getStockCompteurs);
-router.get   ('/stock/inventaire/articles',              ...P('com.stock.mouvements'), c.getArticlesInventaire);
+router.get   ('/stock/inventaire/articles',              ...P('com.stock.inventaire'), c.getArticlesInventaire);
 router.get   ('/stock/documents',                        ...STOCK, c.getStockDocs);
 router.get   ('/stock/documents/:id',                    ...STOCK, c.getStockDoc);
-router.post  ('/stock/documents',                        ...P('com.stock.mouvements'), c.postStockDoc);
-router.put   ('/stock/documents/:id',                    ...P('com.stock.mouvements'), c.putStockDoc);
-router.delete('/stock/documents/:id',                    ...P('com.stock.mouvements'), c.deleteStockDoc);
-router.post  ('/stock/documents/:id/soumission',         ...P('com.stock.mouvements'), c.postStockSoumission);
+router.post  ('/stock/documents',                        ...SAISIE, c.postStockDoc);
+router.put   ('/stock/documents/:id',                    ...SAISIE, c.putStockDoc);
+router.delete('/stock/documents/:id',                    ...SAISIE, c.deleteStockDoc);
+router.post  ('/stock/documents/:id/soumission',         ...SAISIE, c.postStockSoumission);
 router.post  ('/stock/documents/:id/renvoi',             ...P('com.stock.valider'), c.postStockRenvoi);
 router.post  ('/stock/documents/:id/validation',         ...P('com.stock.valider'), c.postStockValidation);
-router.post  ('/stock/documents/:id/annulation',         ...P('com.stock.valider'), c.postStockAnnulation);
+router.post  ('/stock/documents/:id/annulation',         ...P('com.stock.annuler'), c.postStockAnnulation);
 router.post  ('/stock/documents/:id/pieces',             ...STOCK, c.postStockPiece);
 router.get   ('/stock/documents/:id/pieces/:doc',        ...STOCK, c.getStockPiece);
 

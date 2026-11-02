@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Entete, useListe, useDiffere, fmtMontant, fmtQte } from '@/components/commercial/ui';
-import { TYPES_STOCK } from '@/components/commercial/stock';
+import { TYPES_STOCK, SAISIE_STOCK } from '@/components/commercial/stock';
 
 export default function StockEtatPage() {
   const { can } = useApp();
@@ -20,13 +20,14 @@ export default function StockEtatPage() {
   const { donnees, erreur } = useListe(`/commercial/stock/etat?q=${encodeURIComponent(qd)}&magasin_id=${magasin}&famille_id=${famille}`
     + `${filtre === 'alertes' ? '&alertes=1' : ''}${filtre === 'a_valoriser' ? '&a_valoriser=1' : ''}`);
   const liste = (donnees || []).filter((l) => filtre || l.quantite !== 0 || l.a_valoriser);
-  const total = liste.reduce((t, l) => t + l.valeur, 0);
+  const valeurs = can('com.stock.valorisation');
+  const total = liste.reduce((t, l) => t + (l.valeur || 0), 0);
   return (
     <div className="cm-page">
       <Entete titre="État du stock"
         description="Quantités et valeurs calculées à partir des seuls mouvements validés, au coût moyen (CMUP) ou premier entré, premier sorti (FIFO) selon l'article.">
-        {can('com.stock.mouvements') && Object.entries(TYPES_STOCK).map(([k, t]) => (
-          <button key={k} type="button" className={'cm-btn ' + (k === 'entree' ? 'cm-primaire' : 'cm-secondaire')}
+        {Object.entries(TYPES_STOCK).filter(([k]) => can(SAISIE_STOCK[k])).map(([k, t], i) => (
+          <button key={k} type="button" className={'cm-btn ' + (i === 0 ? 'cm-primaire' : 'cm-secondaire')}
             onClick={() => navigate(`/commercial/stock/nouveau?type=${k}`)}>{t.libelle}</button>
         ))}
       </Entete>
@@ -45,24 +46,24 @@ export default function StockEtatPage() {
           <option value="alertes">Sous le seuil d'alerte</option>
           <option value="a_valoriser">Sans coût (à valoriser)</option>
         </select>
-        <span className="cm-compteur">{donnees ? `${liste.length} ligne${liste.length > 1 ? 's' : ''} · ${fmtMontant(Math.round(total))}` : ''}</span>
+        <span className="cm-compteur">{donnees ? `${liste.length} ligne${liste.length > 1 ? 's' : ''}${valeurs ? ` · ${fmtMontant(Math.round(total))}` : ''}` : ''}</span>
       </div>
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table" style={{ minWidth: 820 }}>
-          <thead><tr><th>Article</th><th>Magasin</th><th className="cm-num">Quantité</th><th className="cm-num">Coût unitaire</th><th className="cm-num">Valeur</th><th>Méthode</th><th>État</th></tr></thead>
+          <thead><tr><th>Article</th><th>Magasin</th><th className="cm-num">Quantité</th>{valeurs && <><th className="cm-num">Coût unitaire</th><th className="cm-num">Valeur</th></>}<th>Méthode</th><th>État</th></tr></thead>
           <tbody>
             {!donnees ? <tr><td colSpan={7} className="cm-vide">Chargement…</td></tr>
               : liste.length === 0 ? <tr><td colSpan={7} className="cm-vide"><strong>Aucun stock</strong>Le stock naît du stock d'ouverture (fiche article) puis des documents de stock validés.</td></tr>
                 : liste.map((l) => (
-                  <tr key={`${l.article_id}-${l.magasin_id}`} className="cm-cliquable" tabIndex={0}
-                    onClick={() => navigate(`/commercial/stock/mouvements?article_id=${l.article_id}&magasin_id=${l.magasin_id}`)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/commercial/stock/mouvements?article_id=${l.article_id}&magasin_id=${l.magasin_id}`); }}>
+                  <tr key={`${l.article_id}-${l.magasin_id}`} className={can('com.stock.journal') ? 'cm-cliquable' : ''} tabIndex={0}
+                    onClick={() => can('com.stock.journal') && navigate(`/commercial/stock/mouvements?article_id=${l.article_id}&magasin_id=${l.magasin_id}`)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && can('com.stock.journal')) navigate(`/commercial/stock/mouvements?article_id=${l.article_id}&magasin_id=${l.magasin_id}`); }}>
                     <td><strong>{l.designation}</strong><span className="cm-sous">{l.reference} · {l.famille_nom}</span></td>
                     <td>{l.magasin_code}<span className="cm-sous">{l.agence_code}</span></td>
                     <td className="cm-num"><strong>{fmtQte(l.quantite)}</strong> {l.unite}</td>
-                    <td className="cm-num">{l.a_valoriser ? '—' : fmtMontant(l.cmup === null ? null : Math.round(l.cmup * 100) / 100, '')}</td>
-                    <td className="cm-num">{fmtMontant(l.valeur, '')}</td>
+                    {valeurs && <td className="cm-num">{l.a_valoriser ? '—' : fmtMontant(l.cmup === null ? null : Math.round(l.cmup * 100) / 100, '')}</td>}
+                    {valeurs && <td className="cm-num">{fmtMontant(l.valeur, '')}</td>}
                     <td>{l.methode_valorisation === 'fifo' ? 'FIFO' : 'CMUP'}</td>
                     <td>
                       {l.quantite < 0 && <span className="cm-pastille cm-rouge">Négatif</span>}

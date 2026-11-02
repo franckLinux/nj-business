@@ -201,10 +201,26 @@ const repondreSt = (quoi, fn, statut = 200) => async (req, res) => {
     return res.status(500).json({ error: 'Erreur serveur.' });
   }
 };
+// Droits fins du stock (057) : l'état sert aussi aux formulaires de saisie (stock disponible) ;
+// coûts et valeurs ne sont renvoyés qu'avec com.stock.valorisation.
+const exigerUn = (ctx, codes, libelle) => {
+  if (!codes.some((c) => ctx.peut(c))) throw new sd.ErreurStock(403, `Permission requise : ${libelle}.`);
+};
+const sansValeurs = (ctx, lignes) => (ctx.peut('com.stock.valorisation') ? lignes
+  : lignes.map((l) => ({ ...l, cmup: null, valeur: null, cout_unitaire: null, valeurs_masquees: true })));
 Object.assign(module.exports, {
-  getStockEtat:         repondreSt('stock.état', (ctx, req) => moteurStock.etat(ctx, req.query)),
-  getStockMouvements:   repondreSt('stock.mouvements', (ctx, req) => moteurStock.mouvements(ctx, req.query)),
-  getStockValorisation: repondreSt('stock.valorisation', (ctx, req) => moteurStock.valorisation(ctx, req.query)),
+  getStockEtat:         repondreSt('stock.état', async (ctx, req) => {
+    exigerUn(ctx, ['com.stock.voir', ...Object.values(sd.SAISIES)], 'consulter l\'état du stock');
+    return sansValeurs(ctx, await moteurStock.etat(ctx, req.query));
+  }),
+  getStockMouvements:   repondreSt('stock.mouvements', async (ctx, req) => {
+    exigerUn(ctx, ['com.stock.journal'], 'consulter les mouvements de stock');
+    return sansValeurs(ctx, await moteurStock.mouvements(ctx, req.query));
+  }),
+  getStockValorisation: repondreSt('stock.valorisation', (ctx, req) => {
+    exigerUn(ctx, ['com.stock.valorisation'], 'voir la valorisation du stock');
+    return moteurStock.valorisation(ctx, req.query);
+  }),
   getStockCompteurs:    repondreSt('stock.compteurs', (ctx) => sd.compteurs(ctx)),
   getArticlesInventaire: repondreSt('stock.inventaire', (ctx, req) => sd.articlesInventaire(ctx, req.query.magasin_id, req.query)),
   getStockDocs:         repondreSt('stock.documents', (ctx, req) => sd.lister(ctx, req.query)),

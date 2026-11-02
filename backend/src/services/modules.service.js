@@ -196,15 +196,19 @@ const PROFILS_COMMERCIAL = [
     ['com.parametrage.voir', 'com.articles.voir', 'com.tiers.voir', 'com.da.creer', 'com.documents.ajouter']],
   ['achats_gestionnaire', 'Gestionnaire des achats (GAS)', 'Vérifie stocks et fournisseurs, prépare les bons de commande', '#6366f1',
     ['com.parametrage.voir', 'com.articles.voir', 'com.articles.modifier', 'com.tiers.voir', 'com.tiers.modifier', 'com.stock.initial',
-      'com.da.creer', 'com.da.voir_tout', 'com.bc.preparer', 'com.documents.ajouter', 'com.tableau_bord.voir', 'com.stock.voir']],
+      'com.da.creer', 'com.da.voir_tout', 'com.bc.preparer', 'com.documents.ajouter', 'com.tableau_bord.voir',
+      'com.stock.voir', 'com.stock.journal', 'com.stock.valorisation']],
   ['achats_responsable', 'Responsable des achats', 'Approuve ou rejette les demandes, émet et annule les bons', '#7c3aed',
     ['com.parametrage.voir', 'com.parametrage.modifier', 'com.articles.voir', 'com.articles.modifier', 'com.tiers.voir',
       'com.tiers.modifier', 'com.tiers.banque', 'com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.bc.preparer',
-      'com.bc.emettre', 'com.bc.annuler', 'com.documents.ajouter', 'com.tableau_bord.voir', 'com.stock.voir']],
+      'com.bc.emettre', 'com.bc.annuler', 'com.documents.ajouter', 'com.tableau_bord.voir',
+      'com.stock.voir', 'com.stock.journal', 'com.stock.valorisation']],
   ['stock_magasinier', 'Magasinier', 'Saisit entrées, sorties, transferts et comptages d\'inventaire', '#0d9488',
-    ['com.articles.voir', 'com.stock.voir', 'com.stock.mouvements']],
+    ['com.articles.voir', 'com.stock.voir', 'com.stock.entree', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.inventaire', 'com.stock.journal']],
   ['stock_gestionnaire', 'Gestionnaire de stock', 'Valide les documents de stock, suit la valorisation', '#0f766e',
-    ['com.parametrage.voir', 'com.articles.voir', 'com.stock.initial', 'com.stock.voir', 'com.stock.mouvements', 'com.stock.valider', 'com.tableau_bord.voir']],
+    ['com.parametrage.voir', 'com.articles.voir', 'com.stock.initial', 'com.stock.voir', 'com.stock.entree', 'com.stock.sortie',
+      'com.stock.transfert', 'com.stock.inventaire', 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation',
+      'com.tableau_bord.voir']],
 ];
 const PREPARATIONS = {
   commercial: async (client, tenantId) => {

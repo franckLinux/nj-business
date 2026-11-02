@@ -56,7 +56,7 @@ import StockDocsPage from '@/pages/commercial/StockDocsPage';
 import StockDocFormPage from '@/pages/commercial/StockDocFormPage';
 import StockDocPage from '@/pages/commercial/StockDocPage';
 import { StockMouvementsPage, StockValorisationPage } from '@/pages/commercial/StockMouvementsPage';
-import { DROITS_STOCK } from '@/components/commercial/stock';
+import { DROITS_STOCK, DROITS_SAISIE } from '@/components/commercial/stock';
 import VerificationBcPage from '@/pages/VerificationBcPage';
 import { consommerEntree, moduleActif, routeApresConnexion, systemeInstalle, utiliseAccueil } from '@/lib/modules';
 
@@ -123,7 +123,12 @@ function EntreeCommercial() {
   if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
   if (can('com.tableau_bord.voir')) return <Navigate to="/commercial/tableau-bord" replace />;
   if (can('com.da.creer') || can('com.da.voir_tout')) return <Navigate to="/commercial/demandes" replace />;
-  if (can('com.stock.voir') || can('com.stock.mouvements') || can('com.stock.valider')) return <Navigate to="/commercial/stock" replace />;
+  if (can('com.stock.voir')) return <Navigate to="/commercial/stock" replace />;
+  if (can('com.stock.valider')) return <Navigate to="/commercial/stock/validation" replace />;
+  const saisie = [['com.stock.entree', 'entrees'], ['com.stock.sortie', 'sorties'], ['com.stock.transfert', 'transferts'], ['com.stock.inventaire', 'inventaires']].find(([c]) => can(c));
+  if (saisie) return <Navigate to={`/commercial/stock/${saisie[1]}`} replace />;
+  if (can('com.stock.journal')) return <Navigate to="/commercial/stock/mouvements" replace />;
+  if (can('com.stock.valorisation')) return <Navigate to="/commercial/stock/valorisation" replace />;
   return <Navigate to="/commercial/mise-en-route" replace />;
 }
 
@@ -185,13 +190,13 @@ function AuthenticatedApp() {
         <Route path="tableau-bord"          element={<AutoriseCm codes={['com.tableau_bord.voir']}><TableauBordPage /></AutoriseCm>} />
         <Route path="documents"             element={<AutoriseCm codes={DROITS_BONS}><DocumentsPage /></AutoriseCm>} />
         <Route path="historique"            element={<AutoriseCm codes={DROITS_HISTORIQUE}><HistoriquePage /></AutoriseCm>} />
-        <Route path="stock"                 element={<AutoriseCm codes={DROITS_STOCK}><StockEtatPage /></AutoriseCm>} />
-        <Route path="stock/nouveau"         element={<AutoriseCm codes={['com.stock.mouvements']}><StockDocFormPage key="n" /></AutoriseCm>} />
+        <Route path="stock"                 element={<AutoriseCm codes={['com.stock.voir']}><StockEtatPage /></AutoriseCm>} />
+        <Route path="stock/nouveau"         element={<AutoriseCm codes={DROITS_SAISIE}><StockDocFormPage key="n" /></AutoriseCm>} />
         <Route path="stock/validation"      element={<AutoriseCm codes={['com.stock.valider']}><StockDocsPage key="v" validation /></AutoriseCm>} />
-        <Route path="stock/mouvements"      element={<AutoriseCm codes={DROITS_STOCK}><StockMouvementsPage /></AutoriseCm>} />
-        <Route path="stock/valorisation"    element={<AutoriseCm codes={DROITS_STOCK}><StockValorisationPage /></AutoriseCm>} />
+        <Route path="stock/mouvements"      element={<AutoriseCm codes={['com.stock.journal']}><StockMouvementsPage /></AutoriseCm>} />
+        <Route path="stock/valorisation"    element={<AutoriseCm codes={['com.stock.valorisation']}><StockValorisationPage /></AutoriseCm>} />
         <Route path="stock/documents/:id"   element={<AutoriseCm codes={DROITS_STOCK}><StockDocPage /></AutoriseCm>} />
-        <Route path="stock/documents/:id/modifier" element={<AutoriseCm codes={['com.stock.mouvements']}><StockDocFormPage key="m" /></AutoriseCm>} />
+        <Route path="stock/documents/:id/modifier" element={<AutoriseCm codes={DROITS_SAISIE}><StockDocFormPage key="m" /></AutoriseCm>} />
         <Route path="stock/:route"          element={<AutoriseCm codes={DROITS_STOCK}><StockDocsPage key="l" /></AutoriseCm>} />
         <Route path="*"            element={<Navigate to="/commercial" replace />} />
       </Route>

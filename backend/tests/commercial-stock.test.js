@@ -293,3 +293,42 @@ test('Intangibilité en base, tableau de bord, isolation entre clients', async (
   assert.equal((await appel('POST', '/commercial/stock/documents', 'dirB', { type: 'entree', magasin_id: R.cen })).status, 400);
   assert.equal((await appel('GET', '/commercial/stock/etat', 'dem')).status, 403);
 });
+
+test('Droits fins (057) : une permission par fonction du stock', async () => {
+  const codes = (await sql("SELECT code FROM permissions WHERE code LIKE 'com.stock.%' ORDER BY code")).map((r) => r.code);
+  assert.deepEqual(codes, ['com.stock.annuler', 'com.stock.entree', 'com.stock.initial', 'com.stock.inventaire', 'com.stock.journal',
+    'com.stock.sortie', 'com.stock.transfert', 'com.stock.valider', 'com.stock.valorisation', 'com.stock.voir']);
+  // Une personne qui ne fait que des sorties.
+  await creerUtilisateur('sor', 'collaborateur', A);
+  for (const p of ['com.stock.voir', 'com.stock.sortie']) await sql('INSERT INTO user_permissions (user_id, permission_code) VALUES ($1, $2)', [U.sor.id, p]);
+  const e = await appel('POST', '/commercial/stock/documents', 'sor', { type: 'entree', magasin_id: R.cen, motif: 'x', lignes: [{ article_id: R.eau, quantite: 1, cout_unitaire: 1 }] });
+  assert.equal(e.status, 403);
+  assert.match(e.message, /entrées/);
+  const s = await appel('POST', '/commercial/stock/documents', 'sor', { type: 'sortie', magasin_id: R.cen, motif: 'Casse', lignes: [{ article_id: R.eau, quantite: 1 }] });
+  assert.equal(s.status, 201, s.message);
+  assert.equal((await appel('GET', `/commercial/stock/inventaire/articles?magasin_id=${R.cen}`, 'sor')).status, 403);
+  // Sans « valorisation » : quantités oui, coûts et valeurs non ; ni journal ni écran de valorisation.
+  const etat = (await appel('GET', '/commercial/stock/etat', 'sor')).data;
+  const eau = etat.find((l) => l.article_id === R.eau && l.magasin_id === R.cen);
+  assert.equal(eau.quantite, 25);
+  assert.equal(eau.valeur, null);
+  assert.equal(eau.cmup, null);
+  assert.equal((await appel('GET', '/commercial/stock/valorisation', 'sor')).status, 403);
+  assert.equal((await appel('GET', '/commercial/stock/mouvements', 'sor')).status, 403);
+  // Les entrées ne lui sont pas visibles ; ses sorties oui.
+  const docs = (await appel('GET', '/commercial/stock/documents', 'sor')).data;
+  assert.ok(docs.length >= 1 && docs.every((d) => d.type === 'sortie'));
+  assert.equal((await appel('GET', `/commercial/stock/documents/${R.entree}`, 'sor')).status, 403);
+  // Valider n'est pas annuler : le valideur sans « annuler » ne peut pas annuler.
+  await creerUtilisateur('val', 'collaborateur', A);
+  for (const p of ['com.stock.voir', 'com.stock.valider']) await sql('INSERT INTO user_permissions (user_id, permission_code) VALUES ($1, $2)', [U.val.id, p]);
+  await appel('POST', `/commercial/stock/documents/${s.data.id}/soumission`, 'sor', {});
+  const v = await appel('POST', `/commercial/stock/documents/${s.data.id}/validation`, 'val', {});
+  assert.equal(v.status, 200, v.message);
+  assert.equal(v.data.droits.annuler, false);
+  assert.equal((await appel('POST', `/commercial/stock/documents/${s.data.id}/annulation`, 'val', { motif: 'Erreur' })).status, 403);
+  // Profils créés à l'activation : magasinier sans valorisation ni validation.
+  const mag = (await sql(`SELECT rp.permission_code FROM role_permissions rp JOIN roles r ON r.id = rp.role_id
+                           WHERE r.tenant_id = $1 AND r.code = 'stock_magasinier' AND rp.permission_code LIKE 'com.stock.%' ORDER BY 1`, [A])).map((r) => r.permission_code);
+  assert.deepEqual(mag, ['com.stock.entree', 'com.stock.inventaire', 'com.stock.journal', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.voir']);
+});

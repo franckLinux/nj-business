@@ -29,22 +29,24 @@ function BlocStock({ agence, magasin, devise }) {
   const { can } = useApp();
   const [v, setV] = useState(null);
   const [c, setC] = useState(null);
-  const voit = ['com.stock.voir', 'com.stock.mouvements', 'com.stock.valider'].some((x) => can(x));
+  const voit = ['com.stock.voir', 'com.stock.valider'].some((x) => can(x));
+  const valeurs = can('com.stock.valorisation');
   useEffect(() => {
     if (!voit) return;
-    api.get(`/commercial/stock/valorisation?agence_id=${agence}&magasin_id=${magasin}`).then((r) => { if (!r?.error) setV(r); });
+    if (valeurs) api.get(`/commercial/stock/valorisation?agence_id=${agence}&magasin_id=${magasin}`).then((r) => { if (!r?.error) setV(r); });
+    else setV({ total: null, magasins: [], a_valoriser: null });
     api.get('/commercial/stock/compteurs').then((r) => { if (!r?.error) setC(r); });
-  }, [voit, agence, magasin]);
+  }, [voit, valeurs, agence, magasin]);
   if (!voit || !v || !c) return null;
   return (
     <>
       <h2 className="cm-titre-domaine">Stock</h2>
       <div className="cm-tuiles">
-        <Tuile libelle="Valeur du stock" valeur={fmtMontant(v.total, devise)} detail={`${v.magasins.length} magasin(s), aujourd'hui`} lien="/commercial/stock/valorisation" />
-        <Tuile libelle="Sous le seuil d'alerte" valeur={c.sous_seuil} alerte={c.sous_seuil > 0} lien="/commercial/stock" detail="tous vos magasins" />
+        {valeurs && <Tuile libelle="Valeur du stock" valeur={fmtMontant(v.total, devise)} detail={`${v.magasins.length} magasin(s), aujourd'hui`} lien="/commercial/stock/valorisation" />}
+        <Tuile libelle="Sous le seuil d'alerte" valeur={c.sous_seuil} alerte={c.sous_seuil > 0} lien={can('com.stock.voir') ? '/commercial/stock' : null} detail="tous vos magasins" />
         <Tuile libelle="Documents à valider" valeur={c.a_valider} alerte={c.a_valider > 0} lien={can('com.stock.valider') ? '/commercial/stock/validation' : null}
           detail="saisis par d'autres personnes" />
-        <Tuile libelle="Lignes sans coût" valeur={v.a_valoriser} alerte={v.a_valoriser > 0} detail="stock d'ouverture à valoriser" />
+        {valeurs && <Tuile libelle="Lignes sans coût" valeur={v.a_valoriser} alerte={v.a_valoriser > 0} detail="stock d'ouverture à valoriser" />}
       </div>
     </>
   );

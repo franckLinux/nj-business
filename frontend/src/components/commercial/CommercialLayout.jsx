@@ -78,7 +78,8 @@ const I = {
   mouvements: 'M4 6h16M4 12h16M4 18h10',
   valeur: 'M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
 };
-const STOCK = ['com.stock.voir', 'com.stock.mouvements', 'com.stock.valider'];
+const STOCK = ['com.stock.voir', 'com.stock.entree', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.inventaire', 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation'];
+const LISTE = (code) => [code, 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal'];
 const RUBRIQUES = [
   { titre: 'Tableau de bord', groupes: [{ entrees: [
     { to: '/commercial/tableau-bord', libelle: 'Tableau de bord', codes: ['com.tableau_bord.voir'], icone: I.tableau },
@@ -100,17 +101,17 @@ const RUBRIQUES = [
     { to: '/commercial/demandes', libelle: 'Expressions de besoin', codes: ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'], icone: I.besoin, badge: 'a_corriger', badgeTitre: 'Vos demandes à corriger' },
     { to: '/commercial/bons', libelle: 'Bons de commande', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.bon, badge: 'a_commander', badgeTitre: 'Demandes approuvées à commander' },
   ] }, { titre: 'Stock', entrees: [
-    { to: '/commercial/stock', end: true, libelle: 'État du stock', codes: STOCK, icone: I.stock, badge: 'sous_seuil', badgeTitre: 'Articles sous le seuil d\'alerte' },
-    { to: '/commercial/stock/entrees', libelle: 'Entrées en stock', codes: STOCK, icone: I.entree },
-    { to: '/commercial/stock/sorties', libelle: 'Sorties diverses', codes: STOCK, icone: I.sortie },
-    { to: '/commercial/stock/transferts', libelle: 'Transferts', codes: STOCK, icone: I.transfert },
-    { to: '/commercial/stock/inventaires', libelle: 'Inventaires', codes: STOCK, icone: I.inventaire },
+    { to: '/commercial/stock', end: true, libelle: 'État du stock', codes: ['com.stock.voir'], icone: I.stock, badge: 'sous_seuil', badgeTitre: 'Articles sous le seuil d\'alerte' },
+    { to: '/commercial/stock/entrees', libelle: 'Entrées en stock', codes: LISTE('com.stock.entree'), icone: I.entree },
+    { to: '/commercial/stock/sorties', libelle: 'Sorties diverses', codes: LISTE('com.stock.sortie'), icone: I.sortie },
+    { to: '/commercial/stock/transferts', libelle: 'Transferts', codes: LISTE('com.stock.transfert'), icone: I.transfert },
+    { to: '/commercial/stock/inventaires', libelle: 'Inventaires', codes: LISTE('com.stock.inventaire'), icone: I.inventaire },
   ] }] },
   { titre: 'Contrôles et reporting', groupes: [{ entrees: [
     { to: '/commercial/autorisations', libelle: 'Autorisations d\'achat', codes: ['com.da.approuver', 'com.da.approuver_direction'], icone: I.autorisation, badge: 'a_examiner', badgeTitre: 'Demandes qui attendent votre décision' },
     { to: '/commercial/stock/validation', libelle: 'Validation des stocks', codes: ['com.stock.valider'], icone: I.valider, badge: 'a_valider', badgeTitre: 'Documents de stock à valider' },
-    { to: '/commercial/stock/mouvements', libelle: 'Mouvements de stock', codes: STOCK, icone: I.mouvements },
-    { to: '/commercial/stock/valorisation', libelle: 'Valorisation du stock', codes: STOCK, icone: I.valeur },
+    { to: '/commercial/stock/mouvements', libelle: 'Mouvements de stock', codes: ['com.stock.journal'], icone: I.mouvements },
+    { to: '/commercial/stock/valorisation', libelle: 'Valorisation du stock', codes: ['com.stock.valorisation'], icone: I.valeur },
     { to: '/commercial/documents', libelle: 'Documents justificatifs', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.piece },
     { to: '/commercial/historique', libelle: 'Historique', codes: ['com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.historique },
   ] }] },

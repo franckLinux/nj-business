@@ -3,9 +3,12 @@
 // transferts entre magasins, inventaires.
 //
 // Circuit : brouillon → à valider → validé → (annulé, motivé).
-//   • saisie et soumission : com.stock.mouvements ;
-//   • validation, renvoi, annulation : com.stock.valider, jamais par l'auteur du
-//     document (sauf paramètre « auto-validation » activé par le directeur) ;
+//   • saisie et soumission : une permission par type (com.stock.entree, .sortie,
+//     .transfert, .inventaire — migration 057) ;
+//   • validation et renvoi : com.stock.valider, jamais par l'auteur du document
+//     (sauf paramètre « auto-validation » activé par le directeur) ;
+//   • annulation d'un document validé : com.stock.annuler ;
+//   • coûts et valeurs affichés seulement avec com.stock.valorisation ;
 //   • SEULE la validation écrit des mouvements ; l'annulation les marque annulés
 //     et la valorisation de l'article est rejouée (rien n'est effacé) ;
 //   • un document validé est intangible (déclencheurs en base) ;
@@ -40,9 +43,14 @@ const nombre = (v, nom, { min = 0, vide = null } = {}) => {
 const q3 = (n) => Math.round(n * 1000) / 1000;
 const perim = () => require('./demandes.service');
 
-const VOIR = ['com.stock.voir', 'com.stock.mouvements', 'com.stock.valider'];
+const SAISIES = { entree: 'com.stock.entree', sortie: 'com.stock.sortie', transfert: 'com.stock.transfert', inventaire: 'com.stock.inventaire' };
+const LIB_SAISIES = { entree: 'saisir les entrées en stock', sortie: 'saisir les sorties diverses', transfert: 'saisir les transferts', inventaire: 'saisir les inventaires' };
+const VOIR = ['com.stock.voir', ...Object.values(SAISIES), 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation'];
+// Documents d'un type visibles par : qui le saisit, qui valide ou annule, qui consulte le journal.
+const voitType = (ctx, type) => ctx.peut(SAISIES[type]) || ['com.stock.valider', 'com.stock.annuler', 'com.stock.journal'].some((c) => ctx.peut(c));
 const exigerVue = (ctx) => { if (!VOIR.some((c) => ctx.peut(c))) throw new ErreurStock(403, 'Permission requise : consulter le stock.'); };
 const exiger = (ctx, code, libelle) => { if (!ctx.peut(code)) throw new ErreurStock(403, `Permission requise : ${libelle}.`); };
+const exigerSaisie = (ctx, type) => exiger(ctx, SAISIES[type], LIB_SAISIES[type]);
 
 const auditer = (tr, ctx, action, id, apres, avant = null) => X(
   `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur, nouvelle_valeur)
@@ -101,7 +109,7 @@ const lister = async (ctx, { type = '', statut = '', q = '', du = '', au = '' } 
     r.like = `%${txt(q).toLowerCase()}%`;
   }
   return (await Q(`${SQL_DOC} WHERE ${conds.join(' AND ')} ORDER BY d.cree_le DESC LIMIT 500`, r))
-    .filter((d) => dansPerimetre(ctx, d)).map(formater);
+    .filter((d) => dansPerimetre(ctx, d) && voitType(ctx, d.type)).map(formater);
 };
 
 const compteurs = async (ctx) => {
@@ -119,6 +127,8 @@ const compteurs = async (ctx) => {
 const lire = async (ctx, id) => {
   exigerVue(ctx);
   const d = await charger(ctx, id);
+  if (!voitType(ctx, d.type)) throw new ErreurStock(403, `Permission requise : ${LIB_SAISIES[d.type]} ou valider les documents de stock.`);
+  const couts = ctx.peut('com.stock.valorisation');
   const lignes = await Q(
     `SELECT l.*, a.reference, a.designation, a.unite AS unite_stock, a.actif AS article_actif, a.methode_valorisation,
             COALESCE((SELECT SUM(s.sens * s.quantite) FROM com_stock_mouvements s WHERE s.article_id = l.article_id AND s.magasin_id = :m AND NOT s.annule), 0) AS stock_actuel
@@ -142,20 +152,22 @@ const lire = async (ctx, id) => {
     lignes: lignes.map((l) => ({
       ...l, id: Number(l.id), article_id: Number(l.article_id), unite_id: l.unite_id ? Number(l.unite_id) : null, coefficient: Number(l.coefficient),
       quantite: Number(l.quantite), quantite_stock: q3(Number(l.quantite) * Number(l.coefficient)),
-      cout_unitaire: l.cout_unitaire === null ? null : Number(l.cout_unitaire),
+      // Coût saisi sur une entrée : visible par qui la saisit ou par qui voit la valorisation.
+      cout_unitaire: l.cout_unitaire === null || !(couts || ctx.peut('com.stock.entree')) ? null : Number(l.cout_unitaire),
       quantite_theorique: l.quantite_theorique === null ? null : Number(l.quantite_theorique),
       quantite_comptee: l.quantite_comptee === null ? null : Number(l.quantite_comptee), stock_actuel: Number(l.stock_actuel),
     })),
     mouvements: mouvements.map((m) => ({ ...m, id: Number(m.id), quantite: Number(m.quantite), sens: Number(m.sens),
-      cout_unitaire: m.cout_unitaire === null ? null : Number(m.cout_unitaire), valeur: m.valeur === null ? null : Number(m.valeur) })),
+      cout_unitaire: m.cout_unitaire === null || !couts ? null : Number(m.cout_unitaire), valeur: m.valeur === null || !couts ? null : Number(m.valeur) })),
+    valeurs_visibles: couts,
     pieces: pieces.map((x) => ({ ...x, id: Number(x.id), taille: Number(x.taille) })), historique,
     droits: {
-      modifier: d.statut === 'brouillon' && ctx.peut('com.stock.mouvements'),
-      soumettre: d.statut === 'brouillon' && ctx.peut('com.stock.mouvements'),
+      modifier: d.statut === 'brouillon' && ctx.peut(SAISIES[d.type]),
+      soumettre: d.statut === 'brouillon' && ctx.peut(SAISIES[d.type]),
       valider: d.statut === 'a_valider' && ctx.peut('com.stock.valider') && (!auteur || p.autovalidation),
       renvoyer: d.statut === 'a_valider' && ctx.peut('com.stock.valider') && (!auteur || p.autovalidation),
-      annuler: d.statut === 'valide' && ctx.peut('com.stock.valider'),
-      joindre: ['brouillon', 'a_valider'].includes(d.statut) && (ctx.peut('com.stock.mouvements') || ctx.peut('com.stock.valider')),
+      annuler: d.statut === 'valide' && ctx.peut('com.stock.annuler'),
+      joindre: ['brouillon', 'a_valider'].includes(d.statut) && (ctx.peut(SAISIES[d.type]) || ctx.peut('com.stock.valider')),
       auto_validation_interdite: d.statut === 'a_valider' && ctx.peut('com.stock.valider') && auteur && !p.autovalidation,
     },
   };
@@ -234,9 +246,9 @@ const ecrireLignes = async (ctx, tr, d, lignes) => {
 };
 
 const creer = async (ctx, body = {}) => {
-  exiger(ctx, 'com.stock.mouvements', 'saisir les documents de stock');
   const type = txt(body.type);
   if (!TYPES[type]) throw new ErreurStock(400, 'Type de document inconnu (entrée, sortie, transfert ou inventaire).');
+  exigerSaisie(ctx, type);
   const id = await sequelize.transaction(async (tr) => {
     const v = await valeursEntete(ctx, type, body, tr);
     const numero = await numeroter(tr, ctx.tenantId, type);
@@ -252,9 +264,9 @@ const creer = async (ctx, body = {}) => {
 };
 
 const modifier = async (ctx, id, body = {}) => {
-  exiger(ctx, 'com.stock.mouvements', 'saisir les documents de stock');
   await sequelize.transaction(async (tr) => {
     const d = await charger(ctx, id, tr, true);
+    exigerSaisie(ctx, d.type);
     if (d.statut !== 'brouillon') throw new ErreurStock(409, 'Seul un brouillon se modifie.');
     const v = await valeursEntete(ctx, d.type, { ...d, ...body }, tr);
     await X(`UPDATE com_stock_documents SET date_document = :date_document, magasin_id = :magasin_id, magasin_dest_id = :magasin_dest_id,
@@ -267,9 +279,9 @@ const modifier = async (ctx, id, body = {}) => {
 };
 
 const supprimer = async (ctx, id) => {
-  exiger(ctx, 'com.stock.mouvements', 'saisir les documents de stock');
   return sequelize.transaction(async (tr) => {
     const d = await charger(ctx, id, tr, true);
+    exigerSaisie(ctx, d.type);
     if (d.statut !== 'brouillon') throw new ErreurStock(409, 'Seul un brouillon se supprime ; un document validé s\'annule.');
     await X("UPDATE com_documents SET retire = true, retire_par = :u, retire_le = NOW(), motif_retrait = 'Brouillon supprimé' WHERE objet_type = 'stock_doc' AND objet_id = :d AND NOT retire",
       { u: ctx.userId, d: d.id }, tr);
@@ -280,9 +292,9 @@ const supprimer = async (ctx, id) => {
 };
 
 const soumettre = async (ctx, id) => {
-  exiger(ctx, 'com.stock.mouvements', 'saisir les documents de stock');
   await sequelize.transaction(async (tr) => {
     const d = await charger(ctx, id, tr, true);
+    exigerSaisie(ctx, d.type);
     if (d.statut !== 'brouillon') throw new ErreurStock(409, 'Ce document a déjà été soumis.');
     const lignes = await Q('SELECT l.quantite_comptee, a.designation FROM com_stock_doc_lignes l JOIN com_articles a ON a.id = l.article_id WHERE l.document_id = :d', { d: d.id }, tr);
     if (!lignes.length) throw new ErreurStock(400, 'Ajoutez au moins un article.');
@@ -364,7 +376,7 @@ const valider = async (ctx, id) => {
 
 // ── Annulation : les mouvements restent, marqués annulés ; la valorisation est rejouée ──
 const annuler = async (ctx, id, body = {}) => {
-  exiger(ctx, 'com.stock.valider', 'annuler les documents de stock');
+  exiger(ctx, 'com.stock.annuler', 'annuler les documents de stock validés');
   const motif = txt(body.motif);
   if (motif.length < 3) throw new ErreurStock(400, 'Indiquez le motif de l\'annulation.');
   await sequelize.transaction(async (tr) => {
@@ -395,7 +407,7 @@ const annuler = async (ctx, id, body = {}) => {
 
 // Articles à compter pour un inventaire : suivis en stock, avec leur stock théorique actuel.
 const articlesInventaire = async (ctx, magasinId, { famille_id = '' } = {}) => {
-  exiger(ctx, 'com.stock.mouvements', 'saisir les documents de stock');
+  exigerSaisie(ctx, 'inventaire');
   const mid = entier(magasinId, 'Magasin');
   if (!perim().dansPerimetre(ctx, mid)) throw new ErreurStock(403, 'Ce magasin n\'appartient pas à vos agences.');
   const rows = await Q(
@@ -412,7 +424,7 @@ const articlesInventaire = async (ctx, magasinId, { famille_id = '' } = {}) => {
 const joindre = async (ctx, id, body = {}) => {
   const d = await charger(ctx, id);
   if (!['brouillon', 'a_valider'].includes(d.statut)) throw new ErreurStock(409, 'Les pièces d\'un document validé sont figées.');
-  if (!ctx.peut('com.stock.mouvements') && !ctx.peut('com.stock.valider')) throw new ErreurStock(403, 'Permission requise : documents de stock.');
+  if (!ctx.peut(SAISIES[d.type]) && !ctx.peut('com.stock.valider')) throw new ErreurStock(403, 'Permission requise : documents de stock.');
   const f = docs.preparer(body);
   const chemin = await docs.ecrire(ctx.tenantId, 'stock_doc', d.id, f);
   await sequelize.transaction(async (tr) => {
@@ -433,6 +445,6 @@ const lirePiece = async (ctx, id, docId) => {
 };
 
 module.exports = {
-  ErreurStock, TYPES, STATUTS, lister, compteurs, lire, creer, modifier, supprimer, soumettre, renvoyer, valider, annuler,
+  ErreurStock, TYPES, STATUTS, SAISIES, VOIR, lister, compteurs, lire, creer, modifier, supprimer, soumettre, renvoyer, valider, annuler,
   articlesInventaire, joindre, lirePiece,
 };

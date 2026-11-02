@@ -17,14 +17,41 @@ export const MODULE_META = {
   roles: { label: 'Profils métier', color: '#fff7ed', text: '#9a3412' },
   passerelle: { label: 'Passerelle comptable', color: '#ecfeff', text: '#0e7490' },
   controle: { label: 'Contrôle comptable', color: '#f0fdfa', text: '#0f766e' },
+  commercial: { label: 'NJ COMMERCIAL', color: '#eef2ff', text: '#3730a3' },
 };
 
-export const moduleMeta = (mod) => MODULE_META[mod] || { label: mod, color: '#f1f5f9', text: '#64748b' };
+// NJ COMMERCIAL : un seul module en base, présenté en trois blocs (configuration,
+// achats, stock) pour que chaque fonction se retrouve facilement à cocher.
+const SOUS_GROUPES = {
+  'commercial:config': { label: 'NJ COMMERCIAL — Configuration', color: '#eef2ff', text: '#3730a3' },
+  'commercial:achats': { label: 'NJ COMMERCIAL — Achats', color: '#f5f3ff', text: '#6d28d9' },
+  'commercial:stock': { label: 'NJ COMMERCIAL — Stock', color: '#ecfdf5', text: '#047857' },
+};
+const ORDRE_STOCK = ['voir', 'initial', 'entree', 'sortie', 'transfert', 'inventaire', 'valider', 'annuler', 'journal', 'valorisation'];
+export const groupeDe = (p) => {
+  if (p.module !== 'commercial') return p.module;
+  if (p.code.startsWith('com.stock.')) return 'commercial:stock';
+  if (/^com\.(da|bc|documents|tableau_bord)\./.test(p.code)) return 'commercial:achats';
+  return 'commercial:config';
+};
+// Permissions regroupées par bloc, dans l'ordre de lecture (le stock suit le circuit).
+export const regrouper = (permissions) => {
+  const groupes = {};
+  permissions.forEach((p) => { (groupes[groupeDe(p)] ??= []).push(p); });
+  const rang = (p) => { const i = ORDRE_STOCK.indexOf(p.code.slice(10)); return i < 0 ? 99 : i; };
+  if (groupes['commercial:stock']) groupes['commercial:stock'].sort((a, b) => rang(a) - rang(b));
+  const cles = Object.keys(groupes).sort((a, b) => {
+    const ca = a.startsWith('commercial'); const cb = b.startsWith('commercial');
+    if (ca !== cb) return ca ? 1 : -1;
+    return ca ? Object.keys(SOUS_GROUPES).indexOf(a) - Object.keys(SOUS_GROUPES).indexOf(b) : 0;
+  });
+  return cles.map((k) => [k, groupes[k]]);
+};
+
+export const moduleMeta = (mod) => SOUS_GROUPES[mod] || MODULE_META[mod] || { label: mod, color: '#f1f5f9', text: '#64748b' };
 
 // permissions: [{code,nom,module,description}], granted: Set<string>, onChange: (Set) => void
 export default function PermModuleGrid({ permissions, granted, onChange }) {
-  const byModule = {};
-  permissions.forEach((p) => { (byModule[p.module] ??= []).push(p); });
 
   const toggle = (code) => {
     const next = new Set(granted);
@@ -41,7 +68,7 @@ export default function PermModuleGrid({ permissions, granted, onChange }) {
 
   return (
     <>
-      {Object.entries(byModule).map(([mod, list]) => {
+      {regrouper(permissions).map(([mod, list]) => {
         const meta = moduleMeta(mod);
         const allOn = list.every((p) => granted.has(p.code));
         return (

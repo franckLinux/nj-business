@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
-import { MODULE_META, moduleMeta } from '@/components/PermModuleGrid';
+import { MODULE_META, moduleMeta, regrouper } from '@/components/PermModuleGrid';
 
 // Reprend loadPermissions()/openModalNewPerm()/openModalEditPerm()/savePerm()/
 // updatePerm()/deletePerm() de legacy/js/app.js (l. 5332-5516). Les modales
@@ -96,22 +96,21 @@ export default function PermissionsPage() {
   if (erreur) return <div className="alert-err">{erreur}</div>;
   if (!perms) return <div className="loading-msg">Chargement…</div>;
 
-  const byModule = {};
-  perms.forEach((p) => { (byModule[p.module] ??= []).push(p); });
+  const groupes = regrouper(perms);
 
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
         <div>
           <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Permissions</h2>
-          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{perms.length} permission{perms.length > 1 ? 's' : ''} · {Object.keys(byModule).length} modules</span>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{perms.length} permission{perms.length > 1 ? 's' : ''} · {groupes.length} blocs</span>
         </div>
         {/* Catalogue défini par les migrations SQL : pas de création ni de
             suppression depuis l'interface, seuls libellés et descriptions
             sont modifiables. */}
       </div>
 
-      {Object.entries(byModule).map(([mod, list]) => {
+      {groupes.map(([mod, list]) => {
         const meta = moduleMeta(mod);
         return (
           <div key={mod} style={{ marginBottom: 28 }}>
@@ -129,7 +128,7 @@ export default function PermissionsPage() {
                         <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--accent)', marginBottom: 2 }}>{p.nom}</div>
                         <code style={{ fontSize: 11, color: 'var(--text-muted)', background: '#f1f5f9', padding: '1px 6px', borderRadius: 4 }}>{p.code}</code>
                       </td>
-                      <td><span style={{ background: meta.color, color: meta.text, padding: '2px 10px', borderRadius: 10, fontSize: 11, fontWeight: 600 }}>{mod}</span></td>
+                      <td><span style={{ background: meta.color, color: meta.text, padding: '2px 10px', borderRadius: 10, fontSize: 11, fontWeight: 600 }}>{p.module}</span></td>
                       <td style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{p.description || '—'}</td>
                       {isSuperAdmin && (
                         <td>

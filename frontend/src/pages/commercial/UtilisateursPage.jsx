@@ -38,15 +38,22 @@ function Perimetre({ u, agences, onFermer, onEnregistre }) {
 }
 
 const ROLES = { directeur: 'Directeur', caissier: 'Caissier(ère)', auditeur: 'Comptable', collaborateur: 'Collaborateur', comptable_cabinet: 'Comptable cabinet' };
-const COLONNES = [
+const ACHATS = [
   ['com.da.creer', 'Demande'], ['com.da.voir_tout', 'Voit tout'], ['com.da.approuver', 'Approuve (achats)'],
   ['com.da.approuver_direction', 'Approuve (direction)'], ['com.bc.preparer', 'Prépare BC'], ['com.bc.emettre', 'Émet BC'],
   ['com.articles.modifier', 'Articles'], ['com.parametrage.modifier', 'Paramétrage'], ['com.tiers.banque', 'Banque'],
+];
+const STOCK = [
+  ['com.stock.voir', 'État'], ['com.stock.initial', 'Ouverture'], ['com.stock.entree', 'Entrées'], ['com.stock.sortie', 'Sorties'],
+  ['com.stock.transfert', 'Transferts'], ['com.stock.inventaire', 'Inventaires'], ['com.stock.valider', 'Valide'],
+  ['com.stock.annuler', 'Annule'], ['com.stock.journal', 'Mouvements'], ['com.stock.valorisation', 'Valeurs'],
 ];
 const PROFILS = [
   ['Demandeur achats', 'Exprime ses besoins et suit ses demandes.'],
   ['Gestionnaire des achats (GAS)', 'Vérifie stocks et fournisseurs, prépare les bons de commande, saisit le stock d\'ouverture.'],
   ['Responsable des achats', 'Approuve ou rejette, émet et annule les bons, voit les coordonnées bancaires.'],
+  ['Magasinier', 'Saisit entrées, sorties, transferts et comptages ; voit les quantités et les mouvements, pas les valeurs.'],
+  ['Gestionnaire de stock', 'Valide, renvoie et annule les documents de stock ; voit coûts et valorisation.'],
   ['Directeur (rôle)', 'Tous les droits du module, dont l\'approbation au-delà du seuil.'],
 ];
 
@@ -57,20 +64,26 @@ export default function UtilisateursPage() {
   const [perim, setPerim] = useState(null);
   const liste = donnees?.utilisateurs || [];
   const agences = donnees?.agences || [];
+  const [vue, setVue] = useState('achats');
+  const COLONNES = vue === 'stock' ? STOCK : ACHATS;
   const codes = (ids) => (ids.length ? agences.filter((a) => ids.includes(a.id)).map((a) => a.code).join(', ') : 'Toutes');
   return (
     <div className="cm-page">
-      <Entete titre="Utilisateurs et rôles" description="Les droits d'achat de chaque personne, tels que le serveur les applique. Personne ne peut approuver sa propre demande.">
+      <Entete titre="Utilisateurs et rôles" description="Les droits d'achat et de stock de chaque personne, tels que le serveur les applique. Personne n'approuve sa propre demande ni ne valide son propre document de stock.">
         {can('users.view') && <Link to="/config" className="cm-btn cm-secondaire" style={{ textDecoration: 'none' }}>Gérer dans Configuration</Link>}
       </Entete>
       <div className="cm-note">
-        Pour donner un rôle achats : dans Configuration → Utilisateurs, attribuez un des profils métier créés à l'activation du module.
+        Pour donner un rôle achats ou stock : dans Configuration → Utilisateurs, attribuez un des profils métier créés à l'activation du module. Chaque fonction se coche aussi une à une (Profils métier ou Permissions de la personne, bloc « NJ COMMERCIAL — Stock »).
         Une personne qui ne touche pas à la caisse (demandeur, magasinier) prend le rôle de base <strong>Collaborateur</strong>.
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10, marginBottom: 16 }}>
         {PROFILS.map(([n, d]) => <div key={n} className="cm-section" style={{ margin: 0 }}><strong style={{ fontSize: 13.5 }}>{n}</strong><p className="cm-aide" style={{ marginTop: 4 }}>{d}</p></div>)}
       </div>
       {erreur && <div className="cm-erreur">{erreur}</div>}
+      <div className="cm-onglets" role="tablist">
+        <button type="button" role="tab" aria-selected={vue === 'achats'} onClick={() => setVue('achats')}>Droits achats</button>
+        <button type="button" role="tab" aria-selected={vue === 'stock'} onClick={() => setVue('stock')}>Droits stock</button>
+      </div>
       <div className="cm-table-wrap">
         <table className="cm-table" style={{ minWidth: 1060 }}>
           <thead><tr><th>Utilisateur</th><th>Rôle · profil</th><th>Agences</th>{COLONNES.map(([c, l]) => <th key={c} style={{ textAlign: 'center' }}>{l}</th>)}<th>Statut</th></tr></thead>

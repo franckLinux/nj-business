@@ -126,3 +126,45 @@ Ce lot n'ajoute aucune bibliothèque.
 ## Suite
 
 Lot 6 (ventes), puis lot 5 (réceptions, factures fournisseurs, retours et avoirs), selon l'ordre retenu le 2 novembre.
+
+---
+
+## Complément du 02/11/2026 : une permission par fonction (migration 057, frontend v49)
+
+Chaque fonction du stock a maintenant sa propre permission. On la coche dans **Profils métier**, dans les **permissions d'une personne** (exception) ou dans le **plafond d'un client**, au sein d'un nouveau bloc « NJ COMMERCIAL — Stock ». Les permissions de NJ COMMERCIAL sont désormais présentées en trois blocs : Configuration, Achats, Stock.
+
+| Permission | Libellé | Ce qu'elle ouvre |
+| --- | --- | --- |
+| `com.stock.voir` | Consulter l'état du stock | Écran État du stock (quantités, alertes) |
+| `com.stock.initial` | Saisir le stock d'ouverture | Fiche article (quantité et coût initiaux) |
+| `com.stock.entree` | Saisir les entrées en stock | Créer, modifier, soumettre une entrée |
+| `com.stock.sortie` | Saisir les sorties diverses | Idem pour les sorties |
+| `com.stock.transfert` | Saisir les transferts entre magasins | Idem pour les transferts |
+| `com.stock.inventaire` | Saisir les inventaires | Idem pour les inventaires, avec la liste des articles à compter |
+| `com.stock.valider` | Valider ou renvoyer les documents de stock | Écran Validation des stocks ; jamais pour l'auteur du document |
+| `com.stock.annuler` | Annuler les documents de stock validés | Annulation motivée |
+| `com.stock.journal` | Consulter les mouvements de stock | Écran Mouvements de stock |
+| `com.stock.valorisation` | Voir les coûts et la valorisation | Coûts, valeurs, écran Valorisation, bloc valeur du tableau de bord |
+
+- **Sans « valorisation »**, l'état du stock et les fiches n'affichent que les quantités. Le serveur ne renvoie ni les coûts ni les valeurs.
+- **Le menu** n'affiche que les écrans permis. Les listes d'un type de document (entrées, sorties…) sont visibles par la personne qui le saisit, par les valideurs, par les annulateurs et par qui consulte le journal.
+- **Aucun droit perdu** à la migration :
+  - « Saisir les documents de stock » (`com.stock.mouvements`) est remplacée par les quatre saisies ;
+  - « Consulter le stock » donne aussi le journal et la valorisation (ce qu'elle montrait déjà) ;
+  - « Valider » donne aussi « Annuler ».
+  - La conversion s'applique aux rôles, aux profils, aux exceptions individuelles et aux plafonds des clients.
+- **Profils des nouveaux clients** :
+  - Magasinier : état, quatre saisies, mouvements, sans valeurs ni validation.
+  - Gestionnaire de stock : tout le bloc.
+  - Gestionnaire et responsable des achats : état, mouvements, valorisation.
+- **Profils Magasinier déjà en place** : ils gardent la valorisation, qu'ils avaient avant la migration. Décochez-la dans Profils métier si nécessaire.
+- **NJ COMMERCIAL → Utilisateurs et rôles** : nouvel onglet « Droits stock », une colonne par fonction.
+- **Retour arrière** : `057_retour_arriere.sql` recrée `com.stock.mouvements` pour quiconque a au moins une des quatre saisies.
+
+**Tests** : un test ajouté (une personne limitée aux sorties ; un valideur sans droit d'annuler), suite complète 153/153. Parcours navigateur « permissions » 12/12, stock 27/27, lots 1-2 24/24.
+
+**Déploiement** :
+1. Remplacer `backend/src` sur le serveur.
+2. Lancer `node db/migrate.js` (migration 057).
+3. Déployer `dist-nj-business-v49.zip`.
+4. Redémarrer, puis demander à chacun de se reconnecter : les droits sont chargés à la connexion.

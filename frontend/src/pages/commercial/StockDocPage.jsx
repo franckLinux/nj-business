@@ -183,20 +183,20 @@ export default function StockDocPage() {
           {d.mouvements.length > 0 && (
             <Section titre="Mouvements de stock produits">
               <table className="cm-lignes cm-bc-lecture">
-                <thead><tr><th>Mouvement</th><th>Magasin</th><th style={{ textAlign: 'right' }}>Quantité</th><th style={{ textAlign: 'right' }}>Coût unitaire</th><th style={{ textAlign: 'right' }}>Valeur</th></tr></thead>
+                <thead><tr><th>Mouvement</th><th>Magasin</th><th style={{ textAlign: 'right' }}>Quantité</th>{d.valeurs_visibles && <><th style={{ textAlign: 'right' }}>Coût unitaire</th><th style={{ textAlign: 'right' }}>Valeur</th></>}</tr></thead>
                 <tbody>
                   {d.mouvements.map((m) => (
                     <tr key={m.id} className={m.annule ? 'cm-retiree' : ''}>
                       <td>{MOUVEMENTS[m.type] || m.type}{m.annule && <span className="cm-pastille cm-rouge" style={{ marginLeft: 6 }}>Annulé</span>}</td>
                       <td>{m.magasin_code}</td>
                       <td className="cm-num">{m.sens > 0 ? '+' : '−'}{fmtQte(m.quantite)} {m.unite}</td>
-                      <td className="cm-num">{m.cout_unitaire === null ? 'à valoriser' : fmtMontant(Math.round(m.cout_unitaire * 100) / 100, '')}</td>
-                      <td className="cm-num">{fmtMontant(m.valeur, '')}</td>
+                      {d.valeurs_visibles && <td className="cm-num">{m.cout_unitaire === null ? 'à valoriser' : fmtMontant(Math.round(m.cout_unitaire * 100) / 100, '')}</td>}
+                      {d.valeurs_visibles && <td className="cm-num">{fmtMontant(m.valeur, '')}</td>}
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {d.statut === 'valide' && <p className="cm-aide" style={{ marginTop: 8 }}>Effet net sur la valeur du stock : <strong>{fmtMontant(Math.round(valeurMvts * 100) / 100)}</strong></p>}
+              {d.statut === 'valide' && d.valeurs_visibles && <p className="cm-aide" style={{ marginTop: 8 }}>Effet net sur la valeur du stock : <strong>{fmtMontant(Math.round(valeurMvts * 100) / 100)}</strong></p>}
             </Section>
           )}
         </div>
