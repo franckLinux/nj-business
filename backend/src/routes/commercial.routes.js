@@ -16,6 +16,9 @@ const LECTURE = [...base, requireAnyPermission('com.parametrage.voir', 'com.arti
 router.get ('/societe',            ...P('com.parametrage.voir'),     c.getSociete);
 router.put ('/societe',            ...P('com.parametrage.modifier'), c.putSociete);
 
+router.get ('/unites',             ...LECTURE,                       c.getUnites);
+router.post('/unites',             ...P('com.parametrage.modifier'), c.postUnite);
+router.put ('/unites/:id',         ...P('com.parametrage.modifier'), c.putUnite);
 router.get ('/agences',            ...LECTURE,                       c.getAgences);
 router.post('/agences',            ...P('com.parametrage.modifier'), c.postAgence);
 router.put ('/agences/:id',        ...P('com.parametrage.modifier'), c.putAgence);

@@ -37,6 +37,7 @@ import DemandeFormPage from '@/pages/commercial/DemandeFormPage';
 import DemandePage from '@/pages/commercial/DemandePage';
 import DemarragePage from '@/pages/commercial/DemarragePage';
 import AgencesPage from '@/pages/commercial/AgencesPage';
+import UnitesPage from '@/pages/commercial/UnitesPage';
 import SocietePage from '@/pages/commercial/SocietePage';
 import MagasinsPage from '@/pages/commercial/MagasinsPage';
 import FamillesPage from '@/pages/commercial/FamillesPage';
@@ -156,6 +157,7 @@ function AuthenticatedApp() {
         <Route index element={<EntreeCommercial />} />
         <Route path="mise-en-route" element={<DemarragePage />} />
         <Route path="agences"      element={<AutoriseCm codes={['com.parametrage.voir']}><AgencesPage /></AutoriseCm>} />
+        <Route path="unites"       element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><UnitesPage /></AutoriseCm>} />
         <Route path="societe"      element={<AutoriseCm codes={['com.parametrage.voir']}><SocietePage /></AutoriseCm>} />
         <Route path="magasins"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><MagasinsPage /></AutoriseCm>} />
         <Route path="familles"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><FamillesPage /></AutoriseCm>} />

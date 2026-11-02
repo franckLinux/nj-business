@@ -23,6 +23,9 @@ module.exports = {
   getSociete:   repondre('société', (req) => svc.lireSociete(req.tenantId)),
   putSociete:   repondre('société.modif', (req) => svc.modifierSociete({ ...ctx(req), body: req.body || {} })),
 
+  getUnites:    repondre('unités', (req) => svc.listerUnites(req.tenantId, req.query)),
+  postUnite:    repondre('unité.création', (req) => svc.enregistrerUnite({ ...ctx(req), body: req.body || {} }), 201),
+  putUnite:     repondre('unité.modif', (req) => svc.enregistrerUnite({ ...ctx(req), id: req.params.id, body: req.body || {} })),
   getAgences:   repondre('agences', (req) => svc.listerAgences(req.tenantId, req.query)),
   postAgence:   repondre('agence.création', (req) => svc.enregistrerAgence({ ...ctx(req), body: req.body || {} }), 201),
   putAgence:    repondre('agence.modif', (req) => svc.enregistrerAgence({ ...ctx(req), id: req.params.id, body: req.body || {} })),

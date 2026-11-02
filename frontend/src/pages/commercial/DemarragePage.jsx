@@ -11,6 +11,7 @@ const ETAPES = [
   ['magasins', '/commercial/magasins', 'Magasins', 'Les lieux de stockage, rattachés à une agence, avec leur responsable.', ['com.parametrage.voir', 'com.articles.voir']],
   ['fournisseurs', '/commercial/fournisseurs', 'Fournisseurs', 'Le registre des tiers, complété des informations d\'achat.', ['com.tiers.voir']],
   ['familles', '/commercial/familles', 'Familles d\'articles', 'Classer les articles ; taxes d\'achat et de vente, suivi en stock et valorisation proposés aux articles.', ['com.parametrage.voir', 'com.articles.voir']],
+  ['unites', '/commercial/unites', 'Unités de mesure', 'Pièce, carton, kg… et leurs décimales ; la conversion se règle sur chaque article.', ['com.parametrage.voir', 'com.articles.voir']],
   ['taxes', '/commercial/taxes', 'Taxes', 'Les taxes applicables, avec leur taux.', ['com.parametrage.voir']],
   ['articles', '/commercial/articles', 'Articles', 'Le catalogue, le suivi comptable et le stock d\'ouverture.', ['com.articles.voir', 'com.da.creer']],
   ['utilisateurs', '/commercial/utilisateurs', 'Utilisateurs et rôles', 'Qui demande, qui prépare, qui approuve.', ['com.parametrage.modifier']],
@@ -30,6 +31,7 @@ export default function DemarragePage() {
     lire('familles', '/commercial/familles?actifs=1', (r) => r.length);
     lire('articles', '/commercial/articles?actifs=1', (r) => r.length);
     if (can('com.tiers.voir')) lire('fournisseurs', '/commercial/tiers?type=fournisseur&actifs=1', (r) => r.length);
+    lire('unites', '/commercial/unites?actifs=1', (r) => r.length);
     if (can('com.parametrage.voir')) lire('taxes', '/commercial/taxes?actifs=1', (r) => r.length);
     if (can('com.parametrage.modifier')) lire('utilisateurs', '/commercial/utilisateurs', (r) => r.utilisateurs.filter((u) => u.actif && u.permissions.length).length);
   }, [can]);

@@ -204,11 +204,12 @@ export default function DemandePage() {
                 {d.lignes.map((l) => (
                   <tr key={l.id}>
                     <td className="cm-l-article"><strong>{l.designation}</strong><span className="cm-sous">{l.reference} · {l.famille_nom}{l.prix_estime !== null ? ` · ${fmtMontant(l.prix_estime)} / ${l.unite}` : ''}</span></td>
-                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><strong>{Number(l.quantite).toLocaleString('fr-FR')}</strong> {l.unite}</td>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}><strong>{Number(l.quantite).toLocaleString('fr-FR')}</strong> {l.unite}
+                      {l.coefficient !== 1 && <span className="cm-conv">= {Number(l.quantite_stock).toLocaleString('fr-FR')} {l.unite_stock}</span>}</td>
                     <td className="cm-l-stock">
-                      <EncartStock stock={soumise && l.stock_constate ? l.stock_constate : l.stock_actuel} unite={l.unite} />
+                      <EncartStock stock={soumise && l.stock_constate ? l.stock_constate : l.stock_actuel} unite={l.unite_stock || l.unite} />
                       {soumise && l.stock_constate && l.stock_actuel.suivi && l.stock_actuel.disponible !== l.stock_constate.disponible && (
-                        <span className="cm-sous">Aujourd'hui : {Number(l.stock_actuel.disponible).toLocaleString('fr-FR')} {l.unite}</span>
+                        <span className="cm-sous">Aujourd'hui : {Number(l.stock_actuel.disponible).toLocaleString('fr-FR')} {l.unite_stock || l.unite}</span>
                       )}
                     </td>
                     <td className="cm-l-fournisseur">{l.fournisseur_nom || (l.fournisseurs_proposes.length ? <span className="cm-sous" style={{ marginTop: 0 }}>Habituels : {l.fournisseurs_proposes.map((x) => x.nom).join(', ')}</span> : '—')}</td>

@@ -77,7 +77,8 @@ const urlVerification = (jeton) => { const b = baseVerification(); return b ? `$
 // `sauf` : bons à ignorer (le bon en cours, et l'original qu'une révision remplace).
 const restes = async (tenantId, demandeId, sauf = [], tr) => {
   const rows = await Q(
-    `SELECT l.id, l.article_id, l.quantite, l.unite, l.prix_estime, l.fournisseur_id, a.reference, a.designation, a.taxe_id,
+    `SELECT l.id, l.article_id, l.quantite, l.unite, l.unite_id, l.coefficient, l.prix_estime, l.fournisseur_id, a.reference, a.designation, a.taxe_id,
+            (SELECT u.decimales FROM com_unites u WHERE u.id = l.unite_id) AS decimales, a.unite AS unite_stock,
             COALESCE((SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id
                        WHERE bl.demande_ligne_id = l.id AND b.statut IN ('brouillon', 'emis')
                          AND NOT (b.id = ANY (CAST(:sauf AS BIGINT[])))), 0) AS commande,
@@ -88,6 +89,8 @@ const restes = async (tenantId, demandeId, sauf = [], tr) => {
     { d: demandeId, t: tenantId, sauf: `{${sauf.map(Number).join(',')}}` }, tr);
   return rows.map((r) => ({
     demande_ligne_id: Number(r.id), article_id: Number(r.article_id), reference: r.reference, designation: r.designation, unite: r.unite,
+    unite_id: r.unite_id ? Number(r.unite_id) : null, coefficient: Number(r.coefficient || 1), unite_stock: r.unite_stock,
+    decimales: r.decimales === null || r.decimales === undefined ? 3 : Number(r.decimales),
     approuve: Number(r.quantite), commande: Number(r.commande), emis: Number(r.emis),
     reste: Math.max(0, Math.round((Number(r.quantite) - Number(r.commande)) * 1000) / 1000),
     prix_approuve: r.prix_estime === null ? null : Number(r.prix_estime),
@@ -199,6 +202,9 @@ const ecrireLignes = async (ctx, tr, bc, lignes, sauf) => {
     if (!src) throw new ErreurBon(400, 'Cette ligne n\'appartient pas à la demande d\'origine.');
     const q = nombre(l.quantite, 'Quantité', { min: 0.001 });
     if (q === null) throw new ErreurBon(400, 'Chaque ligne doit avoir une quantité.');
+    if (Math.round(q * 10 ** src.decimales) !== q * 10 ** src.decimales) {
+      throw new ErreurBon(400, `« ${src.designation} » : ${src.unite} se compte avec ${src.decimales ? `${src.decimales} décimale(s) au plus` : 'des nombres entiers'}.`);
+    }
     if (q > src.reste + 1e-9) {
       throw new ErreurBon(409, `« ${src.designation} » : ${q} ${src.unite} commandé(s) pour ${src.reste} restant(s) sur ${src.approuve} approuvé(s).`);
     }
@@ -216,10 +222,10 @@ const ecrireLignes = async (ctx, tr, bc, lignes, sauf) => {
     const mht = arrondi(q * prix * (1 - remise / 100), dec);
     const mtx = taxe ? arrondi(mht * Number(taxe.taux) / 100, dec) : 0;
     ht += mht; tx += mtx;
-    await X(`INSERT INTO com_bc_lignes (bc_id, tenant_id, ordre, demande_ligne_id, article_id, reference, designation, unite, quantite,
+    await X(`INSERT INTO com_bc_lignes (bc_id, tenant_id, ordre, demande_ligne_id, article_id, reference, designation, unite, unite_id, coefficient, quantite,
                prix_unitaire, remise_pct, taxe_id, taxe_code, taxe_taux, montant_ht, montant_taxe, montant_ttc)
-             VALUES (:b, :t, :o, :dl, :a, :ref, :des, :u, :q, :pu, :rm, :tid, :tc, :tt, :ht, :tx, :ttc)`,
-    { b: bc.id, t: ctx.tenantId, o: i, dl: dlId, a: src.article_id, ref: src.reference, des: src.designation, u: src.unite, q,
+             VALUES (:b, :t, :o, :dl, :a, :ref, :des, :u, :uid, :k, :q, :pu, :rm, :tid, :tc, :tt, :ht, :tx, :ttc)`,
+    { b: bc.id, t: ctx.tenantId, o: i, dl: dlId, a: src.article_id, ref: src.reference, des: src.designation, u: src.unite, uid: src.unite_id, k: src.coefficient, q,
       pu: prix, rm: remise, tid: taxe ? taxe.id : null, tc: taxe ? taxe.code : '', tt: taxe ? Number(taxe.taux) : 0,
       ht: mht, tx: mtx, ttc: arrondi(mht + mtx, dec) }, tr);
   }
@@ -341,7 +347,8 @@ const controler = async (ctx, b, tr) => {
 const lire = async (ctx, id) => {
   exigerVue(ctx);
   const b = await charger(ctx, id);
-  const lignes = await Q(`SELECT l.*, x.actif AS taxe_active FROM com_bc_lignes l LEFT JOIN com_taxes x ON x.id = l.taxe_id WHERE l.bc_id = :b ORDER BY l.ordre, l.id`, { b: b.id });
+  const lignes = await Q(`SELECT l.*, x.actif AS taxe_active, a.unite AS unite_stock FROM com_bc_lignes l LEFT JOIN com_taxes x ON x.id = l.taxe_id
+                            JOIN com_articles a ON a.id = l.article_id WHERE l.bc_id = :b ORDER BY l.ordre, l.id`, { b: b.id });
   const documents = await Q(
     `SELECT x.id, x.categorie, x.nom, x.mime, x.taille, x.sha256, x.ajoute_le, u.username AS ajoute_par_nom, x.retire, x.retire_le, x.motif_retrait
        FROM com_documents x LEFT JOIN users u ON u.id = x.ajoute_par
@@ -358,6 +365,8 @@ const lire = async (ctx, id) => {
     regles: await parametres(ctx.tenantId).then((p) => ({ tolerance: p.tolerance, proforma_obligatoire: p.proforma_obligatoire })),
     lignes: lignes.map((l) => ({ ...l, id: Number(l.id), demande_ligne_id: Number(l.demande_ligne_id), article_id: Number(l.article_id), taxe_id: l.taxe_id ? Number(l.taxe_id) : null,
       quantite: Number(l.quantite), prix_unitaire: Number(l.prix_unitaire), remise_pct: Number(l.remise_pct), taxe_taux: Number(l.taxe_taux),
+      unite_id: l.unite_id ? Number(l.unite_id) : null, coefficient: Number(l.coefficient || 1),
+      quantite_stock: Math.round(Number(l.quantite) * Number(l.coefficient || 1) * 1000) / 1000,
       montant_ht: Number(l.montant_ht), montant_taxe: Number(l.montant_taxe), montant_ttc: Number(l.montant_ttc) })),
     disponibles, controles, documents: documents.map((x) => ({ ...x, id: Number(x.id), taille: Number(x.taille) })), historique,
     droits: {
@@ -516,9 +525,9 @@ const reviser = async (ctx, id) => {
        SELECT tenant_id, numero, revision, :nc, demande_id, fournisseur_id, magasin_id, devise, conditions_paiement, delai_livraison, observations,
               total_ht, total_taxes, total_ttc, id, :u FROM com_bons_commande WHERE id = :b RETURNING id`,
       { nc: `BROUILLON-${crypto.randomBytes(5).toString('hex')}`, u: ctx.userId, b: b.id }, tr);
-    await X(`INSERT INTO com_bc_lignes (bc_id, tenant_id, ordre, demande_ligne_id, article_id, reference, designation, unite, quantite, prix_unitaire,
+    await X(`INSERT INTO com_bc_lignes (bc_id, tenant_id, ordre, demande_ligne_id, article_id, reference, designation, unite, unite_id, coefficient, quantite, prix_unitaire,
                remise_pct, taxe_id, taxe_code, taxe_taux, montant_ht, montant_taxe, montant_ttc)
-             SELECT :n, tenant_id, ordre, demande_ligne_id, article_id, reference, designation, unite, quantite, prix_unitaire,
+             SELECT :n, tenant_id, ordre, demande_ligne_id, article_id, reference, designation, unite, unite_id, coefficient, quantite, prix_unitaire,
                     remise_pct, taxe_id, taxe_code, taxe_taux, montant_ht, montant_taxe, montant_ttc FROM com_bc_lignes WHERE bc_id = :b`,
     { n: r.id, b: b.id }, tr);
     await auditer(tr, ctx, 'COM_BC_REVISION', r.id, { revise: b.numero_complet });

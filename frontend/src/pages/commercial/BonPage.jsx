@@ -240,7 +240,7 @@ export default function BonPage() {
                 {b.lignes.map((l) => (
                   <tr key={l.id}>
                     <td className="cm-l-article"><strong>{l.designation}</strong><span className="cm-sous">{l.reference}</span></td>
-                    <td className="cm-num"><span className="cm-l-lib">Qté</span>{fmtQte(l.quantite)} {l.unite}</td>
+                    <td className="cm-num"><span className="cm-l-lib">Qté</span>{fmtQte(l.quantite)} {l.unite}{l.coefficient !== 1 && <span className="cm-conv">= {fmtQte(l.quantite_stock)} {l.unite_stock}</span>}</td>
                     <td className="cm-num"><span className="cm-l-lib">P.U. HT</span>{fmtMontant(l.prix_unitaire, '')}</td>
                     <td className="cm-num"><span className="cm-l-lib">Rem.</span>{l.remise_pct ? `${String(l.remise_pct).replace('.', ',')} %` : '—'}</td>
                     <td><span className="cm-l-lib">Taxe</span>{l.taxe_code ? `${l.taxe_code} ${String(l.taxe_taux).replace('.', ',')} %` : '—'}</td>

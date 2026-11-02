@@ -41,7 +41,8 @@ export default function DemandeFormPage() {
         setNumero(d.numero);
         setF({ magasin_id: String(d.magasin_id), service: d.service, priorite: d.priorite, motif: d.motif,
           fournisseur_propose_id: d.fournisseur_propose_id ? String(d.fournisseur_propose_id) : '', commentaire: d.commentaire, justification_stock: d.justification_stock });
-        setLignes(d.lignes.map((l) => ({ article_id: l.article_id, quantite: String(l.quantite).replace('.', ','), fournisseur_id: l.fournisseur_id ? String(l.fournisseur_id) : '', commentaire: l.commentaire })));
+        setLignes(d.lignes.map((l) => ({ article_id: l.article_id, quantite: String(l.quantite).replace('.', ','), unite_id: l.unite_id ? String(l.unite_id) : '',
+          fournisseur_id: l.fournisseur_id ? String(l.fournisseur_id) : '', commentaire: l.commentaire })));
       } else {
         setF({ magasin_id: r.magasins.length === 1 ? String(r.magasins[0].id) : '', service: '', priorite: 'normale', motif: '', fournisseur_propose_id: '', commentaire: '', justification_stock: '' });
       }
@@ -77,21 +78,35 @@ export default function DemandeFormPage() {
     e.target.value = '';
     if (!aid) return;
     if (lignes.some((l) => l.article_id === aid)) { toast('Cet article est déjà dans la demande : modifiez sa quantité.', 'error'); return; }
-    setLignes((ls) => [...ls, { article_id: aid, quantite: '1', fournisseur_id: '', commentaire: '' }]);
+    const a = (refs?.articles || []).find((x) => x.id === aid);
+    setLignes((ls) => [...ls, { article_id: aid, quantite: '1', unite_id: a ? String(a.unite_achat_id) : '', fournisseur_id: '', commentaire: '' }]);
   };
 
   const articles = refs?.articles || [];
   const article = (aid) => articles.find((a) => a.id === aid);
-  const couverts = useMemo(() => lignes.filter((l) => evaluer(stocks[`${l.article_id}-${f?.magasin_id}`], l.quantite)?.couvert)
+  // Unité de la ligne (055) : coefficient vers l'unité de stock, quantité convertie pour l'encart stock.
+  const uniteLigne = (l) => {
+    const a = article(l.article_id);
+    return a?.unites?.find((u) => String(u.id) === String(l.unite_id || a.unite_achat_id)) || { code: a?.unite, coefficient: 1 };
+  };
+  const qteStock = (l) => Math.round((Number(String(l.quantite).replace(',', '.')) || 0) * uniteLigne(l).coefficient * 1000) / 1000;
+  const couverts = useMemo(() => lignes.filter((l) => evaluer(stocks[`${l.article_id}-${f?.magasin_id}`], qteStock(l))?.couvert)
     .map((l) => article(l.article_id)?.designation), [lignes, stocks, f?.magasin_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Prix indicatif : saisi par unité d'achat, ramené à l'unité de la ligne.
+  const prixLigne = (l) => {
+    const a = article(l.article_id);
+    const p = details[l.article_id]?.prix ?? a?.prix_achat_indicatif;
+    if (p === null || p === undefined) return null;
+    return (p / (a?.coef_achat || 1)) * uniteLigne(l).coefficient;
+  };
   const estimation = lignes.reduce((s, l) => {
-    const p = details[l.article_id]?.prix ?? article(l.article_id)?.prix_achat_indicatif;
+    const p = prixLigne(l);
     const q = Number(String(l.quantite).replace(',', '.')) || 0;
-    return p === null || p === undefined ? s : s + p * q;
+    return p === null ? s : s + p * q;
   }, 0);
 
   const corps = () => ({ ...f, fournisseur_propose_id: f.fournisseur_propose_id || null,
-    lignes: lignes.map((l) => ({ article_id: l.article_id, quantite: l.quantite, fournisseur_id: l.fournisseur_id || null, commentaire: l.commentaire })) });
+    lignes: lignes.map((l) => ({ article_id: l.article_id, quantite: l.quantite, unite_id: l.unite_id || null, fournisseur_id: l.fournisseur_id || null, commentaire: l.commentaire })) });
   const enregistrer = async (aussiSoumettre) => {
     setEnCours(true); setErreur('');
     const r = id ? await api.put(`/commercial/demandes/${id}`, corps()) : await api.post('/commercial/demandes', corps());
@@ -157,12 +172,17 @@ export default function DemandeFormPage() {
                 const autres = refs.fournisseurs.filter((x) => !proposes.some((p) => p.id === x.id));
                 return (
                   <tr key={l.article_id}>
-                    <td className="cm-l-article"><strong>{a?.designation || `Article ${l.article_id}`}</strong><span className="cm-sous">{a?.reference}{a?.prix_achat_indicatif ? ` · ${Number(a.prix_achat_indicatif).toLocaleString('fr-FR')} FCFA / ${a.unite}` : ' · sans prix indicatif'}</span></td>
+                    <td className="cm-l-article"><strong>{a?.designation || `Article ${l.article_id}`}</strong><span className="cm-sous">{a?.reference}{prixLigne(l) !== null ? ` · ${Math.round(prixLigne(l)).toLocaleString('fr-FR')} FCFA / ${uniteLigne(l).code}` : ' · sans prix indicatif'}</span></td>
                     <td style={{ textAlign: 'right' }}>
                       <input className="cm-qte-input" inputMode="decimal" value={l.quantite} onChange={(e) => setLigne(i, 'quantite', e.target.value)} aria-label={`Quantité de ${a?.designation}`} />
-                      <span className="cm-sous">{a?.unite}</span>
+                      {a?.unites?.length > 1 ? (
+                        <select className="cm-unite-ligne" value={l.unite_id || String(a.unite_achat_id)} onChange={(e) => setLigne(i, 'unite_id', e.target.value)} aria-label={`Unité pour ${a?.designation}`}>
+                          {a.unites.map((u) => <option key={u.id} value={u.id}>{u.code}</option>)}
+                        </select>
+                      ) : <span className="cm-sous">{uniteLigne(l).code}</span>}
+                      {uniteLigne(l).coefficient !== 1 && <span className="cm-conv">= {qteStock(l).toLocaleString('fr-FR')} {a?.unite}</span>}
                     </td>
-                    <td className="cm-l-stock">{f.magasin_id ? <EncartStock stock={evaluer(stocks[`${l.article_id}-${f.magasin_id}`], l.quantite)} unite={a?.unite} /> : '—'}</td>
+                    <td className="cm-l-stock">{f.magasin_id ? <EncartStock stock={evaluer(stocks[`${l.article_id}-${f.magasin_id}`], qteStock(l))} unite={a?.unite} /> : '—'}</td>
                     <td className="cm-l-fournisseur">
                       <select value={l.fournisseur_id} onChange={(e) => setLigne(i, 'fournisseur_id', e.target.value)} aria-label={`Fournisseur pour ${a?.designation}`}>
                         <option value="">{proposes.length ? 'Laisser choisir les achats' : '— Aucun fournisseur associé —'}</option>

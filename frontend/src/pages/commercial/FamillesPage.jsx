@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { Entete, Statut, Tiroir, Section, Champ, Bascule, Cases, useListe, useDiffere, enregistrer } from '@/components/commercial/ui';
+import { Entete, Statut, Tiroir, Section, Champ, Bascule, Cases, ChampUnite, useListe, useDiffere, enregistrer } from '@/components/commercial/ui';
 
 function FicheFamille({ famille, onFermer, onEnregistre, modifiable }) {
   const [f, setF] = useState({
@@ -11,7 +11,13 @@ function FicheFamille({ famille, onFermer, onEnregistre, modifiable }) {
     fournisseur_ids: (famille?.fournisseurs || []).map((x) => x.id),
     taxe_achat_id: famille?.taxe_achat_id ? String(famille.taxe_achat_id) : '', taxe_vente_id: famille?.taxe_vente_id ? String(famille.taxe_vente_id) : '',
     suivi_stock: famille ? famille.suivi_stock : true, methode_valorisation: famille?.methode_valorisation || 'cmup',
+    unite_stock_id: famille?.unite_stock_id ? String(famille.unite_stock_id) : '',
+    unite_achat_id: famille?.unite_achat_id && famille.unite_achat_id !== famille.unite_stock_id ? String(famille.unite_achat_id) : '',
+    coef_achat: famille?.coef_achat ? String(famille.coef_achat).replace('.', ',') : '',
+    unite_vente_id: famille?.unite_vente_id && famille.unite_vente_id !== famille.unite_stock_id ? String(famille.unite_vente_id) : '',
+    coef_vente: famille?.coef_vente ? String(famille.coef_vente).replace('.', ',') : '',
   });
+  const [unites, setUnites] = useState([]);
   const [fournisseurs, setFournisseurs] = useState(null);
   const [taxes, setTaxes] = useState([]);
   const [erreur, setErreur] = useState('');
@@ -19,11 +25,14 @@ function FicheFamille({ famille, onFermer, onEnregistre, modifiable }) {
   useEffect(() => {
     api.get('/commercial/tiers?type=fournisseur').then((r) => setFournisseurs(r?.error ? [] : r));
     api.get('/commercial/taxes').then((r) => setTaxes(r?.error ? [] : r));
+    api.get('/commercial/unites').then((r) => setUnites(r?.error ? [] : r));
   }, []);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const valider = async () => {
     setEnCours(true);
-    const r = await enregistrer('/commercial/familles', famille?.id, { ...f, taxe_achat_id: f.taxe_achat_id || null, taxe_vente_id: f.taxe_vente_id || null });
+    const st = f.unite_stock_id || null;
+    const r = await enregistrer('/commercial/familles', famille?.id, { ...f, taxe_achat_id: f.taxe_achat_id || null, taxe_vente_id: f.taxe_vente_id || null,
+      unite_stock_id: st, unite_achat_id: st ? (f.unite_achat_id || st) : null, unite_vente_id: st ? (f.unite_vente_id || st) : null });
     setEnCours(false);
     if (!r.ok) { setErreur(r.error); return; }
     onEnregistre(famille ? 'Famille modifiée.' : 'Famille créée.');
@@ -78,7 +87,21 @@ function FicheFamille({ famille, onFermer, onEnregistre, modifiable }) {
             </Champ>
           )}
         </div>
-        <p className="cm-aide" style={{ marginTop: 8 }}>Les unités d'achat, de vente et de stock arrivent avec le lot 3 (unités et conversions).</p>
+        <div className="cm-grille" style={{ marginTop: 12 }}>
+          <Champ label="Unité de stock" id="fus" aide="Facultatif : sans unité, chaque article choisit la sienne.">
+            <select id="fus" value={f.unite_stock_id} onChange={(e) => setF((x) => ({ ...x, unite_stock_id: e.target.value }))} disabled={!modifiable}>
+              <option value="">— Aucune proposition —</option>
+              {unites.filter((u) => u.actif || String(u.id) === f.unite_stock_id).map((u) => <option key={u.id} value={u.id}>{u.code}</option>)}
+            </select>
+          </Champ>
+          <div />
+          {f.unite_stock_id && (<>
+            <ChampUnite label="Unité d'achat" id="fua" unites={unites} valeur={f.unite_achat_id} stockId={f.unite_stock_id} disabled={!modifiable}
+              onUnite={(v) => setF((x) => ({ ...x, unite_achat_id: v === x.unite_stock_id ? '' : v }))} coef={f.coef_achat} onCoef={(v) => setF((x) => ({ ...x, coef_achat: v }))} />
+            <ChampUnite label="Unité de vente" id="fuv" unites={unites} valeur={f.unite_vente_id} stockId={f.unite_stock_id} disabled={!modifiable}
+              onUnite={(v) => setF((x) => ({ ...x, unite_vente_id: v === x.unite_stock_id ? '' : v }))} coef={f.coef_vente} onCoef={(v) => setF((x) => ({ ...x, coef_vente: v }))} />
+          </>)}
+        </div>
       </Section>
       <Section titre={`Fournisseurs associés (${f.fournisseur_ids.length})`}>
         <p className="cm-aide" style={{ marginBottom: 8 }}>Ils seront proposés pour chaque article de la famille. Le demandeur pourra toujours choisir un autre fournisseur actif.</p>
@@ -113,15 +136,16 @@ export default function FamillesPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table">
-          <thead><tr><th>Code</th><th>Nom</th><th>Taxes achat · vente</th><th>Stock</th><th>Fournisseurs associés</th><th className="cm-num">Articles</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Code</th><th>Nom</th><th>Taxes achat · vente</th><th>Unités</th><th>Stock</th><th>Fournisseurs associés</th><th className="cm-num">Articles</th><th>Statut</th></tr></thead>
           <tbody>
-            {!donnees ? <tr><td colSpan={7} className="cm-vide">Chargement…</td></tr>
-              : liste.length === 0 ? <tr><td colSpan={7} className="cm-vide"><strong>Aucune famille</strong>Exemples : fournitures de bureau, matériel informatique, consommables.</td></tr>
+            {!donnees ? <tr><td colSpan={8} className="cm-vide">Chargement…</td></tr>
+              : liste.length === 0 ? <tr><td colSpan={8} className="cm-vide"><strong>Aucune famille</strong>Exemples : fournitures de bureau, matériel informatique, consommables.</td></tr>
                 : liste.map((x) => (
                   <tr key={x.id} className={'cm-cliquable' + (x.actif ? '' : ' cm-inactif')} onClick={() => setFiche(x)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') setFiche(x); }}>
                     <td><span className="cm-code">{x.code}</span></td>
                     <td><strong>{x.nom}</strong>{x.description && <span className="cm-sous">{x.description.slice(0, 80)}</span>}</td>
                     <td>{x.taxe_achat_code || '—'} · {x.taxe_vente_code || '—'}</td>
+                    <td>{x.unite_stock_code ? <>{x.unite_stock_code}{x.unite_achat_code && x.unite_achat_code !== x.unite_stock_code && <span className="cm-sous">achat : {x.unite_achat_code} ×{String(x.coef_achat).replace('.', ',')}</span>}</> : <span className="cm-sous" style={{ marginTop: 0 }}>—</span>}</td>
                     <td>{x.suivi_stock ? <span className="cm-puce">{x.methode_valorisation === 'fifo' ? 'FIFO' : 'CMUP'}</span> : <span className="cm-sous" style={{ marginTop: 0 }}>Non suivi</span>}</td>
                     <td>{x.fournisseurs.length ? <div className="cm-puces">{x.fournisseurs.slice(0, 4).map((t) => <span key={t.id} className="cm-puce">{t.nom}</span>)}{x.fournisseurs.length > 4 && <span className="cm-puce">+{x.fournisseurs.length - 4}</span>}</div> : <span className="cm-pastille cm-alerte">Aucun</span>}</td>
                     <td className="cm-num">{x.nb_articles}</td>

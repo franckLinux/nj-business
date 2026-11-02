@@ -222,6 +222,7 @@ const lire = async (ctx, id) => {
   const d = await charger(ctx, id);
   const lignes = await Q(
     `SELECT l.*, a.reference, a.designation, a.actif AS article_actif, a.famille_id, fa.nom AS famille_nom, r.nom AS fournisseur_nom,
+            a.unite AS unite_stock,
             COALESCE((SELECT json_agg(json_build_object('id', t.id, 'nom', t.nom) ORDER BY lower(t.nom)) FROM (
                SELECT rt.id, rt.nom FROM com_article_fournisseurs af JOIN registre_tiers rt ON rt.id = af.tiers_id WHERE af.article_id = a.id AND rt.actif
                UNION
@@ -235,12 +236,15 @@ const lire = async (ctx, id) => {
   const out = [];
   for (const l of lignes) {
     const qte = Number(l.quantite);
+    const k = Number(l.coefficient || 1);
+    const qteStock = Math.round(qte * k * 1000) / 1000;
     out.push({
-      ...l, id: Number(l.id), article_id: Number(l.article_id), quantite: qte,
+      ...l, id: Number(l.id), article_id: Number(l.article_id), quantite: qte, coefficient: k, quantite_stock: qteStock,
+      unite_id: l.unite_id ? Number(l.unite_id) : null,
       fournisseur_id: l.fournisseur_id ? Number(l.fournisseur_id) : null,
       prix_estime: l.prix_estime === null ? null : Number(l.prix_estime),
       fournisseurs_proposes: l.fournisseurs_proposes.map((f) => ({ ...f, id: Number(f.id) })),
-      stock_actuel: await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, qte),
+      stock_actuel: await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, qteStock),
     });
   }
   const decisions = await Q(
@@ -305,16 +309,29 @@ const ecrireLignes = async (ctx, tr, demandeId, lignes) => {
     const aid = entier(l.article_id, 'Article');
     if (vus.has(aid)) throw new ErreurDemande(400, 'Un même article figure deux fois : regroupez les quantités sur une seule ligne.');
     vus.add(aid);
-    const [a] = await Q('SELECT id, actif, unite, prix_achat_indicatif, designation FROM com_articles WHERE id = :a AND tenant_id = :t', { a: aid, t: ctx.tenantId }, tr);
+    const [a] = await Q('SELECT id, actif, unite, prix_achat_indicatif, designation, unite_achat_id FROM com_articles WHERE id = :a AND tenant_id = :t', { a: aid, t: ctx.tenantId }, tr);
     if (!a) throw new ErreurDemande(400, 'Article inconnu.');
     if (!a.actif) throw new ErreurDemande(400, `L'article « ${a.designation} » est désactivé.`);
+    // Unité de la ligne (055) : l'unité d'achat par défaut, ou une autre unité de l'article ;
+    // son coefficient vers l'unité de stock est copié sur la ligne.
+    const uid = l.unite_id ? entier(l.unite_id, 'Unité') : Number(a.unite_achat_id);
+    const [u] = await Q(`SELECT u.id, u.code, u.decimales, au.coefficient FROM com_article_unites au JOIN com_unites u ON u.id = au.unite_id
+                          WHERE au.article_id = :a AND au.unite_id = :u`, { a: aid, u: uid }, tr);
+    if (!u) throw new ErreurDemande(400, `« ${a.designation} » ne se compte pas dans cette unité.`);
+    const qte = quantite(l.quantite);
+    if (Math.round(qte * 10 ** Number(u.decimales)) !== qte * 10 ** Number(u.decimales)) {
+      throw new ErreurDemande(400, `« ${a.designation} » : ${u.code} se compte avec ${Number(u.decimales) ? `${u.decimales} décimale(s) au plus` : 'des nombres entiers'}.`);
+    }
+    const [ua] = await Q('SELECT coefficient FROM com_article_unites WHERE article_id = :a AND unite_id = :u', { a: aid, u: a.unite_achat_id }, tr);
+    const prix = a.prix_achat_indicatif === null ? null
+      : Math.round(Number(a.prix_achat_indicatif) / Number(ua?.coefficient || 1) * Number(u.coefficient) * 100) / 100;
     let fid = null;
     if (l.fournisseur_id) { fid = entier(l.fournisseur_id, 'Fournisseur'); await verifierFournisseur(ctx, fid, tr); }
     const commentaire = txt(l.commentaire);
     if (commentaire.length > 500) throw new ErreurDemande(400, 'Commentaire de ligne : 500 caractères au plus.');
-    await X(`INSERT INTO com_demande_lignes (demande_id, tenant_id, ordre, article_id, quantite, unite, fournisseur_id, prix_estime, commentaire)
-             VALUES (:d, :t, :o, :a, :q, :u, :f, :p, :c)`,
-    { d: demandeId, t: ctx.tenantId, o: i, a: aid, q: quantite(l.quantite), u: a.unite, f: fid, p: a.prix_achat_indicatif, c: commentaire }, tr);
+    await X(`INSERT INTO com_demande_lignes (demande_id, tenant_id, ordre, article_id, quantite, unite, unite_id, coefficient, fournisseur_id, prix_estime, commentaire)
+             VALUES (:d, :t, :o, :a, :q, :u, :uid, :k, :f, :p, :c)`,
+    { d: demandeId, t: ctx.tenantId, o: i, a: aid, q: qte, u: u.code, uid: u.id, k: Number(u.coefficient), f: fid, p: prix, c: commentaire }, tr);
   }
   return lignes.length;
 };
@@ -384,7 +401,7 @@ const soumettre = async (ctx, id, body = {}) => {
     if (txt(d.motif).length < 3) manque.push('le motif de la demande');
     if (!d.magasin_actif) manque.push('un magasin actif');
     const lignes = await Q(
-      `SELECT l.id, l.article_id, l.quantite, l.prix_estime, a.actif, a.designation FROM com_demande_lignes l
+      `SELECT l.id, l.article_id, l.quantite, l.coefficient, l.prix_estime, a.actif, a.designation FROM com_demande_lignes l
          JOIN com_articles a ON a.id = l.article_id WHERE l.demande_id = :id ORDER BY l.ordre`, { id: d.id }, tr);
     if (!lignes.length) manque.push('au moins un article');
     if (manque.length) throw new ErreurDemande(400, `Pour soumettre, indiquez ${manque.join(', ')}.`);
@@ -395,7 +412,7 @@ const soumettre = async (ctx, id, body = {}) => {
     let montant = 0; let incomplet = false; const couverts = [];
     for (const l of lignes) {
       const qte = Number(l.quantite);
-      const s = await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, qte);
+      const s = await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, Math.round(qte * Number(l.coefficient || 1) * 1000) / 1000);
       await X('UPDATE com_demande_lignes SET stock_constate = CAST(:s AS jsonb) WHERE id = :id',
         { s: JSON.stringify({ ...s, au: new Date().toISOString() }), id: l.id }, tr);
       if (s.couvert) couverts.push(l.designation);

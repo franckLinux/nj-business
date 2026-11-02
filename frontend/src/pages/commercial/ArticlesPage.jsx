@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { Entete, Statut, Tiroir, Section, Champ, Bascule, Cases, useListe, useDiffere, enregistrer, fmtMontant, fmtQte } from '@/components/commercial/ui';
+import { Entete, Statut, Tiroir, Section, Champ, Bascule, Cases, ChampUnite, useListe, useDiffere, enregistrer, fmtMontant, fmtQte } from '@/components/commercial/ui';
 
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
@@ -53,10 +53,12 @@ function StockInitial({ article, magasins, onEnregistre }) {
 function FicheArticle({ id, references, onFermer, onEnregistre }) {
   const { can } = useApp();
   const modifiable = can('com.articles.modifier');
-  const { familles, taxes, magasins, fournisseurs } = references;
+  const { familles, taxes, magasins, fournisseurs, unites } = references;
+  const uniteParDefaut = unites.find((u) => u.actif && ['unité', 'unite', 'pièce', 'piece', 'u'].includes(u.code.toLowerCase())) || unites.find((u) => u.actif);
   const [article, setArticle] = useState(null);
   const [f, setF] = useState(id ? null : {
-    reference: '', designation: '', description: '', famille_id: '', unite: 'unité', prix_achat_indicatif: '', taxe_id: '', taxe_vente_id: '',
+    reference: '', designation: '', description: '', famille_id: '', prix_achat_indicatif: '', taxe_id: '', taxe_vente_id: '',
+    unite_stock_id: uniteParDefaut ? String(uniteParDefaut.id) : '', unite_achat_id: '', coef_achat: '', unite_vente_id: '', coef_vente: '', prix_vente_indicatif: '',
     suivi_stock: true, methode_valorisation: 'cmup', seuil_alerte: '', suivi_comptable: null, actif: true, fournisseur_ids: [], magasin_ids: [],
   });
   const [erreur, setErreur] = useState('');
@@ -67,7 +69,11 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
     if (r?.error) { setErreur(r.error); return; }
     setArticle(r);
     setF({
-      reference: r.reference, designation: r.designation, description: r.description, famille_id: String(r.famille_id), unite: r.unite,
+      reference: r.reference, designation: r.designation, description: r.description, famille_id: String(r.famille_id),
+      unite_stock_id: String(r.unite_stock_id),
+      unite_achat_id: r.unite_achat_id === r.unite_stock_id ? '' : String(r.unite_achat_id), coef_achat: String(r.coef_achat).replace('.', ','),
+      unite_vente_id: r.unite_vente_id === r.unite_stock_id ? '' : String(r.unite_vente_id), coef_vente: String(r.coef_vente).replace('.', ','),
+      prix_vente_indicatif: r.prix_vente_indicatif === null ? '' : String(r.prix_vente_indicatif),
       prix_achat_indicatif: r.prix_achat_indicatif === null ? '' : String(r.prix_achat_indicatif), taxe_id: r.taxe_id ? String(r.taxe_id) : '',
       taxe_vente_id: r.taxe_vente_id ? String(r.taxe_vente_id) : '', suivi_stock: r.suivi_stock, methode_valorisation: r.methode_valorisation,
       seuil_alerte: r.seuil_alerte === null ? '' : String(r.seuil_alerte), suivi_comptable: r.suivi_comptable, actif: r.actif,
@@ -84,12 +90,22 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
     setF((x) => (article || !fam ? { ...x, famille_id: v } : {
       ...x, famille_id: v, taxe_id: fam.taxe_achat_id ? String(fam.taxe_achat_id) : '', taxe_vente_id: fam.taxe_vente_id ? String(fam.taxe_vente_id) : '',
       suivi_stock: fam.suivi_stock, methode_valorisation: fam.methode_valorisation,
+      ...(fam.unite_stock_id ? {
+        unite_stock_id: String(fam.unite_stock_id),
+        unite_achat_id: fam.unite_achat_id && fam.unite_achat_id !== fam.unite_stock_id ? String(fam.unite_achat_id) : '',
+        coef_achat: fam.coef_achat ? String(fam.coef_achat).replace('.', ',') : '',
+        unite_vente_id: fam.unite_vente_id && fam.unite_vente_id !== fam.unite_stock_id ? String(fam.unite_vente_id) : '',
+        coef_vente: fam.coef_vente ? String(fam.coef_vente).replace('.', ',') : '',
+      } : {}),
     }));
   };
   const valider = async () => {
     if (f.suivi_comptable === null) { setErreur('Indiquez si l\'article est suivi en comptabilité (oui / non).'); return; }
     setEnCours(true);
-    const r = await enregistrer('/commercial/articles', article?.id, { ...f, taxe_id: f.taxe_id || null, taxe_vente_id: f.taxe_vente_id || null });
+    const corps = { ...f, taxe_id: f.taxe_id || null, taxe_vente_id: f.taxe_vente_id || null,
+      unite_achat_id: f.unite_achat_id || f.unite_stock_id, unite_vente_id: f.unite_vente_id || f.unite_stock_id };
+    if (!f.unite_stock_id) { delete corps.unite_stock_id; delete corps.unite_achat_id; delete corps.unite_vente_id; corps.unite = 'unité'; }
+    const r = await enregistrer('/commercial/articles', article?.id, corps);
     setEnCours(false);
     if (!r.ok) { setErreur(r.error); return; }
     setErreur('');
@@ -104,6 +120,10 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
   };
 
   const famille = familles.find((x) => String(x.id) === String(f?.famille_id));
+  const code = (uid, defaut) => unites.find((u) => String(u.id) === String(uid))?.code || defaut;
+  const uStock = f ? code(f.unite_stock_id, 'unité') : '';
+  const uAchat = f ? code(f.unite_achat_id || f.unite_stock_id, uStock) : '';
+  const uVente = f ? code(f.unite_vente_id || f.unite_stock_id, uStock) : '';
   const viaFamille = famille ? famille.fournisseurs.filter((x) => x.actif) : [];
   return (
     <Tiroir titre={article ? article.designation : 'Nouvel article'} sousTitre={article ? `${article.reference} · ${article.famille_nom}` : 'Catalogue des articles'} onFermer={onFermer}
@@ -136,16 +156,31 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
             </Champ>
             <Champ label="Désignation" requis id="ad" pleine><input id="ad" value={f.designation} onChange={set('designation')} maxLength={200} disabled={!modifiable} /></Champ>
             <Champ label="Description" id="ade" pleine><textarea id="ade" value={f.description} onChange={set('description')} maxLength={2000} disabled={!modifiable} /></Champ>
-            <Champ label="Unité de mesure" requis id="au" aide="Ex. unité, rame, carton, litre, kg."><input id="au" value={f.unite} onChange={set('unite')} maxLength={20} disabled={!modifiable} /></Champ>
             <div className="cm-champ">
               <span className="cm-etiquette">Statut</span>
               <Bascule label="Statut de l'article" oui="Actif" non="Inactif" valeur={f.actif} onChange={(v) => modifiable && setF((x) => ({ ...x, actif: v }))} />
             </div>
           </div>
         </Section>
+        <Section titre="Unités et conversions">
+          <div className="cm-grille">
+            <Champ label="Unité de stock" requis id="aus" aide={article?.utilise ? 'Figée : l\'article a déjà du stock ou des documents.' : 'Celle dans laquelle le stock est compté.'}>
+              <select id="aus" value={f.unite_stock_id} onChange={set('unite_stock_id')} disabled={!modifiable || article?.utilise}>
+                {!f.unite_stock_id && <option value="">« unité » (créée automatiquement)</option>}
+                {unites.filter((u) => u.actif || String(u.id) === f.unite_stock_id).map((u) => <option key={u.id} value={u.id}>{u.code}{u.libelle !== u.code ? ` — ${u.libelle}` : ''}</option>)}
+              </select>
+            </Champ>
+            <div />
+            <ChampUnite label="Unité d'achat" id="aua" unites={unites} valeur={f.unite_achat_id} stockId={f.unite_stock_id} disabled={!modifiable || !f.unite_stock_id}
+              onUnite={(v) => setF((x) => ({ ...x, unite_achat_id: v === x.unite_stock_id ? '' : v }))} coef={f.coef_achat} onCoef={(v) => setF((x) => ({ ...x, coef_achat: v }))} />
+            <ChampUnite label="Unité de vente" id="auv" unites={unites} valeur={f.unite_vente_id} stockId={f.unite_stock_id} disabled={!modifiable || !f.unite_stock_id}
+              onUnite={(v) => setF((x) => ({ ...x, unite_vente_id: v === x.unite_stock_id ? '' : v }))} coef={f.coef_vente} onCoef={(v) => setF((x) => ({ ...x, coef_vente: v }))} />
+          </div>
+          <p className="cm-aide" style={{ marginTop: 8 }}>Les documents gardent la conversion appliquée le jour de leur saisie : changer un coefficient ne modifie aucun document passé.</p>
+        </Section>
         <Section titre="Achat">
           <div className="cm-grille">
-            <Champ label="Prix d'achat indicatif" id="ap" aide="Sert à estimer le montant des demandes."><input id="ap" inputMode="decimal" value={f.prix_achat_indicatif} onChange={set('prix_achat_indicatif')} disabled={!modifiable} /></Champ>
+            <Champ label={`Prix d'achat indicatif (par ${uAchat})`} id="ap" aide="Sert à estimer le montant des demandes."><input id="ap" inputMode="decimal" value={f.prix_achat_indicatif} onChange={set('prix_achat_indicatif')} disabled={!modifiable} /></Champ>
             <Champ label="Taxe à l'achat" id="at" aide={!article && famille ? 'Reprise de la famille ; modifiable.' : undefined}>
               <select id="at" value={f.taxe_id} onChange={set('taxe_id')} disabled={!modifiable}>
                 <option value="">Aucune taxe</option>
@@ -167,6 +202,7 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
         </Section>
         <Section titre="Vente">
           <div className="cm-grille">
+            <Champ label={`Prix de vente indicatif (par ${uVente})`} id="apv"><input id="apv" inputMode="decimal" value={f.prix_vente_indicatif} onChange={set('prix_vente_indicatif')} disabled={!modifiable} /></Champ>
             <Champ label="Taxe à la vente" id="atv" aide="Distincte de la taxe d'achat ; jamais copiée d'office.">
               <select id="atv" value={f.taxe_vente_id} onChange={set('taxe_vente_id')} disabled={!modifiable}>
                 <option value="">Aucune taxe</option>
@@ -192,7 +228,7 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
             )}
           </div>
           <div className="cm-grille">
-            <Champ label={`Seuil d'alerte${f.unite ? ` (${f.unite})` : ''}`} id="asa"><input id="asa" inputMode="decimal" value={f.seuil_alerte} onChange={set('seuil_alerte')} disabled={!modifiable} /></Champ>
+            <Champ label={`Seuil d'alerte (${uStock})`} id="asa"><input id="asa" inputMode="decimal" value={f.seuil_alerte} onChange={set('seuil_alerte')} disabled={!modifiable} /></Champ>
             <div className="cm-champ cm-pleine">
               <span className="cm-etiquette">Magasins où l'article est géré</span>
               <Cases label="Magasins" options={magasins.filter((m) => m.actif || f.magasin_ids.includes(m.id)).map((m) => ({ id: m.id, libelle: `${m.code} — ${m.nom}` }))}
@@ -242,9 +278,9 @@ export default function ArticlesPage() {
   useEffect(() => {
     Promise.all([
       api.get('/commercial/familles'), api.get('/commercial/taxes'), api.get('/commercial/magasins'),
-      api.get('/commercial/tiers?type=fournisseur'),
-    ]).then(([fa, ta, ma, fo]) => setRefs({
-      familles: fa?.error ? [] : fa, taxes: ta?.error ? [] : ta, magasins: ma?.error ? [] : ma, fournisseurs: fo?.error ? [] : fo,
+      api.get('/commercial/tiers?type=fournisseur'), api.get('/commercial/unites'),
+    ]).then(([fa, ta, ma, fo, un]) => setRefs({
+      familles: fa?.error ? [] : fa, taxes: ta?.error ? [] : ta, magasins: ma?.error ? [] : ma, fournisseurs: fo?.error ? [] : fo, unites: un?.error ? [] : un,
     }));
   }, []);
 
@@ -284,7 +320,7 @@ export default function ArticlesPage() {
                     <td><span className="cm-code">{a.reference}</span></td>
                     <td><strong>{a.designation}</strong>{(a.fournisseurs_famille.length + a.fournisseurs_directs.length) > 0 && <span className="cm-sous">{[...a.fournisseurs_directs, ...a.fournisseurs_famille].map((x) => x.nom).filter((v, i, t) => t.indexOf(v) === i).slice(0, 3).join(', ')}</span>}</td>
                     <td>{a.famille_nom}</td>
-                    <td>{a.unite}</td>
+                    <td>{a.unite}{a.unite_achat_code !== a.unite ? <span className="cm-sous">achat : {a.unite_achat_code} ×{fmtQte(a.coef_achat)}</span> : null}{a.unite_vente_code !== a.unite ? <span className="cm-sous">vente : {a.unite_vente_code} ×{fmtQte(a.coef_vente)}</span> : null}</td>
                     <td className="cm-num">{fmtMontant(a.prix_achat_indicatif)}</td>
                     <td>{a.taxe_code || '—'} · {a.taxe_vente_code || '—'}{!a.suivi_stock && <span className="cm-sous">non suivi en stock</span>}</td>
                     <td>{a.suivi_comptable ? <span className="cm-pastille cm-violet">Suivi</span> : <span className="cm-pastille cm-off">Non suivi</span>}</td>

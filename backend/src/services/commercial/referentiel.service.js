@@ -284,17 +284,113 @@ const enregistrerMagasin = async ({ tenantId, userId, id, body }) => {
   } catch (err) { return unicite(err, 'Ce code de magasin existe déjà.'); }
 };
 
+// ── Unités de mesure (055) ──────────────────────────────────────────────
+// Une unité a un nombre de décimales (0 pour la pièce, 3 pour le kg). Les
+// conversions sont portées par l'article (1 carton = 12 pièces pour CET article).
+const listerUnites = async (tenantId, { actifs = '' } = {}) => {
+  exigerClient(tenantId);
+  const rows = await Q(
+    `SELECT u.*, (SELECT COUNT(DISTINCT au.article_id)::int FROM com_article_unites au WHERE au.unite_id = u.id) AS nb_articles
+       FROM com_unites u WHERE u.tenant_id = :t AND (:actifs <> '1' OR u.actif) ORDER BY u.actif DESC, lower(u.code)`,
+    { t: tenantId, actifs: String(actifs) });
+  return rows.map((r) => ({ ...r, id: Number(r.id), decimales: Number(r.decimales) }));
+};
+
+// Une unité « utilisée » figure sur un document ou porte un stock : ses décimales ne baissent plus.
+const uniteUtilisee = async (uniteId, tr) => {
+  const [u] = await Q(
+    `SELECT 1 FROM com_demande_lignes WHERE unite_id = :u
+     UNION ALL SELECT 1 FROM com_bc_lignes WHERE unite_id = :u
+     UNION ALL SELECT 1 FROM com_stock_mouvements s JOIN com_articles a ON a.id = s.article_id WHERE a.unite_stock_id = :u LIMIT 1`, { u: uniteId }, tr);
+  return Boolean(u);
+};
+
+const enregistrerUnite = async ({ tenantId, userId, id, body }) => {
+  exigerClient(tenantId);
+  try {
+    const uid = await sequelize.transaction(async (tr) => {
+      let avant = null;
+      if (id) {
+        [avant] = await Q('SELECT * FROM com_unites WHERE id = :id AND tenant_id = :t FOR UPDATE', { id: entier(id, 'Unité'), t: tenantId }, tr);
+        if (!avant) throw new ErreurCom(404, 'Unité introuvable.');
+        avant.decimales = Number(avant.decimales);
+      }
+      const b = { ...(avant || {}), ...body };
+      const code = txt(b.code);
+      if (!/^[\p{L}\p{N}_.\-/ ]{1,20}$/u.test(code)) throw new ErreurCom(400, 'Code de l\'unité : 1 à 20 lettres, chiffres, espace, point, tiret ou barre.');
+      const libelle = longueur(b.libelle || code, 60, 'Libellé');
+      const decimales = Number.parseInt(b.decimales ?? 0, 10);
+      if (!Number.isInteger(decimales) || decimales < 0 || decimales > 3) throw new ErreurCom(400, 'Décimales : de 0 à 3.');
+      const v = { code, libelle, decimales, actif: b.actif === undefined ? true : Boolean(b.actif) };
+      if (avant) {
+        if (decimales < avant.decimales && await uniteUtilisee(avant.id, tr)) {
+          throw new ErreurCom(409, 'Cette unité figure déjà dans des documents ou un stock : son nombre de décimales ne peut que rester ou augmenter.');
+        }
+        await X('UPDATE com_unites SET code = :code, libelle = :libelle, decimales = :decimales, actif = :actif, modifie_le = NOW() WHERE id = :id',
+          { ...v, id: avant.id }, tr);
+        // Le mot affiché sur les articles suit le code de leur unité de stock.
+        if (avant.code !== code) await X('UPDATE com_articles SET unite = :c WHERE unite_stock_id = :id', { c: code, id: avant.id }, tr);
+        const d = differences(avant, v);
+        if (d) await auditer(tr, { tenantId, userId, action: 'COM_UNITE_MODIFICATION', id: avant.id, ...d });
+        return Number(avant.id);
+      }
+      const [r] = await Q('INSERT INTO com_unites (tenant_id, code, libelle, decimales, actif, cree_par) VALUES (:t, :code, :libelle, :decimales, :actif, :u) RETURNING id',
+        { ...v, t: tenantId, u: userId }, tr);
+      await auditer(tr, { tenantId, userId, action: 'COM_UNITE_CREATION', id: r.id, apres: v });
+      return Number(r.id);
+    });
+    return (await listerUnites(tenantId)).find((u) => u.id === uid);
+  } catch (err) { return unicite(err, 'Ce code d\'unité existe déjà.'); }
+};
+
+// Unité par son id (contrôlée) ou par son code (anciens écrans : `unite: 'rame'`), créée au besoin.
+const uniteDe = async (tenantId, userId, { id, code }, tr) => {
+  if (id !== undefined && id !== null && id !== '') {
+    const [u] = await Q('SELECT id, code, decimales, actif FROM com_unites WHERE id = :id AND tenant_id = :t', { id: entier(id, 'Unité'), t: tenantId }, tr);
+    if (!u) throw new ErreurCom(400, 'Unité inconnue.');
+    return { ...u, id: Number(u.id), decimales: Number(u.decimales) };
+  }
+  const c = longueur(code || 'unité', 20, 'Unité') || 'unité';
+  let [u] = await Q('SELECT id, code, decimales, actif FROM com_unites WHERE tenant_id = :t AND lower(code) = lower(:c)', { t: tenantId, c }, tr);
+  if (!u) {
+    [u] = await Q('INSERT INTO com_unites (tenant_id, code, libelle, cree_par) VALUES (:t, :c, :c, :u) RETURNING id, code, decimales, actif', { t: tenantId, c, u: userId }, tr);
+    await auditer(tr, { tenantId, userId, action: 'COM_UNITE_CREATION', id: u.id, apres: { code: c, automatique: true } });
+  }
+  return { ...u, id: Number(u.id), decimales: Number(u.decimales) };
+};
+const coefficient = (v, nom) => {
+  const n = nombre(v, nom, { vide: null });
+  if (n === null || !(n > 0) || n > 1e9) throw new ErreurCom(400, `${nom} : un nombre positif (combien d'unités de stock vaut une unité).`);
+  return Math.round(n * 1e6) / 1e6;
+};
+
+// Unités proposées par une famille : stock, puis achat et vente avec leur coefficient
+// vers l'unité de stock (1 quand c'est la même unité). Tout est facultatif.
+const unitesFamille = async (tenantId, b, tr) => {
+  const vide = (x) => x === undefined || x === null || x === '';
+  const id = async (x) => (vide(x) ? null : (await uniteDe(tenantId, null, { id: x }, tr)).id);
+  const stock = await id(b.unite_stock_id);
+  const achat = await id(b.unite_achat_id);
+  const vente = await id(b.unite_vente_id);
+  if ((achat || vente) && !stock) throw new ErreurCom(400, 'Choisissez d\'abord l\'unité de stock de la famille.');
+  const coef = (u, c, nom) => (!u ? null : u === stock ? 1 : coefficient(c, nom));
+  return { unite_stock_id: stock, unite_achat_id: achat, coef_achat: coef(achat, b.coef_achat, 'Conversion de l\'unité d\'achat'),
+    unite_vente_id: vente, coef_vente: coef(vente, b.coef_vente, 'Conversion de l\'unité de vente') };
+};
+
 // ── Familles d'articles (+ fournisseurs associés) ────────────────────────
 const listerFamilles = async (tenantId, { q = '', actifs = '' } = {}) => {
   exigerClient(tenantId);
   const rows = await Q(
     `SELECT f.*, ta.code AS taxe_achat_code, ta.taux AS taxe_achat_taux, tv.code AS taxe_vente_code, tv.taux AS taxe_vente_taux,
+            us.code AS unite_stock_code, ua.code AS unite_achat_code, uv.code AS unite_vente_code,
             COALESCE((SELECT json_agg(json_build_object('id', r.id, 'nom', r.nom, 'actif', r.actif) ORDER BY lower(r.nom))
                         FROM com_famille_fournisseurs ff JOIN registre_tiers r ON r.id = ff.tiers_id
                        WHERE ff.famille_id = f.id), '[]') AS fournisseurs,
             (SELECT COUNT(*)::int FROM com_articles a WHERE a.famille_id = f.id) AS nb_articles
        FROM com_familles f
        LEFT JOIN com_taxes ta ON ta.id = f.taxe_achat_id LEFT JOIN com_taxes tv ON tv.id = f.taxe_vente_id
+       LEFT JOIN com_unites us ON us.id = f.unite_stock_id LEFT JOIN com_unites ua ON ua.id = f.unite_achat_id LEFT JOIN com_unites uv ON uv.id = f.unite_vente_id
       WHERE f.tenant_id = :t AND (:actifs <> '1' OR f.actif)
         AND (:q = '' OR lower(f.code) LIKE :like OR lower(f.nom) LIKE :like)
       ORDER BY f.actif DESC, upper(f.code)`,
@@ -302,6 +398,9 @@ const listerFamilles = async (tenantId, { q = '', actifs = '' } = {}) => {
   return rows.map((r) => ({
     ...r, id: Number(r.id), taxe_achat_id: r.taxe_achat_id ? Number(r.taxe_achat_id) : null, taxe_vente_id: r.taxe_vente_id ? Number(r.taxe_vente_id) : null,
     taxe_achat_taux: r.taxe_achat_taux === null ? null : Number(r.taxe_achat_taux), taxe_vente_taux: r.taxe_vente_taux === null ? null : Number(r.taxe_vente_taux),
+    unite_stock_id: r.unite_stock_id ? Number(r.unite_stock_id) : null, unite_achat_id: r.unite_achat_id ? Number(r.unite_achat_id) : null,
+    unite_vente_id: r.unite_vente_id ? Number(r.unite_vente_id) : null,
+    coef_achat: r.coef_achat === null ? null : Number(r.coef_achat), coef_vente: r.coef_vente === null ? null : Number(r.coef_vente),
     fournisseurs: r.fournisseurs.map((f) => ({ ...f, id: Number(f.id) })),
   }));
 };
@@ -334,18 +433,24 @@ const enregistrerFamille = async ({ tenantId, userId, id, body }) => {
         code, nom, description: longueur(b.description, 1000, 'Description'), actif: b.actif === undefined ? true : Boolean(b.actif),
         taxe_achat_id: await taxePour(tenantId, b.taxe_achat_id, 'achat', tr), taxe_vente_id: await taxePour(tenantId, b.taxe_vente_id, 'vente', tr),
         suivi_stock: suivi, methode_valorisation: methode(b.methode_valorisation),
+        ...await unitesFamille(tenantId, b, tr),
       };
       let famId;
       if (avant) {
         famId = Number(avant.id);
         // Les articles existants gardent leurs paramètres : la famille ne fait que proposer.
         await X(`UPDATE com_familles SET code = :code, nom = :nom, description = :description, actif = :actif, taxe_achat_id = :taxe_achat_id,
-                   taxe_vente_id = :taxe_vente_id, suivi_stock = :suivi_stock, methode_valorisation = :methode_valorisation, modifie_le = NOW() WHERE id = :id`,
+                   taxe_vente_id = :taxe_vente_id, suivi_stock = :suivi_stock, methode_valorisation = :methode_valorisation,
+                   unite_stock_id = :unite_stock_id, unite_achat_id = :unite_achat_id, coef_achat = :coef_achat,
+                   unite_vente_id = :unite_vente_id, coef_vente = :coef_vente, modifie_le = NOW() WHERE id = :id`,
         { ...v, id: famId }, tr);
-        for (const k of ['taxe_achat_id', 'taxe_vente_id']) avant[k] = avant[k] ? Number(avant[k]) : null;
+        for (const k of ['taxe_achat_id', 'taxe_vente_id', 'unite_stock_id', 'unite_achat_id', 'unite_vente_id']) avant[k] = avant[k] ? Number(avant[k]) : null;
+        for (const k of ['coef_achat', 'coef_vente']) avant[k] = avant[k] === null ? null : Number(avant[k]);
       } else {
-        const [r] = await Q(`INSERT INTO com_familles (tenant_id, code, nom, description, actif, taxe_achat_id, taxe_vente_id, suivi_stock, methode_valorisation, cree_par)
-                             VALUES (:t, :code, :nom, :description, :actif, :taxe_achat_id, :taxe_vente_id, :suivi_stock, :methode_valorisation, :u) RETURNING id`,
+        const [r] = await Q(`INSERT INTO com_familles (tenant_id, code, nom, description, actif, taxe_achat_id, taxe_vente_id, suivi_stock, methode_valorisation,
+                               unite_stock_id, unite_achat_id, coef_achat, unite_vente_id, coef_vente, cree_par)
+                             VALUES (:t, :code, :nom, :description, :actif, :taxe_achat_id, :taxe_vente_id, :suivi_stock, :methode_valorisation,
+                               :unite_stock_id, :unite_achat_id, :coef_achat, :unite_vente_id, :coef_vente, :u) RETURNING id`,
         { ...v, t: tenantId, u: userId }, tr);
         famId = Number(r.id);
       }
@@ -558,6 +663,10 @@ const enregistrerBanque = async (tr, { tenantId, userId, tid, b }) => {
 const SQL_ARTICLES = `
   SELECT a.*, f.code AS famille_code, f.nom AS famille_nom, x.code AS taxe_code, x.taux AS taxe_taux,
          xv.code AS taxe_vente_code, xv.taux AS taxe_vente_taux,
+         us.code AS unite_stock_code, us.decimales AS unite_stock_decimales, ua.code AS unite_achat_code, uv.code AS unite_vente_code,
+         COALESCE((SELECT json_agg(json_build_object('id', u.id, 'code', u.code, 'libelle', u.libelle, 'decimales', u.decimales, 'coefficient', au.coefficient)
+                                   ORDER BY au.coefficient, lower(u.code))
+                     FROM com_article_unites au JOIN com_unites u ON u.id = au.unite_id WHERE au.article_id = a.id), '[]') AS unites,
          COALESCE((SELECT json_agg(json_build_object('id', r.id, 'nom', r.nom) ORDER BY lower(r.nom))
                      FROM com_article_fournisseurs af JOIN registre_tiers r ON r.id = af.tiers_id
                     WHERE af.article_id = a.id), '[]') AS fournisseurs_directs,
@@ -570,7 +679,10 @@ const SQL_ARTICLES = `
     FROM com_articles a
     JOIN com_familles f ON f.id = a.famille_id
     LEFT JOIN com_taxes x ON x.id = a.taxe_id
-    LEFT JOIN com_taxes xv ON xv.id = a.taxe_vente_id`;
+    LEFT JOIN com_taxes xv ON xv.id = a.taxe_vente_id
+    JOIN com_unites us ON us.id = a.unite_stock_id
+    JOIN com_unites ua ON ua.id = a.unite_achat_id
+    JOIN com_unites uv ON uv.id = a.unite_vente_id`;
 
 const formaterArticle = (r) => ({
   ...r, id: Number(r.id), famille_id: Number(r.famille_id), taxe_id: r.taxe_id ? Number(r.taxe_id) : null,
@@ -578,6 +690,12 @@ const formaterArticle = (r) => ({
   seuil_alerte: r.seuil_alerte === null ? null : Number(r.seuil_alerte),
   taxe_taux: r.taxe_taux === null || r.taxe_taux === undefined ? null : Number(r.taxe_taux),
   taxe_vente_id: r.taxe_vente_id ? Number(r.taxe_vente_id) : null,
+  unite_stock_id: Number(r.unite_stock_id), unite_achat_id: Number(r.unite_achat_id), unite_vente_id: Number(r.unite_vente_id),
+  unite_stock_decimales: Number(r.unite_stock_decimales),
+  unites: r.unites.map((u) => ({ ...u, id: Number(u.id), decimales: Number(u.decimales), coefficient: Number(u.coefficient) })),
+  coef_achat: Number(r.unites.find((u) => Number(u.id) === Number(r.unite_achat_id))?.coefficient ?? 1),
+  coef_vente: Number(r.unites.find((u) => Number(u.id) === Number(r.unite_vente_id))?.coefficient ?? 1),
+  prix_vente_indicatif: r.prix_vente_indicatif === null || r.prix_vente_indicatif === undefined ? null : Number(r.prix_vente_indicatif),
   taxe_vente_taux: r.taxe_vente_taux === null || r.taxe_vente_taux === undefined ? null : Number(r.taxe_vente_taux),
   fournisseurs_directs: r.fournisseurs_directs.map((x) => ({ ...x, id: Number(x.id) })),
   fournisseurs_famille: r.fournisseurs_famille.map((x) => ({ ...x, id: Number(x.id) })),
@@ -649,6 +767,11 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
       // Création : ce que l'écran n'envoie pas est repris de la famille (054) ; ensuite,
       // chaque article garde ses propres paramètres (modifier la famille ne le touche plus).
       if (!avant) {
+        if (body.unite_stock_id === undefined && body.unite === undefined && fam.unite_stock_id) {
+          b.unite_stock_id = fam.unite_stock_id;
+          if (body.unite_achat_id === undefined && fam.unite_achat_id) { b.unite_achat_id = fam.unite_achat_id; b.coef_achat = fam.coef_achat; }
+          if (body.unite_vente_id === undefined && fam.unite_vente_id) { b.unite_vente_id = fam.unite_vente_id; b.coef_vente = fam.coef_vente; }
+        }
         if (body.taxe_id === undefined) b.taxe_id = fam.taxe_achat_id;
         if (body.taxe_vente_id === undefined) b.taxe_vente_id = fam.taxe_vente_id;
         if (body.suivi_stock === undefined) b.suivi_stock = fam.suivi_stock;
@@ -665,9 +788,27 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
         // la méthode peut encore changer. Après, elle ne changera que par inventaire de bascule.
         if (avant.methode_valorisation !== methodeV && mv.autres) throw new ErreurCom(409, 'Des mouvements valorisés existent : la méthode ne se change que par un inventaire de bascule.');
       }
+      // Unités (055) : stock, achat et vente, avec leur coefficient vers l'unité de stock.
+      const coefsAvant = avant ? Object.fromEntries((await Q('SELECT unite_id, coefficient FROM com_article_unites WHERE article_id = :a', { a: avant.id }, tr))
+        .map((r) => [Number(r.unite_id), Number(r.coefficient)])) : {};
+      const parCode = body.unite_stock_id === undefined && body.unite !== undefined;
+      const uStock = await uniteDe(tenantId, userId, parCode ? { code: body.unite } : { id: b.unite_stock_id, code: b.unite }, tr);
+      if (avant && Number(avant.unite_stock_id) !== uStock.id && await articleUtilise(Number(avant.id), tr)) {
+        throw new ErreurCom(409, 'Cet article a déjà un stock ou figure dans des documents : son unité de stock ne change plus.');
+      }
+      const uniteEtCoef = async (champ, champCoef, nom) => {
+        const vid = b[champ] === undefined || b[champ] === null || b[champ] === '' || parCode ? uStock.id : (await uniteDe(tenantId, userId, { id: b[champ] }, tr)).id;
+        if (vid === uStock.id) return [vid, 1];
+        const brut = body[champCoef] !== undefined ? body[champCoef] : (b[champCoef] ?? coefsAvant[vid]);
+        return [vid, coefficient(brut, nom)];
+      };
+      const [uAchat, cAchat] = await uniteEtCoef('unite_achat_id', 'coef_achat', 'Conversion de l\'unité d\'achat');
+      const [uVente, cVente] = await uniteEtCoef('unite_vente_id', 'coef_vente', 'Conversion de l\'unité de vente');
+      if (uAchat === uVente && cAchat !== cVente) throw new ErreurCom(400, 'Même unité à l\'achat et à la vente : un seul coefficient possible.');
       const v = {
         reference, designation, description: longueur(b.description, 2000, 'Description'), famille_id: familleId,
-        unite: longueur(b.unite || 'unité', 20, 'Unité'),
+        unite: uStock.code, unite_stock_id: uStock.id, unite_achat_id: uAchat, unite_vente_id: uVente,
+        prix_vente_indicatif: nombre(b.prix_vente_indicatif, 'Prix de vente indicatif', { vide: null }),
         prix_achat_indicatif: nombre(b.prix_achat_indicatif, 'Prix d\'achat indicatif', { vide: null }),
         taxe_id: taxeId, taxe_vente_id: taxeVenteId, suivi_stock: suiviStock, methode_valorisation: methodeV,
         seuil_alerte: nombre(b.seuil_alerte, 'Seuil d\'alerte', { vide: null }),
@@ -680,21 +821,34 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
         await X(`UPDATE com_articles SET reference = :reference, designation = :designation, description = :description, famille_id = :famille_id,
                    unite = :unite, prix_achat_indicatif = :prix_achat_indicatif, taxe_id = :taxe_id, taxe_vente_id = :taxe_vente_id,
                    suivi_stock = :suivi_stock, methode_valorisation = :methode_valorisation, seuil_alerte = :seuil_alerte,
+                   unite_stock_id = :unite_stock_id, unite_achat_id = :unite_achat_id, unite_vente_id = :unite_vente_id, prix_vente_indicatif = :prix_vente_indicatif,
                    suivi_comptable = :suivi_comptable, actif = :actif, modifie_par = :u, modifie_le = NOW() WHERE id = :id`,
         { ...v, u: userId, id: artId }, tr);
         const norm = { ...avant, famille_id: Number(avant.famille_id), taxe_id: avant.taxe_id ? Number(avant.taxe_id) : null,
           taxe_vente_id: avant.taxe_vente_id ? Number(avant.taxe_vente_id) : null,
+          unite_stock_id: Number(avant.unite_stock_id), unite_achat_id: Number(avant.unite_achat_id), unite_vente_id: Number(avant.unite_vente_id),
+          prix_vente_indicatif: avant.prix_vente_indicatif === null ? null : Number(avant.prix_vente_indicatif),
           prix_achat_indicatif: avant.prix_achat_indicatif === null ? null : Number(avant.prix_achat_indicatif),
           seuil_alerte: avant.seuil_alerte === null ? null : Number(avant.seuil_alerte) };
         const d = differences(norm, v);
         if (d) await auditer(tr, { tenantId, userId, action: 'COM_ARTICLE_MODIFICATION', id: artId, ...d });
       } else {
         const [r] = await Q(`INSERT INTO com_articles (tenant_id, reference, designation, description, famille_id, unite, prix_achat_indicatif,
-                               taxe_id, taxe_vente_id, suivi_stock, methode_valorisation, seuil_alerte, suivi_comptable, actif, cree_par, modifie_par)
+                               taxe_id, taxe_vente_id, suivi_stock, methode_valorisation, seuil_alerte, suivi_comptable, actif, cree_par, modifie_par,
+                               unite_stock_id, unite_achat_id, unite_vente_id, prix_vente_indicatif)
                              VALUES (:t, :reference, :designation, :description, :famille_id, :unite, :prix_achat_indicatif,
-                               :taxe_id, :taxe_vente_id, :suivi_stock, :methode_valorisation, :seuil_alerte, :suivi_comptable, :actif, :u, :u) RETURNING id`, { ...v, t: tenantId, u: userId }, tr);
+                               :taxe_id, :taxe_vente_id, :suivi_stock, :methode_valorisation, :seuil_alerte, :suivi_comptable, :actif, :u, :u,
+                               :unite_stock_id, :unite_achat_id, :unite_vente_id, :prix_vente_indicatif) RETURNING id`, { ...v, t: tenantId, u: userId }, tr);
         artId = Number(r.id);
         await auditer(tr, { tenantId, userId, action: 'COM_ARTICLE_CREATION', id: artId, apres: v });
+      }
+      // Conversions de l'article : l'unité de stock vaut 1 ; achat et vente leur coefficient.
+      const conv = new Map([[uStock.id, 1], [uAchat, cAchat], [uVente, cVente]]);
+      const avantConv = JSON.stringify(Object.entries(coefsAvant).sort());
+      await X('DELETE FROM com_article_unites WHERE article_id = :a', { a: artId }, tr);
+      for (const [uid, c] of conv) await X('INSERT INTO com_article_unites (article_id, unite_id, tenant_id, coefficient) VALUES (:a, :u, :t, :c)', { a: artId, u: uid, t: tenantId, c }, tr);
+      if (avant && avantConv !== JSON.stringify([...conv].map(([k, c]) => [String(k), c]).sort())) {
+        await auditer(tr, { tenantId, userId, action: 'COM_ARTICLE_CONVERSIONS', id: artId, avant: { conversions: coefsAvant }, apres: { conversions: Object.fromEntries(conv) } });
       }
       if (body.fournisseur_ids !== undefined) {
         const f = ids(body.fournisseur_ids, 'Fournisseur');
@@ -840,6 +994,7 @@ module.exports = {
   ErreurCom,
   lireSociete, modifierSociete,
   listerAgences, enregistrerAgence, definirAgencesUtilisateur,
+  listerUnites, enregistrerUnite,
   listerMagasins, enregistrerMagasin,
   listerFamilles, enregistrerFamille,
   listerTaxes, enregistrerTaxe,

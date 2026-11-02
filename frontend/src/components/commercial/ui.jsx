@@ -118,3 +118,30 @@ export const enregistrer = async (url, id, corps) => {
   const r = id ? await api.put(`${url}/${id}`, corps) : await api.post(url, corps);
   return r?.error ? { ok: false, error: r.error } : { ok: true, data: r };
 };
+
+// Unité + conversion (055) : « 1 carton = 12 pièce ». Le coefficient n'est demandé
+// que si l'unité choisie n'est pas l'unité de stock (qui vaut toujours 1).
+export function ChampUnite({ label, id, unites, valeur, onUnite, coef, onCoef, stockId, disabled, requis, aide }) {
+  const stock = unites.find((u) => String(u.id) === String(stockId));
+  const choisie = unites.find((u) => String(u.id) === String(valeur));
+  const autre = Boolean(choisie && stock && String(choisie.id) !== String(stock.id));
+  return (
+    <div className="cm-champ">
+      <label htmlFor={id}>{label}{requis && <span className="cm-req" aria-hidden="true">*</span>}</label>
+      <div className="cm-unite">
+        <select id={id} value={valeur} onChange={(e) => onUnite(e.target.value)} disabled={disabled}>
+          <option value="">{stock ? `Même que le stock (${stock.code})` : '— Choisir —'}</option>
+          {unites.filter((u) => u.actif || String(u.id) === String(valeur)).map((u) => <option key={u.id} value={u.id}>{u.code}{u.libelle && u.libelle !== u.code ? ` — ${u.libelle}` : ''}</option>)}
+        </select>
+        {autre && (
+          <span className="cm-conversion">
+            1 {choisie.code} =
+            <input inputMode="decimal" value={coef} onChange={(e) => onCoef(e.target.value)} disabled={disabled} aria-label={`Nombre de ${stock.code} dans 1 ${choisie.code}`} />
+            {stock.code}
+          </span>
+        )}
+      </div>
+      {aide && <span className="cm-aide">{aide}</span>}
+    </div>
+  );
+}

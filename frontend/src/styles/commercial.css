@@ -284,3 +284,11 @@ a.cm-tuile:hover { border-color: #93c5fd; box-shadow: 0 6px 18px rgba(37, 99, 23
 }
 
 .cm-titre-domaine { font-size: 15px; font-weight: 800; color: var(--brand); margin: 6px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+
+/* ── Unités et conversions (lot 3) ────────────────────────────────────── */
+.cm-unite { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cm-unite select { flex: 1 1 160px; min-width: 0; }
+.cm-conversion { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.cm-conversion input { width: 84px !important; text-align: right; }
+.cm-conv { display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 3px; white-space: nowrap; }
+.cm-lignes select.cm-unite-ligne { width: 110px; margin-top: 4px; display: block; margin-left: auto; height: 32px; }

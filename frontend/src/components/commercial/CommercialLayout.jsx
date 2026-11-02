@@ -14,6 +14,7 @@ import '@/styles/commercial.css';
 const TITRES = {
   '/commercial/mise-en-route': 'Configuration — Mise en route',
   '/commercial/agences': 'Configuration — Agences',
+  '/commercial/unites': 'Configuration — Unités de mesure',
   '/commercial/societe': 'Configuration — Société',
   '/commercial/magasins': 'Configuration — Magasins',
   '/commercial/familles': 'Configuration — Familles d\'articles',
@@ -48,6 +49,7 @@ const I = {
   magasin: 'M3 9l1-5h16l1 5M3 9h18v11H3zM9 20v-6h6v6',
   famille: 'M3 7h7l2 2h9v10H3z',
   article: 'M21 16V8l-9-5-9 5v8l9 5 9-5zM3.3 7L12 12l8.7-5M12 22V12',
+  unite: 'M3 17l6-12 6 12M5 13h8M17 7v10M15 9l2-2 2 2M15 15l2 2 2-2',
   fournisseur: 'M1 3h15v13H1zM16 8h4l3 3v5h-7M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   client: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
   taxe: 'M19 5L5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
@@ -68,6 +70,7 @@ const RUBRIQUES = [
     { to: '/commercial/agences', libelle: 'Agences', codes: ['com.parametrage.voir'], icone: I.agence },
     { to: '/commercial/magasins', libelle: 'Magasins', codes: ['com.parametrage.voir', 'com.articles.voir'], icone: I.magasin },
     { to: '/commercial/familles', libelle: 'Familles d\'articles', codes: ['com.parametrage.voir', 'com.articles.voir'], icone: I.famille },
+    { to: '/commercial/unites', libelle: 'Unités de mesure', codes: ['com.parametrage.voir', 'com.articles.voir'], icone: I.unite },
     { to: '/commercial/articles', libelle: 'Articles', codes: ['com.articles.voir', 'com.da.creer'], icone: I.article },
     { to: '/commercial/fournisseurs', libelle: 'Fournisseurs', codes: ['com.tiers.voir'], icone: I.fournisseur },
     { to: '/commercial/clients', libelle: 'Clients', codes: ['com.tiers.voir'], icone: I.client },
