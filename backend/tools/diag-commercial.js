@@ -7,12 +7,13 @@
 //      node tools/diag-commercial.js ets-kamga       → un client (slug)
 //
 //  Lecture seule. Vérifie, dans l'ordre où l'interface les applique :
-//    0. le serveur : migrations 050 à 053 jouées, adresse de vérification ;
+//    0. le serveur : migrations 050 à 056 jouées, adresse de vérification ;
 //    1. le catalogue : module « commercial » opérationnel ;
 //    2. le client : module activé (Plateforme › client › Modules) ;
 //    3. le plafond du client : contient des permissions com.* (ou pas de plafond) ;
 //    4. chaque utilisateur : au moins une permission com.* effective
-//       (rôle, profil métier, exceptions, plafond) → le module lui apparaît.
+//       (rôle, profil métier, exceptions, plafond) → le module lui apparaît ;
+//       et ses droits com.stock.* → le menu Stock lui apparaît (lot 4).
 // ============================================================================
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { query } = require('../src/config/database');
@@ -24,9 +25,9 @@ const ok = (c, oui, non) => console.log(`   ${c ? '✅' : '❌'} ${c ? oui : non
 (async () => {
   console.log('\n── 0. Serveur ──────────────────────────────────────────');
   const { rows: mig } = await query(
-    "SELECT version FROM schema_migrations WHERE version ~ '^05[0-3]' ORDER BY version").catch(() => ({ rows: null }));
+    "SELECT version FROM schema_migrations WHERE version ~ '^05[0-6]' ORDER BY version").catch(() => ({ rows: null }));
   if (mig) {
-    for (const v of ['050', '051', '052', '053']) ok(mig.some((m) => m.version.startsWith(v)), `migration ${v} jouée`, `migration ${v} NON jouée → node db/migrate.js`);
+    for (const v of ['050', '051', '052', '053', '054', '055', '056']) ok(mig.some((m) => m.version.startsWith(v)), `migration ${v} jouée`, `migration ${v} NON jouée → node db/migrate.js`);
   } else console.log('   (table des migrations illisible : vérifiez avec « node db/migrate.js --status »)');
   const verif = process.env.VERIFICATION_URL || String(process.env.APP_URL || '').split(',')[0].trim();
   ok(Boolean(verif), `adresse de vérification des bons : ${verif}`, 'APP_URL / VERIFICATION_URL vide : les bons ne pourront pas être émis');
@@ -56,10 +57,11 @@ const ok = (c, oui, non) => console.log(`   ${c ? '✅' : '❌'} ${c ? oui : non
     for (const u of users) {
       const perms = (await getEffectivePermissions({ tenantId: t.id, userId: u.id, role: u.role })) || [];
       const com = perms.filter((p) => p.startsWith('com.')).length;
+      const stock = perms.filter((p) => p.startsWith('com.stock.') && p !== 'com.stock.initial').map((p) => p.slice(10));
       const voit = t.actif && com > 0 && u.actif;
-      console.log(`      ${voit ? '✅' : '·'} ${u.username.padEnd(22)} ${u.role.padEnd(14)} ${(u.profil || '—').padEnd(30)} ${com} droit(s) com.*${u.actif ? '' : ' (compte inactif)'}`);
+      console.log(`      ${voit ? '✅' : '·'} ${u.username.padEnd(22)} ${u.role.padEnd(14)} ${(u.profil || '—').padEnd(30)} ${String(com).padStart(2)} droit(s) com.* · stock : ${stock.length ? stock.join(', ') : 'AUCUN (pas de menu Stock)'}${u.actif ? '' : ' (compte inactif)'}`);
     }
   }
-  console.log('\n   ✅ = voit NJ COMMERCIAL sur son accueil. Après une correction, la personne se reconnecte (ou bouton Rafraîchir).\n');
+  console.log('\n   ✅ = voit NJ COMMERCIAL sur son accueil ; « stock : voir/mouvements/valider » = voit le menu Stock. Après une correction, la personne se reconnecte (ou bouton Rafraîchir).\n');
   process.exit(0);
 })().catch((e) => { console.error('❌', e.message); process.exit(1); });
