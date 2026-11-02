@@ -31,12 +31,22 @@ const TITRES = {
   '/commercial/tableau-bord': 'NJ COMMERCIAL — Tableau de bord',
   '/commercial/documents': 'Contrôles — Documents justificatifs',
   '/commercial/historique': 'Contrôles — Historique',
+  '/commercial/stock': 'Stock — État du stock',
+  '/commercial/stock/nouveau': 'Stock — Nouveau document',
+  '/commercial/stock/entrees': 'Stock — Entrées en stock',
+  '/commercial/stock/sorties': 'Stock — Sorties diverses',
+  '/commercial/stock/transferts': 'Stock — Transferts',
+  '/commercial/stock/inventaires': 'Stock — Inventaires',
+  '/commercial/stock/validation': 'Contrôles — Validation des stocks',
+  '/commercial/stock/mouvements': 'Contrôles — Mouvements de stock',
+  '/commercial/stock/valorisation': 'Contrôles — Valorisation du stock',
 };
 const titre = (chemin) => TITRES[chemin]
   || (/^\/commercial\/demandes\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier la demande'
     : /^\/commercial\/demandes\/\d+$/.test(chemin) ? 'Achats — Demande d\'achat'
       : /^\/commercial\/bons\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier le bon de commande'
-        : /^\/commercial\/bons\/\d+$/.test(chemin) ? 'Achats — Bon de commande' : 'NJ COMMERCIAL');
+        : /^\/commercial\/bons\/\d+$/.test(chemin) ? 'Achats — Bon de commande'
+        : /^\/commercial\/stock\/documents\//.test(chemin) ? 'Stock — Document de stock' : 'NJ COMMERCIAL');
 
 // Menu en quatre rubriques (lot 1) : la saisie dans « Traitements », la décision
 // et le suivi dans « Contrôles et reporting ». Une entrée n'apparaît qu'avec une
@@ -59,7 +69,16 @@ const I = {
   autorisation: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4',
   piece: 'M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48',
   historique: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
+  stock: 'M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10',
+  entree: 'M12 3v12M7 10l5 5 5-5M4 19h16',
+  sortie: 'M12 15V3M7 8l5-5 5 5M4 19h16',
+  transfert: 'M4 8h14M14 4l4 4-4 4M20 16H6M10 12l-4 4 4 4',
+  inventaire: 'M9 4h6v3H9zM6 5H4v16h16V5h-2M8 12l2 2 4-4M8 17h8',
+  valider: 'M20 6L9 17l-5-5',
+  mouvements: 'M4 6h16M4 12h16M4 18h10',
+  valeur: 'M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
 };
+const STOCK = ['com.stock.voir', 'com.stock.mouvements', 'com.stock.valider'];
 const RUBRIQUES = [
   { titre: 'Tableau de bord', groupes: [{ entrees: [
     { to: '/commercial/tableau-bord', libelle: 'Tableau de bord', codes: ['com.tableau_bord.voir'], icone: I.tableau },
@@ -80,9 +99,18 @@ const RUBRIQUES = [
   { titre: 'Traitements', groupes: [{ titre: 'Achats', entrees: [
     { to: '/commercial/demandes', libelle: 'Expressions de besoin', codes: ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'], icone: I.besoin, badge: 'a_corriger', badgeTitre: 'Vos demandes à corriger' },
     { to: '/commercial/bons', libelle: 'Bons de commande', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.bon, badge: 'a_commander', badgeTitre: 'Demandes approuvées à commander' },
+  ] }, { titre: 'Stock', entrees: [
+    { to: '/commercial/stock', end: true, libelle: 'État du stock', codes: STOCK, icone: I.stock, badge: 'sous_seuil', badgeTitre: 'Articles sous le seuil d\'alerte' },
+    { to: '/commercial/stock/entrees', libelle: 'Entrées en stock', codes: STOCK, icone: I.entree },
+    { to: '/commercial/stock/sorties', libelle: 'Sorties diverses', codes: STOCK, icone: I.sortie },
+    { to: '/commercial/stock/transferts', libelle: 'Transferts', codes: STOCK, icone: I.transfert },
+    { to: '/commercial/stock/inventaires', libelle: 'Inventaires', codes: STOCK, icone: I.inventaire },
   ] }] },
   { titre: 'Contrôles et reporting', groupes: [{ entrees: [
     { to: '/commercial/autorisations', libelle: 'Autorisations d\'achat', codes: ['com.da.approuver', 'com.da.approuver_direction'], icone: I.autorisation, badge: 'a_examiner', badgeTitre: 'Demandes qui attendent votre décision' },
+    { to: '/commercial/stock/validation', libelle: 'Validation des stocks', codes: ['com.stock.valider'], icone: I.valider, badge: 'a_valider', badgeTitre: 'Documents de stock à valider' },
+    { to: '/commercial/stock/mouvements', libelle: 'Mouvements de stock', codes: STOCK, icone: I.mouvements },
+    { to: '/commercial/stock/valorisation', libelle: 'Valorisation du stock', codes: STOCK, icone: I.valeur },
     { to: '/commercial/documents', libelle: 'Documents justificatifs', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.piece },
     { to: '/commercial/historique', libelle: 'Historique', codes: ['com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.historique },
   ] }] },
@@ -101,10 +129,10 @@ const navClass = ({ isActive }) => 'nav-item' + (isActive ? ' active' : '');
 function CommercialSidebar({ open, onClose }) {
   const { user, can, logout } = useApp();
   const location = useLocation();
-  const [badge, setBadge] = useState({ a_examiner: 0, a_corriger: 0, a_commander: 0 });
+  const [badge, setBadge] = useState({ a_examiner: 0, a_corriger: 0, a_commander: 0, a_valider: 0, sous_seuil: 0 });
   useEffect(() => {
-    if (!peutUn(can, DROITS_DEMANDES)) return;
-    api.get('/commercial/demandes/compteurs').then((r) => { if (r && !r.error) setBadge(r); });
+    if (peutUn(can, DROITS_DEMANDES)) api.get('/commercial/demandes/compteurs').then((r) => { if (r && !r.error) setBadge((b) => ({ ...b, ...r })); });
+    if (peutUn(can, STOCK)) api.get('/commercial/stock/compteurs').then((r) => { if (r && !r.error) setBadge((b) => ({ ...b, ...r })); });
   }, [can, location.pathname]);
   const navigate = useNavigate();
   const [monCompte, setMonCompte] = useState(false);

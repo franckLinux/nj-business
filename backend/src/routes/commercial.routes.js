@@ -85,6 +85,25 @@ router.post  ('/bons-commande/:id/proformas',            ...P('com.bc.preparer')
 router.post  ('/bons-commande/:id/proformas/:doc/retrait', ...P('com.bc.preparer'), c.postRetraitProforma);
 router.get   ('/bons-commande/:id/pieces/:doc',          ...BC_VUE, c.getPieceBon);
 
+// ── Lot 4 : moteur de stock (contrôles fins — auteur, périmètre — dans le service) ──
+const STOCK = [...base, requireAnyPermission('com.stock.voir', 'com.stock.mouvements', 'com.stock.valider')];
+router.get   ('/stock/etat',                             ...STOCK, c.getStockEtat);
+router.get   ('/stock/mouvements',                       ...STOCK, c.getStockMouvements);
+router.get   ('/stock/valorisation',                     ...STOCK, c.getStockValorisation);
+router.get   ('/stock/compteurs',                        ...STOCK, c.getStockCompteurs);
+router.get   ('/stock/inventaire/articles',              ...P('com.stock.mouvements'), c.getArticlesInventaire);
+router.get   ('/stock/documents',                        ...STOCK, c.getStockDocs);
+router.get   ('/stock/documents/:id',                    ...STOCK, c.getStockDoc);
+router.post  ('/stock/documents',                        ...P('com.stock.mouvements'), c.postStockDoc);
+router.put   ('/stock/documents/:id',                    ...P('com.stock.mouvements'), c.putStockDoc);
+router.delete('/stock/documents/:id',                    ...P('com.stock.mouvements'), c.deleteStockDoc);
+router.post  ('/stock/documents/:id/soumission',         ...P('com.stock.mouvements'), c.postStockSoumission);
+router.post  ('/stock/documents/:id/renvoi',             ...P('com.stock.valider'), c.postStockRenvoi);
+router.post  ('/stock/documents/:id/validation',         ...P('com.stock.valider'), c.postStockValidation);
+router.post  ('/stock/documents/:id/annulation',         ...P('com.stock.valider'), c.postStockAnnulation);
+router.post  ('/stock/documents/:id/pieces',             ...STOCK, c.postStockPiece);
+router.get   ('/stock/documents/:id/pieces/:doc',        ...STOCK, c.getStockPiece);
+
 router.get   ('/tableau-bord',                           ...P('com.tableau_bord.voir'), c.getTableau);
 router.get   ('/documents',                              ...BC_VUE, c.getDocuments);
 router.get   ('/historique',                             ...[...base, requireAnyPermission('com.da.voir_tout', 'com.tableau_bord.voir')], c.getHistorique);

@@ -101,6 +101,20 @@ export default function SocietePage() {
               </div>
             </div>
           </Section>
+          <Section titre="Règles du stock">
+            <div className="cm-grille">
+              <div className="cm-champ cm-pleine">
+                <span className="cm-etiquette">Autoriser le stock négatif</span>
+                <Bascule label="Stock négatif autorisé" valeur={f.stock_negatif_autorise} onChange={(v) => modifiable && setF((x) => ({ ...x, stock_negatif_autorise: v }))} />
+                <span className="cm-aide">Non (recommandé) : une sortie, un transfert ou une annulation qui ferait passer un stock sous zéro est refusé.</span>
+              </div>
+              <div className="cm-champ cm-pleine">
+                <span className="cm-etiquette">Permettre à l'auteur d'un document de stock de le valider lui-même</span>
+                <Bascule label="Auto-validation des stocks" valeur={f.autovalidation_stock} onChange={(v) => modifiable && setF((x) => ({ ...x, autovalidation_stock: v }))} />
+                <span className="cm-aide">Non (recommandé) : la personne qui saisit ne valide pas (séparation des tâches). Oui : à réserver aux petites structures ; chaque validation reste tracée.</span>
+              </div>
+            </div>
+          </Section>
         </div>
       </div>
     </form>

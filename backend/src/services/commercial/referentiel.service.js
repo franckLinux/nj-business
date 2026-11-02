@@ -97,6 +97,9 @@ const PARAMS = {
   proforma_obligatoire: (v) => Boolean(v),
   seuil_direction: (v) => nombre(v, 'Seuil de validation par la direction', { vide: null }),
   tolerance_ecart_pct: (v) => nombre(v, 'Tolérance d\'écart', { max: 100, vide: 10 }),
+  // Lot 4 : stock négatif refusé et validation par une autre personne, par défaut.
+  stock_negatif_autorise: (v) => Boolean(v),
+  autovalidation_stock: (v) => Boolean(v),
 };
 
 const lireSociete = async (tenantId) => {
@@ -108,7 +111,8 @@ const lireSociete = async (tenantId) => {
   if (!t) throw new ErreurCom(404, 'Client introuvable.');
   const [p] = await Q('SELECT * FROM com_parametres WHERE tenant_id = :t', { t: tenantId });
   const defaut = { nom_commercial: '', mentions_documents: '', prefixe_da: 'DA', prefixe_bc: 'BC',
-    bloquer_si_stock_suffisant: false, proforma_obligatoire: false, seuil_direction: 500000, tolerance_ecart_pct: 10 };
+    bloquer_si_stock_suffisant: false, proforma_obligatoire: false, seuil_direction: 500000, tolerance_ecart_pct: 10,
+    stock_negatif_autorise: false, autovalidation_stock: false };
   const parametres = { ...defaut, ...(p || {}) };
   for (const k of ['seuil_direction', 'tolerance_ecart_pct']) {
     parametres[k] = parametres[k] === null ? null : Number(parametres[k]);
@@ -893,8 +897,11 @@ const supprimerArticle = async ({ tenantId, userId, id }) => {
 const stockArticle = async (tenantId, articleId, magasinId = null) => {
   const rows = await Q(
     `SELECT m.id AS magasin_id, m.code, m.nom, m.actif,
-            COUNT(s.id)::int AS nb_mouvements, COALESCE(SUM(s.quantite), 0) AS quantite,
-            MAX(s.date_mouvement)::text AS dernier_mouvement
+            COUNT(s.id)::int AS nb_mouvements, COALESCE(SUM(s.sens * s.quantite) FILTER (WHERE NOT s.annule), 0) AS quantite,
+            MAX(s.date_mouvement)::text AS dernier_mouvement,
+            (SELECT json_build_object('quantite', i.quantite, 'date', i.date_mouvement::text, 'cout', i.cout_unitaire)
+               FROM com_stock_mouvements i WHERE i.article_id = :a AND i.magasin_id = m.id AND i.type = 'stock_initial' AND NOT i.annule
+              ORDER BY i.id LIMIT 1) AS initial
        FROM com_magasins m
        LEFT JOIN com_stock_mouvements s ON s.magasin_id = m.id AND s.article_id = :a
       WHERE m.tenant_id = :t AND (CAST(:m AS BIGINT) IS NULL OR m.id = CAST(:m AS BIGINT))
@@ -904,6 +911,7 @@ const stockArticle = async (tenantId, articleId, magasinId = null) => {
   return rows.map((r) => ({
     magasin_id: Number(r.magasin_id), code: r.code, nom: r.nom, actif: r.actif,
     suivi: r.nb_mouvements > 0, quantite: r.nb_mouvements > 0 ? Number(r.quantite) : null, dernier_mouvement: r.dernier_mouvement,
+    initial: r.initial ? { quantite: Number(r.initial.quantite), date: r.initial.date, cout: r.initial.cout === null ? null : Number(r.initial.cout) } : null,
   }));
 };
 
@@ -935,20 +943,31 @@ const enregistrerStockInitial = async ({ tenantId, userId, body }) => {
     const [m] = await Q('SELECT id, code, actif FROM com_magasins WHERE id = :m AND tenant_id = :t', { m: mid, t: tenantId }, tr);
     if (!m) throw new ErreurCom(404, 'Magasin introuvable.');
     if (!m.actif) throw new ErreurCom(400, 'Ce magasin est désactivé.');
+    const moteur = require('./stock.service');
+    await moteur.verrouiller(tr, aid);
+    // Coût par unité de stock (056) : facultatif ; sans coût, le stock est « à valoriser ».
+    const cout = nombre(body.cout_unitaire, 'Coût unitaire', { vide: null });
     const [autre] = await Q(`SELECT 1 FROM com_stock_mouvements WHERE article_id = :a AND magasin_id = :m AND type <> 'stock_initial' LIMIT 1`, { a: aid, m: mid }, tr);
-    if (autre) throw new ErreurCom(409, 'Des mouvements existent déjà pour cet article dans ce magasin : le stock initial n\'est plus modifiable.');
     const [avant] = await Q(`SELECT * FROM com_stock_mouvements WHERE article_id = :a AND magasin_id = :m AND type = 'stock_initial' FOR UPDATE`, { a: aid, m: mid }, tr);
-    const v = { quantite, date_mouvement: date, piece: longueur(body.piece, 60, 'Pièce'), observation: longueur(body.observation, 500, 'Observation') };
+    const v = { quantite, date_mouvement: date, piece: longueur(body.piece, 60, 'Pièce'), observation: longueur(body.observation, 500, 'Observation'), cout };
+    if (autre) {
+      // D'autres mouvements existent : seule la valorisation d'un stock d'ouverture sans coût est encore possible.
+      const memes = avant && Number(avant.quantite) === quantite && String(avant.date_mouvement).slice(0, 10) === date;
+      if (!memes || avant.cout_unitaire !== null || cout === null) {
+        throw new ErreurCom(409, 'Des mouvements existent déjà pour cet article dans ce magasin : le stock d\'ouverture n\'est plus modifiable (seul son coût, s\'il manque, peut être complété).');
+      }
+    }
     if (avant) {
       await X(`UPDATE com_stock_mouvements SET quantite = :quantite, date_mouvement = :date_mouvement, piece = :piece, observation = :observation,
-                 modifie_par = :u, modifie_le = NOW() WHERE id = :id`, { ...v, u: userId, id: avant.id }, tr);
+                 cout_unitaire = :cout, modifie_par = :u, modifie_le = NOW() WHERE id = :id`, { ...v, u: userId, id: avant.id }, tr);
     } else {
-      await X(`INSERT INTO com_stock_mouvements (tenant_id, article_id, magasin_id, type, quantite, date_mouvement, piece, observation, cree_par, modifie_par)
-               VALUES (:t, :a, :m, 'stock_initial', :quantite, :date_mouvement, :piece, :observation, :u, :u)`, { ...v, t: tenantId, a: aid, m: mid, u: userId }, tr);
+      await moteur.ecrire(tr, { tenantId, articleId: aid, magasinId: mid, type: 'stock_initial', quantite, date, piece: v.piece, observation: v.observation,
+        cout, documentType: 'stock_initial', userId });
     }
-    await auditer(tr, { tenantId, userId, action: avant ? 'COM_STOCK_INITIAL_CORRECTION' : 'COM_STOCK_INITIAL', id: `${aid}/${mid}`,
-      avant: avant ? { quantite: Number(avant.quantite), date: String(avant.date_mouvement).slice(0, 10) } : null,
-      apres: { article: a.reference, magasin: m.code, quantite, date } });
+    await moteur.rejouer(tr, tenantId, aid);
+    await auditer(tr, { tenantId, userId, action: avant ? (autre ? 'COM_STOCK_INITIAL_VALORISATION' : 'COM_STOCK_INITIAL_CORRECTION') : 'COM_STOCK_INITIAL', id: `${aid}/${mid}`,
+      avant: avant ? { quantite: Number(avant.quantite), date: String(avant.date_mouvement).slice(0, 10), cout: avant.cout_unitaire === null ? null : Number(avant.cout_unitaire) } : null,
+      apres: { article: a.reference, magasin: m.code, quantite, date, cout } });
   });
   return { ok: true, stock: (await stockArticle(tenantId, aid, mid))[0] };
 };

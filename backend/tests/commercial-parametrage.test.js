@@ -102,7 +102,8 @@ test('Module inactif : 403 MODULE_INACTIF ; activation : profils achats créés,
   const profils = await sql("SELECT code FROM roles WHERE tenant_id = $1 AND code LIKE 'achats_%' ORDER BY code", [A]);
   assert.deepEqual(profils.map((p) => p.code), ['achats_demandeur', 'achats_gestionnaire', 'achats_responsable']);
   const [{ n }] = await sql("SELECT COUNT(*)::int AS n FROM tenant_permissions WHERE tenant_id = $1 AND permission_code LIKE 'com.%'", [B]);
-  assert.equal(n, 17, 'plafond de B complété');
+  const [{ total }] = await sql("SELECT COUNT(*)::int AS total FROM permissions WHERE module = 'commercial'");
+  assert.equal(n, total, 'plafond de B complété');
   // Réactivation sans effet de bord : pas de doublon de profils.
   await appel('PUT', `/plateforme/clients/${A}/modules/commercial`, 'adm', { actif: false, motif: 'Test désactivation' });
   await appel('PUT', `/plateforme/clients/${A}/modules/commercial`, 'adm', { actif: true, motif: 'Test réactivation' });

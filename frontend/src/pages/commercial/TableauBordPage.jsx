@@ -24,6 +24,32 @@ function Tuile({ libelle, valeur, detail, lien, alerte }) {
     : <div className={'cm-tuile' + (alerte ? ' cm-tuile-alerte' : '')}>{contenu}</div>;
 }
 
+// Stock (lot 4) : valeur et alertes du périmètre filtré, lues dans les soldes calculés.
+function BlocStock({ agence, magasin, devise }) {
+  const { can } = useApp();
+  const [v, setV] = useState(null);
+  const [c, setC] = useState(null);
+  const voit = ['com.stock.voir', 'com.stock.mouvements', 'com.stock.valider'].some((x) => can(x));
+  useEffect(() => {
+    if (!voit) return;
+    api.get(`/commercial/stock/valorisation?agence_id=${agence}&magasin_id=${magasin}`).then((r) => { if (!r?.error) setV(r); });
+    api.get('/commercial/stock/compteurs').then((r) => { if (!r?.error) setC(r); });
+  }, [voit, agence, magasin]);
+  if (!voit || !v || !c) return null;
+  return (
+    <>
+      <h2 className="cm-titre-domaine">Stock</h2>
+      <div className="cm-tuiles">
+        <Tuile libelle="Valeur du stock" valeur={fmtMontant(v.total, devise)} detail={`${v.magasins.length} magasin(s), aujourd'hui`} lien="/commercial/stock/valorisation" />
+        <Tuile libelle="Sous le seuil d'alerte" valeur={c.sous_seuil} alerte={c.sous_seuil > 0} lien="/commercial/stock" detail="tous vos magasins" />
+        <Tuile libelle="Documents à valider" valeur={c.a_valider} alerte={c.a_valider > 0} lien={can('com.stock.valider') ? '/commercial/stock/validation' : null}
+          detail="saisis par d'autres personnes" />
+        <Tuile libelle="Lignes sans coût" valeur={v.a_valoriser} alerte={v.a_valoriser > 0} detail="stock d'ouverture à valoriser" />
+      </div>
+    </>
+  );
+}
+
 // Barres verticales d'une seule série (montant émis par mois) ; info-bulle au survol.
 function BarresMois({ donnees, devise }) {
   const max = Math.max(...donnees.map((m) => m.ttc), 0);
@@ -90,7 +116,7 @@ export default function TableauBordPage() {
 
   return (
     <div className="cm-page">
-      <Entete titre="Tableau de bord commercial" description="Chiffres lus en temps réel dans les documents enregistrés. « À traiter » porte sur aujourd'hui, le reste sur la période. Les ventes et le stock s'ajouteront ici quand leurs lots seront livrés." />
+      <Entete titre="Tableau de bord commercial" description="Chiffres lus en temps réel dans les documents enregistrés. « À traiter » porte sur aujourd'hui, le reste sur la période. Les ventes s'ajouteront ici quand leur lot sera livré." />
       <div className="cm-outils">
         <input className="cm-select" type="date" value={du} max={au || undefined} onChange={(e) => setDu(e.target.value)} aria-label="Du" title="Du" />
         <input className="cm-select" type="date" value={au} min={du || undefined} onChange={(e) => setAu(e.target.value)} aria-label="Au" title="Au" />
@@ -173,8 +199,9 @@ export default function TableauBordPage() {
           )}
         </Section>
       </div>
+      <BlocStock agence={agence} magasin={magasin} devise={devise} />
       <p className="cm-aide">Pièces sur la période : {t.pieces.bons_avec_proforma} bon(s) avec proforma, {t.pieces.demandes_avec_pieces} demande(s) avec justificatifs.
-        Les réceptions, factures et règlements ne sont pas encore gérés : ils n'apparaissent donc pas ici.</p>
+        Les réceptions fournisseurs, factures et règlements ne sont pas encore gérés : ils n'apparaissent donc pas ici.</p>
     </div>
   );
 }

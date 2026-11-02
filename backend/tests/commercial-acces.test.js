@@ -107,7 +107,8 @@ test('caissier doté d\'un profil achats : garde sa caisse et reçoit les droits
 
 test('directeur sans profil : toutes les permissions com.*', async () => {
   const p = perms(await moi('dirSans'));
-  assert.equal(p.filter((x) => x.startsWith('com.')).length, 17);
+  const [{ n }] = await sql("SELECT COUNT(*)::int AS n FROM permissions WHERE module = 'commercial'");
+  assert.equal(p.filter((x) => x.startsWith('com.')).length, n);
 });
 
 test('migration 053 : complète un plafond sans com.* seulement si le module est activé', async () => {
@@ -122,13 +123,14 @@ test('migration 053 : complète un plafond sans com.* seulement si le module est
   await pool.query(migration); // rejouable
   const com = async (t) => (await sql(`SELECT COUNT(*)::int AS n FROM tenant_permissions tp JOIN permissions p ON p.code = tp.permission_code
                                        WHERE tp.tenant_id = $1 AND p.module = 'commercial'`, [t]))[0].n;
-  assert.equal(await com(T.P1), 17);
+  const [{ total }] = await sql("SELECT COUNT(*)::int AS total FROM permissions WHERE module = 'commercial'");
+  assert.equal(await com(T.P1), total);
   assert.equal(await com(T.P2), 1);
   assert.equal(await com(T.P3), 0);
   // Retour arrière : retire exactement ce que la 053 a ajouté.
   const retour = fs.readFileSync(path.join(__dirname, '..', 'db', 'migrations-retour-arriere', '053_retour_arriere.sql'), 'utf8');
   const avant = (await sql('SELECT tenant_id, permission_code FROM com_acces_053')).length;
-  assert.ok(avant >= 17);
+  assert.ok(avant >= total);
   await pool.query(retour);
   assert.equal(await com(T.P1), 0);
   assert.equal(await com(T.P2), 1);

@@ -9,26 +9,29 @@ import { Entete, Statut, Tiroir, Section, Champ, Bascule, Cases, ChampUnite, use
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
 function StockInitial({ article, magasins, onEnregistre }) {
-  const [f, setF] = useState({ magasin_id: '', quantite: '', date_mouvement: aujourdhui(), piece: '' });
+  const [f, setF] = useState({ magasin_id: '', quantite: '', cout_unitaire: '', date_mouvement: aujourdhui(), piece: '' });
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   const actifs = magasins.filter((m) => m.actif);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const choisir = (e) => {
     const m = article.stock.find((s) => String(s.magasin_id) === e.target.value);
-    setF((x) => ({ ...x, magasin_id: e.target.value, quantite: m?.suivi ? String(m.quantite).replace('.', ',') : '' }));
+    const i = m?.initial;   // stock d'ouverture existant : repris tel quel (pour compléter son coût)
+    setF((x) => ({ ...x, magasin_id: e.target.value, quantite: i ? String(i.quantite).replace('.', ',') : '',
+      cout_unitaire: i?.cout !== null && i?.cout !== undefined ? String(i.cout).replace('.', ',') : '', date_mouvement: i?.date || aujourdhui() }));
   };
   const valider = async () => {
     setEnCours(true);
     const r = await api.put('/commercial/stock/initial', { article_id: article.id, ...f });
     setEnCours(false);
     if (r?.error) { setErreur(r.error); return; }
-    setErreur(''); setF((x) => ({ ...x, magasin_id: '', quantite: '', piece: '' }));
+    setErreur(''); setF((x) => ({ ...x, magasin_id: '', quantite: '', cout_unitaire: '', piece: '' }));
     onEnregistre();
   };
   return (
     <div style={{ marginTop: 12, borderTop: '1px dashed var(--border)', paddingTop: 12 }}>
       <span className="cm-etiquette" style={{ fontSize: 12.5, fontWeight: 700 }}>Saisir ou corriger le stock d'ouverture</span>
+      <span className="cm-aide" style={{ display: 'block' }}>Tant qu'aucun autre mouvement n'existe, il se corrige ; ensuite, seul son coût peut être complété (les autres corrections passent par un inventaire).</span>
       {erreur && <div className="cm-erreur" role="alert" style={{ marginTop: 8 }}>{erreur}</div>}
       <div className="cm-grille" style={{ marginTop: 8 }}>
         <Champ label="Magasin" id="si-m">
@@ -38,6 +41,9 @@ function StockInitial({ article, magasins, onEnregistre }) {
           </select>
         </Champ>
         <Champ label={`Quantité (${article.unite})`} id="si-q"><input id="si-q" inputMode="decimal" value={f.quantite} onChange={set('quantite')} /></Champ>
+        <Champ label={`Coût unitaire (FCFA / ${article.unite})`} id="si-c" aide="Facultatif : sans coût, ce stock est « à valoriser ». Le coût peut être complété plus tard.">
+          <input id="si-c" inputMode="decimal" value={f.cout_unitaire} onChange={set('cout_unitaire')} />
+        </Champ>
         <Champ label="Date de l'inventaire" id="si-d"><input id="si-d" type="date" max={aujourdhui()} value={f.date_mouvement} onChange={set('date_mouvement')} /></Champ>
         <Champ label="Pièce (PV, référence)" id="si-p"><input id="si-p" value={f.piece} onChange={set('piece')} maxLength={60} /></Champ>
       </div>

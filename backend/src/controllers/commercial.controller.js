@@ -184,3 +184,47 @@ Object.assign(module.exports, {
     }
   },
 });
+
+// ── Lot 4 : moteur de stock (services/commercial/stock.service.js, stock_docs.service.js) ──
+const moteurStock = require('../services/commercial/stock.service');
+const sd = require('../services/commercial/stock_docs.service');
+const repondreSt = (quoi, fn, statut = 200) => async (req, res) => {
+  try {
+    const ctx = await da.contexte(req);
+    res.status(statut).json(await fn(ctx, req));
+  } catch (err) {
+    if (err instanceof sd.ErreurStock || err instanceof ErreurDocument || err instanceof da.ErreurDemande) return res.status(err.status).json({ error: err.message });
+    if (err.status === 503) return res.status(503).json({ error: err.message });
+    if (/INTANGIBLE/.test(err.message || '')) return res.status(409).json({ error: err.message.replace(/^.*?: /, '') });
+    if (err?.original?.code === '23514' || err?.parent?.code === '23514') return res.status(400).json({ error: 'Donnée refusée par les règles de la base.' });
+    console.error(`[Commercial] ${quoi} :`, err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+Object.assign(module.exports, {
+  getStockEtat:         repondreSt('stock.état', (ctx, req) => moteurStock.etat(ctx, req.query)),
+  getStockMouvements:   repondreSt('stock.mouvements', (ctx, req) => moteurStock.mouvements(ctx, req.query)),
+  getStockValorisation: repondreSt('stock.valorisation', (ctx, req) => moteurStock.valorisation(ctx, req.query)),
+  getStockCompteurs:    repondreSt('stock.compteurs', (ctx) => sd.compteurs(ctx)),
+  getArticlesInventaire: repondreSt('stock.inventaire', (ctx, req) => sd.articlesInventaire(ctx, req.query.magasin_id, req.query)),
+  getStockDocs:         repondreSt('stock.documents', (ctx, req) => sd.lister(ctx, req.query)),
+  getStockDoc:          repondreSt('stock.document', (ctx, req) => sd.lire(ctx, req.params.id)),
+  postStockDoc:         repondreSt('stock.création', (ctx, req) => sd.creer(ctx, req.body || {}), 201),
+  putStockDoc:          repondreSt('stock.modif', (ctx, req) => sd.modifier(ctx, req.params.id, req.body || {})),
+  deleteStockDoc:       repondreSt('stock.suppression', (ctx, req) => sd.supprimer(ctx, req.params.id)),
+  postStockSoumission:  repondreSt('stock.soumission', (ctx, req) => sd.soumettre(ctx, req.params.id)),
+  postStockRenvoi:      repondreSt('stock.renvoi', (ctx, req) => sd.renvoyer(ctx, req.params.id, req.body || {})),
+  postStockValidation:  repondreSt('stock.validation', (ctx, req) => sd.valider(ctx, req.params.id)),
+  postStockAnnulation:  repondreSt('stock.annulation', (ctx, req) => sd.annuler(ctx, req.params.id, req.body || {})),
+  postStockPiece:       repondreSt('stock.pièce', (ctx, req) => sd.joindre(ctx, req.params.id, req.body || {}), 201),
+  getStockPiece: async (req, res) => {
+    try {
+      const ctx = await da.contexte(req);
+      await envoyerFichier(res, await sd.lirePiece(ctx, req.params.id, req.params.doc));
+    } catch (err) {
+      if (err instanceof sd.ErreurStock || err instanceof bc.ErreurBon) return res.status(err.status).json({ error: err.message });
+      console.error('[Commercial] pièce stock :', err.message);
+      return res.status(500).json({ error: 'Erreur serveur.' });
+    }
+  },
+});
