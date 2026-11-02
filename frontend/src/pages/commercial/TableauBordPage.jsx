@@ -62,15 +62,26 @@ export default function TableauBordPage() {
   const { can } = useApp();
   const [du, setDu] = useState('');
   const [au, setAu] = useState('');
+  const [agence, setAgence] = useState('');
+  const [magasin, setMagasin] = useState('');
+  const [refs, setRefs] = useState({ agences: [], magasins: [] });
   const [t, setT] = useState(null);
   const [erreur, setErreur] = useState('');
   useEffect(() => {
-    api.get(`/commercial/tableau-bord?du=${du}&au=${au}`).then((r) => {
+    Promise.all([api.get('/commercial/agences'), api.get('/commercial/magasins?perimetre=1')]).then(([a, m]) => {
+      const magasins = Array.isArray(m) ? m : [];
+      const ids = new Set(magasins.map((x) => x.agence_id));
+      setRefs({ agences: Array.isArray(a) ? a.filter((x) => ids.has(x.id)) : [], magasins });
+    });
+  }, []);
+  useEffect(() => {
+    api.get(`/commercial/tableau-bord?du=${du}&au=${au}&agence_id=${agence}&magasin_id=${magasin}`).then((r) => {
       if (r?.error) { setErreur(r.error); return; }
       setErreur(''); setT(r);
       if (!du && !au) { setDu(r.periode.du); setAu(r.periode.au); }
     });
-  }, [du, au]);
+  }, [du, au, agence, magasin]);
+  const magasinsVisibles = refs.magasins.filter((m) => !agence || String(m.agence_id) === agence);
 
   if (!t) return <div className="cm-page">{erreur ? <div className="cm-erreur">{erreur}</div> : <div className="loading-msg">Chargement…</div>}</div>;
   const at = t.a_traiter;
@@ -79,10 +90,24 @@ export default function TableauBordPage() {
 
   return (
     <div className="cm-page">
-      <Entete titre="Tableau de bord des achats" description="Chiffres lus en temps réel dans les demandes et les bons de commande. « À traiter » porte sur aujourd'hui ; le reste sur la période choisie.">
+      <Entete titre="Tableau de bord commercial" description="Chiffres lus en temps réel dans les documents enregistrés. « À traiter » porte sur aujourd'hui, le reste sur la période. Les ventes et le stock s'ajouteront ici quand leurs lots seront livrés." />
+      <div className="cm-outils">
         <input className="cm-select" type="date" value={du} max={au || undefined} onChange={(e) => setDu(e.target.value)} aria-label="Du" title="Du" />
         <input className="cm-select" type="date" value={au} min={du || undefined} onChange={(e) => setAu(e.target.value)} aria-label="Au" title="Au" />
-      </Entete>
+        {refs.agences.length > 1 && (
+          <select className="cm-select" value={agence} onChange={(e) => { setAgence(e.target.value); setMagasin(''); }} aria-label="Agence">
+            <option value="">Toutes les agences</option>
+            {refs.agences.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.nom}</option>)}
+          </select>
+        )}
+        {magasinsVisibles.length > 1 && (
+          <select className="cm-select" value={magasin} onChange={(e) => setMagasin(e.target.value)} aria-label="Magasin">
+            <option value="">Tous les magasins</option>
+            {magasinsVisibles.map((m) => <option key={m.id} value={m.id}>{m.code} — {m.nom}</option>)}
+          </select>
+        )}
+      </div>
+      <h2 className="cm-titre-domaine">Achats</h2>
       {erreur && <div className="cm-erreur">{erreur}</div>}
 
       <h3 className="cm-titre-bloc">À traiter aujourd'hui</h3>

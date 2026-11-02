@@ -76,10 +76,15 @@ after(async () => {
   serveur?.kill();
   await sql('DELETE FROM users WHERE username LIKE $1', [`%-${sfx}`]).catch(() => {});
   for (const t of Object.values(T)) {
-    for (const q of ['DELETE FROM com_acces_053 WHERE tenant_id = $1', 'DELETE FROM tenant_permissions WHERE tenant_id = $1', 'DELETE FROM tenant_modules WHERE tenant_id = $1',
-      'DELETE FROM role_permissions WHERE role_id IN (SELECT id FROM roles WHERE tenant_id = $1)', 'DELETE FROM roles WHERE tenant_id = $1', 'DELETE FROM tenants WHERE id = $1']) {
-      await sql(q, [t]).catch(() => {});
-    }
+    const c = await pool.connect();   // tout ou rien : un client non supprimé garde ses modules
+    try {
+      await c.query('BEGIN');
+      for (const q of ['DELETE FROM com_acces_053 WHERE tenant_id = $1', 'DELETE FROM tenant_permissions WHERE tenant_id = $1', 'DELETE FROM tenant_modules WHERE tenant_id = $1',
+        'DELETE FROM role_permissions WHERE role_id IN (SELECT id FROM roles WHERE tenant_id = $1)', 'DELETE FROM roles WHERE tenant_id = $1', 'DELETE FROM tenants WHERE id = $1']) {
+        await c.query(q, [t]);
+      }
+      await c.query('COMMIT');
+    } catch { await c.query('ROLLBACK').catch(() => {}); } finally { c.release(); }
   }
   await pool.end();
 });

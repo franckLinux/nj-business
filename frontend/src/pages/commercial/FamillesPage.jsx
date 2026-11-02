@@ -9,17 +9,21 @@ function FicheFamille({ famille, onFermer, onEnregistre, modifiable }) {
   const [f, setF] = useState({
     code: famille?.code || '', nom: famille?.nom || '', description: famille?.description || '', actif: famille ? famille.actif : true,
     fournisseur_ids: (famille?.fournisseurs || []).map((x) => x.id),
+    taxe_achat_id: famille?.taxe_achat_id ? String(famille.taxe_achat_id) : '', taxe_vente_id: famille?.taxe_vente_id ? String(famille.taxe_vente_id) : '',
+    suivi_stock: famille ? famille.suivi_stock : true, methode_valorisation: famille?.methode_valorisation || 'cmup',
   });
   const [fournisseurs, setFournisseurs] = useState(null);
+  const [taxes, setTaxes] = useState([]);
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   useEffect(() => {
     api.get('/commercial/tiers?type=fournisseur').then((r) => setFournisseurs(r?.error ? [] : r));
+    api.get('/commercial/taxes').then((r) => setTaxes(r?.error ? [] : r));
   }, []);
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const valider = async () => {
     setEnCours(true);
-    const r = await enregistrer('/commercial/familles', famille?.id, f);
+    const r = await enregistrer('/commercial/familles', famille?.id, { ...f, taxe_achat_id: f.taxe_achat_id || null, taxe_vente_id: f.taxe_vente_id || null });
     setEnCours(false);
     if (!r.ok) { setErreur(r.error); return; }
     onEnregistre(famille ? 'Famille modifiée.' : 'Famille créée.');
@@ -45,12 +49,43 @@ function FicheFamille({ famille, onFermer, onEnregistre, modifiable }) {
           </div>
         </div>
       </Section>
+      <Section titre="Paramètres proposés aux articles">
+        <p className="cm-aide" style={{ marginBottom: 10 }}>Repris à la création de chaque article de la famille, puis modifiables article par article. Modifier la famille ne change pas les articles déjà créés.</p>
+        <div className="cm-grille">
+          <Champ label="Taxe à l'achat" id="fta">
+            <select id="fta" value={f.taxe_achat_id} onChange={set('taxe_achat_id')} disabled={!modifiable}>
+              <option value="">Aucune</option>
+              {taxes.filter((t) => t.usage !== 'vente' && (t.actif || String(t.id) === f.taxe_achat_id)).map((t) => <option key={t.id} value={t.id}>{t.code} — {String(t.taux).replace('.', ',')} %</option>)}
+            </select>
+          </Champ>
+          <Champ label="Taxe à la vente" id="ftv" aide="Jamais reprise automatiquement de la taxe d'achat.">
+            <select id="ftv" value={f.taxe_vente_id} onChange={set('taxe_vente_id')} disabled={!modifiable}>
+              <option value="">Aucune</option>
+              {taxes.filter((t) => t.usage !== 'achat' && (t.actif || String(t.id) === f.taxe_vente_id)).map((t) => <option key={t.id} value={t.id}>{t.code} — {String(t.taux).replace('.', ',')} %</option>)}
+            </select>
+          </Champ>
+          <div className="cm-champ">
+            <span className="cm-etiquette">Suivi en stock</span>
+            <Bascule label="Suivi en stock" valeur={f.suivi_stock} onChange={(v) => modifiable && setF((x) => ({ ...x, suivi_stock: v }))} />
+            {!f.suivi_stock && <span className="cm-aide">Services, frais… : aucun mouvement ni contrôle de quantité.</span>}
+          </div>
+          {f.suivi_stock && (
+            <Champ label="Méthode de valorisation" requis id="fmv" aide="Appliquée par article et par magasin ; jamais mélangée sur un même article.">
+              <select id="fmv" value={f.methode_valorisation} onChange={set('methode_valorisation')} disabled={!modifiable}>
+                <option value="cmup">CMUP — coût moyen unitaire pondéré</option>
+                <option value="fifo">FIFO — premier entré, premier sorti</option>
+              </select>
+            </Champ>
+          )}
+        </div>
+        <p className="cm-aide" style={{ marginTop: 8 }}>Les unités d'achat, de vente et de stock arrivent avec le lot 3 (unités et conversions).</p>
+      </Section>
       <Section titre={`Fournisseurs associés (${f.fournisseur_ids.length})`}>
         <p className="cm-aide" style={{ marginBottom: 8 }}>Ils seront proposés pour chaque article de la famille. Le demandeur pourra toujours choisir un autre fournisseur actif.</p>
         {fournisseurs === null ? <div className="loading-msg">Chargement…</div> : (
           <Cases label="Fournisseurs associés" options={options} valeurs={f.fournisseur_ids}
             onChange={(v) => modifiable && setF((x) => ({ ...x, fournisseur_ids: v }))}
-            vide="Aucun fournisseur : créez-les d'abord dans Paramétrage → Fournisseurs." />
+            vide="Aucun fournisseur : créez-les d'abord dans Configuration → Fournisseurs." />
         )}
       </Section>
     </Tiroir>
@@ -78,14 +113,16 @@ export default function FamillesPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table">
-          <thead><tr><th>Code</th><th>Nom</th><th>Fournisseurs associés</th><th className="cm-num">Articles</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Code</th><th>Nom</th><th>Taxes achat · vente</th><th>Stock</th><th>Fournisseurs associés</th><th className="cm-num">Articles</th><th>Statut</th></tr></thead>
           <tbody>
-            {!donnees ? <tr><td colSpan={5} className="cm-vide">Chargement…</td></tr>
-              : liste.length === 0 ? <tr><td colSpan={5} className="cm-vide"><strong>Aucune famille</strong>Exemples : fournitures de bureau, matériel informatique, consommables.</td></tr>
+            {!donnees ? <tr><td colSpan={7} className="cm-vide">Chargement…</td></tr>
+              : liste.length === 0 ? <tr><td colSpan={7} className="cm-vide"><strong>Aucune famille</strong>Exemples : fournitures de bureau, matériel informatique, consommables.</td></tr>
                 : liste.map((x) => (
                   <tr key={x.id} className={'cm-cliquable' + (x.actif ? '' : ' cm-inactif')} onClick={() => setFiche(x)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') setFiche(x); }}>
                     <td><span className="cm-code">{x.code}</span></td>
                     <td><strong>{x.nom}</strong>{x.description && <span className="cm-sous">{x.description.slice(0, 80)}</span>}</td>
+                    <td>{x.taxe_achat_code || '—'} · {x.taxe_vente_code || '—'}</td>
+                    <td>{x.suivi_stock ? <span className="cm-puce">{x.methode_valorisation === 'fifo' ? 'FIFO' : 'CMUP'}</span> : <span className="cm-sous" style={{ marginTop: 0 }}>Non suivi</span>}</td>
                     <td>{x.fournisseurs.length ? <div className="cm-puces">{x.fournisseurs.slice(0, 4).map((t) => <span key={t.id} className="cm-puce">{t.nom}</span>)}{x.fournisseurs.length > 4 && <span className="cm-puce">+{x.fournisseurs.length - 4}</span>}</div> : <span className="cm-pastille cm-alerte">Aucun</span>}</td>
                     <td className="cm-num">{x.nb_articles}</td>
                     <td><Statut actif={x.actif} oui="Active" non="Inactive" /></td>

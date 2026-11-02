@@ -56,8 +56,8 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
   const { familles, taxes, magasins, fournisseurs } = references;
   const [article, setArticle] = useState(null);
   const [f, setF] = useState(id ? null : {
-    reference: '', designation: '', description: '', famille_id: '', unite: 'unité', prix_achat_indicatif: '', taxe_id: '',
-    seuil_alerte: '', suivi_comptable: null, actif: true, fournisseur_ids: [], magasin_ids: [],
+    reference: '', designation: '', description: '', famille_id: '', unite: 'unité', prix_achat_indicatif: '', taxe_id: '', taxe_vente_id: '',
+    suivi_stock: true, methode_valorisation: 'cmup', seuil_alerte: '', suivi_comptable: null, actif: true, fournisseur_ids: [], magasin_ids: [],
   });
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
@@ -69,6 +69,7 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
     setF({
       reference: r.reference, designation: r.designation, description: r.description, famille_id: String(r.famille_id), unite: r.unite,
       prix_achat_indicatif: r.prix_achat_indicatif === null ? '' : String(r.prix_achat_indicatif), taxe_id: r.taxe_id ? String(r.taxe_id) : '',
+      taxe_vente_id: r.taxe_vente_id ? String(r.taxe_vente_id) : '', suivi_stock: r.suivi_stock, methode_valorisation: r.methode_valorisation,
       seuil_alerte: r.seuil_alerte === null ? '' : String(r.seuil_alerte), suivi_comptable: r.suivi_comptable, actif: r.actif,
       fournisseur_ids: r.fournisseurs_directs.map((x) => x.id), magasin_ids: r.magasins.map((x) => x.id),
     });
@@ -76,10 +77,19 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
   useEffect(() => { if (id) charger(id); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  // Nouvel article : le choix de la famille reprend ses paramètres (taxes, stock, méthode), modifiables ensuite.
+  const choisirFamille = (e) => {
+    const v = e.target.value;
+    const fam = familles.find((x) => String(x.id) === v);
+    setF((x) => (article || !fam ? { ...x, famille_id: v } : {
+      ...x, famille_id: v, taxe_id: fam.taxe_achat_id ? String(fam.taxe_achat_id) : '', taxe_vente_id: fam.taxe_vente_id ? String(fam.taxe_vente_id) : '',
+      suivi_stock: fam.suivi_stock, methode_valorisation: fam.methode_valorisation,
+    }));
+  };
   const valider = async () => {
     if (f.suivi_comptable === null) { setErreur('Indiquez si l\'article est suivi en comptabilité (oui / non).'); return; }
     setEnCours(true);
-    const r = await enregistrer('/commercial/articles', article?.id, f);
+    const r = await enregistrer('/commercial/articles', article?.id, { ...f, taxe_id: f.taxe_id || null, taxe_vente_id: f.taxe_vente_id || null });
     setEnCours(false);
     if (!r.ok) { setErreur(r.error); return; }
     setErreur('');
@@ -119,7 +129,7 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
               <input id="ar" value={f.reference} onChange={set('reference')} maxLength={30} disabled={!modifiable} style={{ textTransform: 'uppercase' }} />
             </Champ>
             <Champ label="Famille" requis id="af">
-              <select id="af" value={f.famille_id} onChange={set('famille_id')} disabled={!modifiable}>
+              <select id="af" value={f.famille_id} onChange={choisirFamille} disabled={!modifiable}>
                 <option value="">— Choisir —</option>
                 {familles.filter((x) => x.actif || String(x.id) === String(f.famille_id)).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.nom}</option>)}
               </select>
@@ -136,10 +146,10 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
         <Section titre="Achat">
           <div className="cm-grille">
             <Champ label="Prix d'achat indicatif" id="ap" aide="Sert à estimer le montant des demandes."><input id="ap" inputMode="decimal" value={f.prix_achat_indicatif} onChange={set('prix_achat_indicatif')} disabled={!modifiable} /></Champ>
-            <Champ label="Taxe par défaut" id="at">
+            <Champ label="Taxe à l'achat" id="at" aide={!article && famille ? 'Reprise de la famille ; modifiable.' : undefined}>
               <select id="at" value={f.taxe_id} onChange={set('taxe_id')} disabled={!modifiable}>
                 <option value="">Aucune taxe</option>
-                {taxes.filter((x) => x.actif || String(x.id) === String(f.taxe_id)).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.intitule} ({x.taux.toLocaleString('fr-FR')} %)</option>)}
+                {taxes.filter((x) => x.usage !== 'vente' && (x.actif || String(x.id) === String(f.taxe_id))).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.intitule} ({x.taux.toLocaleString('fr-FR')} %)</option>)}
               </select>
             </Champ>
             <div className="cm-champ cm-pleine">
@@ -155,13 +165,38 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
             </div>
           </div>
         </Section>
+        <Section titre="Vente">
+          <div className="cm-grille">
+            <Champ label="Taxe à la vente" id="atv" aide="Distincte de la taxe d'achat ; jamais copiée d'office.">
+              <select id="atv" value={f.taxe_vente_id} onChange={set('taxe_vente_id')} disabled={!modifiable}>
+                <option value="">Aucune taxe</option>
+                {taxes.filter((x) => x.usage !== 'achat' && (x.actif || String(x.id) === String(f.taxe_vente_id))).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.intitule} ({x.taux.toLocaleString('fr-FR')} %)</option>)}
+              </select>
+            </Champ>
+          </div>
+        </Section>
         <Section titre="Stock">
+          <div className="cm-grille" style={{ marginBottom: 12 }}>
+            <div className="cm-champ">
+              <span className="cm-etiquette">Suivi en stock</span>
+              <Bascule label="Suivi en stock" valeur={f.suivi_stock} onChange={(v) => modifiable && setF((x) => ({ ...x, suivi_stock: v }))} />
+              {!f.suivi_stock && <span className="cm-aide">Aucun mouvement ni contrôle de quantité pour cet article.</span>}
+            </div>
+            {f.suivi_stock && (
+              <Champ label="Méthode de valorisation" requis id="amv" aide="La valorisation des mouvements arrive avec le moteur de stock (lot 4).">
+                <select id="amv" value={f.methode_valorisation} onChange={set('methode_valorisation')} disabled={!modifiable}>
+                  <option value="cmup">CMUP — coût moyen unitaire pondéré</option>
+                  <option value="fifo">FIFO — premier entré, premier sorti</option>
+                </select>
+              </Champ>
+            )}
+          </div>
           <div className="cm-grille">
             <Champ label={`Seuil d'alerte${f.unite ? ` (${f.unite})` : ''}`} id="asa"><input id="asa" inputMode="decimal" value={f.seuil_alerte} onChange={set('seuil_alerte')} disabled={!modifiable} /></Champ>
             <div className="cm-champ cm-pleine">
               <span className="cm-etiquette">Magasins où l'article est géré</span>
               <Cases label="Magasins" options={magasins.filter((m) => m.actif || f.magasin_ids.includes(m.id)).map((m) => ({ id: m.id, libelle: `${m.code} — ${m.nom}` }))}
-                valeurs={f.magasin_ids} onChange={(v) => modifiable && setF((x) => ({ ...x, magasin_ids: v }))} vide="Aucun magasin : créez-les dans Paramétrage → Magasins." />
+                valeurs={f.magasin_ids} onChange={(v) => modifiable && setF((x) => ({ ...x, magasin_ids: v }))} vide="Aucun magasin : créez-les dans Configuration → Magasins." />
             </div>
           </div>
           {article && (<>
@@ -181,7 +216,7 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
               </div>
             )}
             <p className="cm-aide" style={{ marginTop: 8 }}>Les réservations ne sont pas encore gérées : elles ne sont pas affichées.</p>
-            {can('com.stock.initial') && <StockInitial article={article} magasins={magasins} onEnregistre={() => { onEnregistre('Stock d\'ouverture enregistré.', false); charger(article.id); }} />}
+            {can('com.stock.initial') && article.suivi_stock && <StockInitial article={article} magasins={magasins} onEnregistre={() => { onEnregistre('Stock d\'ouverture enregistré.', false); charger(article.id); }} />}
           </>)}
           {!article && <p className="cm-aide" style={{ marginTop: 10 }}>Le stock d'ouverture se saisit une fois l'article créé.</p>}
         </Section>
@@ -240,7 +275,7 @@ export default function ArticlesPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table">
-          <thead><tr><th>Référence</th><th>Désignation</th><th>Famille</th><th>Unité</th><th className="cm-num">Prix indicatif</th><th>Taxe</th><th>Comptabilité</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Référence</th><th>Désignation</th><th>Famille</th><th>Unité</th><th className="cm-num">Prix indicatif</th><th>Taxes achat · vente</th><th>Comptabilité</th><th>Statut</th></tr></thead>
           <tbody>
             {!donnees ? <tr><td colSpan={8} className="cm-vide">Chargement…</td></tr>
               : liste.length === 0 ? <tr><td colSpan={8} className="cm-vide"><strong>Aucun article</strong>{modifiable ? 'Créez d\'abord les familles, puis les articles.' : ''}</td></tr>
@@ -251,7 +286,7 @@ export default function ArticlesPage() {
                     <td>{a.famille_nom}</td>
                     <td>{a.unite}</td>
                     <td className="cm-num">{fmtMontant(a.prix_achat_indicatif)}</td>
-                    <td>{a.taxe_code ? `${a.taxe_code} ${Number(a.taxe_taux).toLocaleString('fr-FR')} %` : '—'}</td>
+                    <td>{a.taxe_code || '—'} · {a.taxe_vente_code || '—'}{!a.suivi_stock && <span className="cm-sous">non suivi en stock</span>}</td>
                     <td>{a.suivi_comptable ? <span className="cm-pastille cm-violet">Suivi</span> : <span className="cm-pastille cm-off">Non suivi</span>}</td>
                     <td><Statut actif={a.actif} /></td>
                   </tr>

@@ -11,7 +11,7 @@ function FicheTaxe({ taxe, onFermer, onEnregistre, modifiable }) {
   const [f, setF] = useState({
     code: taxe?.code || '', intitule: taxe?.intitule || '', taux: taxe ? String(taxe.taux).replace('.', ',') : '', type: taxe?.type || 'tva',
     description: taxe?.description || '', debut: taxe?.debut ? String(taxe.debut).slice(0, 10) : '', fin: taxe?.fin ? String(taxe.fin).slice(0, 10) : '',
-    actif: taxe ? taxe.actif : true,
+    actif: taxe ? taxe.actif : true, usage: taxe?.usage || 'les_deux',
   });
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
@@ -36,6 +36,11 @@ function FicheTaxe({ taxe, onFermer, onEnregistre, modifiable }) {
           <Champ label="Code" requis id="tc"><input id="tc" value={f.code} onChange={set('code')} maxLength={20} disabled={!modifiable} style={{ textTransform: 'uppercase' }} /></Champ>
           <Champ label="Type" id="tt">
             <select id="tt" value={f.type} onChange={set('type')} disabled={!modifiable}>{TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          </Champ>
+          <Champ label="Usage" id="tu" aide="Une taxe réservée aux ventes ne peut pas être choisie à l'achat, et inversement.">
+            <select id="tu" value={f.usage} onChange={set('usage')} disabled={!modifiable}>
+              <option value="les_deux">Achats et ventes</option><option value="achat">Achats seulement</option><option value="vente">Ventes seulement</option>
+            </select>
           </Champ>
           <Champ label="Intitulé" requis id="ti" pleine><input id="ti" value={f.intitule} onChange={set('intitule')} maxLength={120} disabled={!modifiable} /></Champ>
           <Champ label="Taux (%)" requis id="tx" aide="De 0 à 100. Ex. 19,25"><input id="tx" inputMode="decimal" value={f.taux} onChange={set('taux')} disabled={!modifiable} /></Champ>
@@ -67,15 +72,16 @@ export default function TaxesPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table">
-          <thead><tr><th>Code</th><th>Intitulé</th><th>Type</th><th className="cm-num">Taux</th><th>Validité</th><th className="cm-num">Articles</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Code</th><th>Intitulé</th><th>Type</th><th>Usage</th><th className="cm-num">Taux</th><th>Validité</th><th className="cm-num">Articles</th><th>Statut</th></tr></thead>
           <tbody>
-            {!donnees ? <tr><td colSpan={7} className="cm-vide">Chargement…</td></tr>
-              : liste.length === 0 ? <tr><td colSpan={7} className="cm-vide"><strong>Aucune taxe</strong>{modifiable ? 'Ajoutez les taxes applicables à l\'entreprise.' : ''}</td></tr>
+            {!donnees ? <tr><td colSpan={8} className="cm-vide">Chargement…</td></tr>
+              : liste.length === 0 ? <tr><td colSpan={8} className="cm-vide"><strong>Aucune taxe</strong>{modifiable ? 'Ajoutez les taxes applicables à l\'entreprise.' : ''}</td></tr>
                 : liste.map((x) => (
                   <tr key={x.id} className={'cm-cliquable' + (x.actif ? '' : ' cm-inactif')} onClick={() => setFiche(x)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') setFiche(x); }}>
                     <td><span className="cm-code">{x.code}</span></td>
                     <td><strong>{x.intitule}</strong></td>
                     <td>{x.type_libelle}</td>
+                    <td>{x.usage_libelle}</td>
                     <td className="cm-num"><strong>{x.taux.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} %</strong></td>
                     <td>{x.debut || x.fin ? `${dateFr(x.debut) || '…'} → ${dateFr(x.fin) || '…'}` : 'Sans limite'}</td>
                     <td className="cm-num">{x.nb_articles}</td>

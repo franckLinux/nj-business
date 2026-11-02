@@ -7,9 +7,10 @@ import { Entete } from '@/components/commercial/ui';
 
 const ETAPES = [
   ['societe', '/commercial/societe', 'Société', 'Identité reprise de l\'Entité, mentions des documents, numérotation, règles du circuit.', ['com.parametrage.voir']],
-  ['magasins', '/commercial/magasins', 'Magasins', 'Les lieux de stockage, avec leur responsable.', ['com.parametrage.voir', 'com.articles.voir']],
+  ['agences', '/commercial/agences', 'Agences', 'Les sites de l\'entreprise ; chacun regroupe ses magasins.', ['com.parametrage.voir']],
+  ['magasins', '/commercial/magasins', 'Magasins', 'Les lieux de stockage, rattachés à une agence, avec leur responsable.', ['com.parametrage.voir', 'com.articles.voir']],
   ['fournisseurs', '/commercial/fournisseurs', 'Fournisseurs', 'Le registre des tiers, complété des informations d\'achat.', ['com.tiers.voir']],
-  ['familles', '/commercial/familles', 'Familles d\'articles', 'Classer les articles et rattacher les fournisseurs habituels.', ['com.parametrage.voir', 'com.articles.voir']],
+  ['familles', '/commercial/familles', 'Familles d\'articles', 'Classer les articles ; taxes d\'achat et de vente, suivi en stock et valorisation proposés aux articles.', ['com.parametrage.voir', 'com.articles.voir']],
   ['taxes', '/commercial/taxes', 'Taxes', 'Les taxes applicables, avec leur taux.', ['com.parametrage.voir']],
   ['articles', '/commercial/articles', 'Articles', 'Le catalogue, le suivi comptable et le stock d\'ouverture.', ['com.articles.voir', 'com.da.creer']],
   ['utilisateurs', '/commercial/utilisateurs', 'Utilisateurs et rôles', 'Qui demande, qui prépare, qui approuve.', ['com.parametrage.modifier']],
@@ -24,6 +25,7 @@ export default function DemarragePage() {
       if (!r?.error) setN((x) => ({ ...x, [cle]: compter(r) }));
     };
     if (can('com.parametrage.voir')) lire('societe', '/commercial/societe', (r) => (r.parametres_enregistres ? 1 : 0));
+    if (can('com.parametrage.voir')) lire('agences', '/commercial/agences?actifs=1', (r) => r.length);
     lire('magasins', '/commercial/magasins?actifs=1', (r) => r.length);
     lire('familles', '/commercial/familles?actifs=1', (r) => r.length);
     lire('articles', '/commercial/articles?actifs=1', (r) => r.length);
@@ -43,7 +45,7 @@ export default function DemarragePage() {
 
   return (
     <div className="cm-page">
-      <Entete titre="Bienvenue dans NJ COMMERCIAL"
+      <Entete titre="Mise en route de NJ COMMERCIAL"
         description="Le module des achats repose sur ce paramétrage : demandes d'achat, autorisations et bons de commande s'appuient sur ces référentiels." />
       <div className="cm-etapes">
         {visibles.map(([cle, to, titre, texte], i) => (

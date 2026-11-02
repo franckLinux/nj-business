@@ -23,7 +23,15 @@ module.exports = {
   getSociete:   repondre('société', (req) => svc.lireSociete(req.tenantId)),
   putSociete:   repondre('société.modif', (req) => svc.modifierSociete({ ...ctx(req), body: req.body || {} })),
 
-  getMagasins:  repondre('magasins', (req) => svc.listerMagasins(req.tenantId, req.query)),
+  getAgences:   repondre('agences', (req) => svc.listerAgences(req.tenantId, req.query)),
+  postAgence:   repondre('agence.création', (req) => svc.enregistrerAgence({ ...ctx(req), body: req.body || {} }), 201),
+  putAgence:    repondre('agence.modif', (req) => svc.enregistrerAgence({ ...ctx(req), id: req.params.id, body: req.body || {} })),
+  putAgencesUtilisateur: repondre('périmètre', (req) => svc.definirAgencesUtilisateur({ ...ctx(req), id: req.params.id, body: req.body || {} })),
+  // ?perimetre=1 : seulement les magasins des agences de la personne (formulaires de saisie).
+  getMagasins:  repondre('magasins', async (req) => svc.listerMagasins(req.tenantId, {
+    ...req.query,
+    magasins: req.query.perimetre === '1' ? await require('../services/commercial/demandes.service').perimetreMagasins(req.tenantId, req.user.id) : null,
+  })),
   postMagasin:  repondre('magasin.création', (req) => svc.enregistrerMagasin({ ...ctx(req), body: req.body || {} }), 201),
   putMagasin:   repondre('magasin.modif', (req) => svc.enregistrerMagasin({ ...ctx(req), id: req.params.id, body: req.body || {} })),
 

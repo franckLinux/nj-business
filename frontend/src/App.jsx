@@ -36,6 +36,7 @@ import DemandesPage from '@/pages/commercial/DemandesPage';
 import DemandeFormPage from '@/pages/commercial/DemandeFormPage';
 import DemandePage from '@/pages/commercial/DemandePage';
 import DemarragePage from '@/pages/commercial/DemarragePage';
+import AgencesPage from '@/pages/commercial/AgencesPage';
 import SocietePage from '@/pages/commercial/SocietePage';
 import MagasinsPage from '@/pages/commercial/MagasinsPage';
 import FamillesPage from '@/pages/commercial/FamillesPage';
@@ -108,6 +109,16 @@ function GardeCommercial({ children }) {
   return children;
 }
 
+// Entrée du module (lot 1) : le tableau de bord pour qui le voit, sinon ses
+// expressions de besoin, sinon la mise en route du paramétrage.
+function EntreeCommercial() {
+  const { user, can } = useApp();
+  if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
+  if (can('com.tableau_bord.voir')) return <Navigate to="/commercial/tableau-bord" replace />;
+  if (can('com.da.creer') || can('com.da.voir_tout')) return <Navigate to="/commercial/demandes" replace />;
+  return <Navigate to="/commercial/mise-en-route" replace />;
+}
+
 // Garde d'un écran du module : une permission parmi plusieurs suffit.
 function AutoriseCm({ codes, children }) {
   const { user, can } = useApp();
@@ -142,7 +153,9 @@ function AuthenticatedApp() {
       {/* Accueil NJ BUSINESS : hors du menu de la caisse, réservé aux utilisateurs d'un client. */}
       <Route path="accueil" element={utiliseAccueil(user) ? <AccueilPage /> : <Navigate to="/" replace />} />
       <Route path="commercial" element={<GardeCommercial><CommercialLayout /></GardeCommercial>}>
-        <Route index element={<DemarragePage />} />
+        <Route index element={<EntreeCommercial />} />
+        <Route path="mise-en-route" element={<DemarragePage />} />
+        <Route path="agences"      element={<AutoriseCm codes={['com.parametrage.voir']}><AgencesPage /></AutoriseCm>} />
         <Route path="societe"      element={<AutoriseCm codes={['com.parametrage.voir']}><SocietePage /></AutoriseCm>} />
         <Route path="magasins"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><MagasinsPage /></AutoriseCm>} />
         <Route path="familles"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><FamillesPage /></AutoriseCm>} />

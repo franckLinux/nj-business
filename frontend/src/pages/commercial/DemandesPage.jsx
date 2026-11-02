@@ -23,7 +23,7 @@ export default function DemandesPage({ autorisations = false }) {
       {autorisations ? (
         <Entete titre="Autorisations d'achat" description="Les demandes qui attendent votre décision. Vous ne voyez jamais ici vos propres demandes : personne ne valide ce qu'il a demandé." />
       ) : (
-        <Entete titre="Demandes d'achat" description="Exprimez un besoin, consultez le stock du magasin et suivez l'avancement de chaque demande.">
+        <Entete titre="Expressions de besoin" description="Exprimez un besoin d'achat (demande d'achat, numérotée DA), consultez le stock du magasin et suivez l'avancement de chaque demande.">
           {can('com.da.creer') && <button type="button" className="cm-btn cm-primaire" onClick={() => navigate('/commercial/demandes/nouvelle')}>+ Nouvelle demande</button>}
         </Entete>
       )}

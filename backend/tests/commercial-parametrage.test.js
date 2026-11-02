@@ -76,9 +76,13 @@ before(async () => {
 after(async () => {
   serveur?.kill();
   for (const t of [A, B]) {
-    for (const q of ['DELETE FROM audit_log WHERE tenant_id = $1', 'DELETE FROM tenant_modules WHERE tenant_id = $1', 'DELETE FROM tenants WHERE id = $1']) {
-      await sql(q, [t]).catch((e) => console.error('nettoyage :', e.message));
-    }
+    // Tout ou rien : un client que ses données métier empêchent de supprimer garde ses modules.
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      for (const q of ['DELETE FROM audit_log WHERE tenant_id = $1', 'DELETE FROM tenant_modules WHERE tenant_id = $1', 'DELETE FROM tenants WHERE id = $1']) await c.query(q, [t]);
+      await c.query('COMMIT');
+    } catch { await c.query('ROLLBACK').catch(() => {}); } finally { c.release(); }
   }
   await sql('DELETE FROM audit_log WHERE user_id = $1', [U.adm.id]).catch(() => {});
   await sql('DELETE FROM users WHERE id = $1', [U.adm.id]).catch(() => {});

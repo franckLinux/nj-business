@@ -30,7 +30,7 @@ export default function DemandeFormPage() {
   useEffect(() => {
     (async () => {
       const [ar, ma, fo] = await Promise.all([
-        api.get('/commercial/articles?actifs=1'), api.get('/commercial/magasins?actifs=1'), api.get('/commercial/tiers?type=fournisseur&actifs=1'),
+        api.get('/commercial/articles?actifs=1'), api.get('/commercial/magasins?actifs=1&perimetre=1'), api.get('/commercial/tiers?type=fournisseur&actifs=1'),
       ]);
       const r = { articles: ar?.error ? [] : ar, magasins: ma?.error ? [] : ma, fournisseurs: fo?.error ? [] : fo };
       setRefs(r);

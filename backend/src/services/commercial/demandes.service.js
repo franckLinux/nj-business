@@ -52,8 +52,22 @@ const quantite = (v) => {
 const contexte = async (req) => {
   if (!req.tenantId) throw new ErreurDemande(400, 'Choisissez d\'abord un client.');
   const p = await getEffectivePermissions({ tenantId: req.tenantId, userId: req.user.id, role: req.user.role });
-  return { tenantId: req.tenantId, userId: req.user.id, username: req.user.username, peut: (c) => p === null || p.includes(c) };
+  return { tenantId: req.tenantId, userId: req.user.id, username: req.user.username, peut: (c) => p === null || p.includes(c),
+    magasins: await perimetreMagasins(req.tenantId, req.user.id) };
 };
+
+// Périmètre par agence (054) : null = tout le client ; sinon les magasins des
+// agences attribuées à la personne. Vérifié par le serveur sur chaque lecture et saisie.
+const perimetreMagasins = async (tenantId, userId) => {
+  const [t] = await Q("SELECT to_regclass('public.com_utilisateur_agences') IS NOT NULL AS ok", {});
+  if (!t.ok) return null;
+  const ag = await Q('SELECT agence_id FROM com_utilisateur_agences WHERE user_id = :u AND tenant_id = :t', { u: userId, t: tenantId });
+  if (!ag.length) return null;
+  const m = await Q('SELECT id FROM com_magasins WHERE tenant_id = :t AND agence_id IN (:a)', { t: tenantId, a: ag.map((r) => r.agence_id) });
+  return m.length ? m.map((r) => Number(r.id)) : [0];
+};
+const dansPerimetre = (ctx, magasinId) => !ctx.magasins || ctx.magasins.includes(Number(magasinId));
+const sqlPerimetre = (ctx, colonne) => (ctx.magasins ? { sql: `${colonne} IN (:perim_mags)`, r: { perim_mags: ctx.magasins } } : { sql: 'true', r: {} });
 
 const auditer = (tr, ctx, action, id, avant, apres) => X(
   `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur, nouvelle_valeur)
@@ -115,6 +129,11 @@ const formater = (d) => ({
 
 // Qui voit quoi : ses demandes ; tout avec voir_tout ; sinon celles de sa file d'examen.
 const filtreVisibilite = (ctx) => {
+  const v = filtreDroits(ctx);
+  const p = sqlPerimetre(ctx, 'd.magasin_id');
+  return { sql: `(${v.sql}) AND ${p.sql}`, r: { ...v.r, ...p.r } };
+};
+const filtreDroits = (ctx) => {
   if (ctx.peut('com.da.voir_tout')) return { sql: 'true', r: {} };
   const etapes = [];
   if (ctx.peut('com.da.approuver')) etapes.push('examen_achats');
@@ -159,9 +178,10 @@ const lister = async (ctx, { vue = 'toutes', statut = '', q = '', du = '', au = 
 
 const compteurs = async (ctx) => {
   const e = etapesDe(ctx);
+  const pd = sqlPerimetre(ctx, 'd.magasin_id');
   const [a] = e.length ? await Q(
-    'SELECT COUNT(*)::int AS n FROM com_demandes WHERE tenant_id = :t AND statut IN (:e) AND demandeur_id <> :moi',
-    { t: ctx.tenantId, e, moi: ctx.userId }) : [{ n: 0 }];
+    `SELECT COUNT(*)::int AS n FROM com_demandes d WHERE d.tenant_id = :t AND d.statut IN (:e) AND d.demandeur_id <> :moi AND ${pd.sql}`,
+    { t: ctx.tenantId, e, moi: ctx.userId, ...pd.r }) : [{ n: 0 }];
   const [c] = await Q(
     "SELECT COUNT(*)::int AS n FROM com_demandes WHERE tenant_id = :t AND demandeur_id = :moi AND statut = 'a_corriger'",
     { t: ctx.tenantId, moi: ctx.userId });
@@ -170,7 +190,7 @@ const compteurs = async (ctx) => {
     `SELECT COUNT(*)::int AS n FROM com_demandes d WHERE d.tenant_id = :t AND d.statut = 'approuvee'
         AND EXISTS (SELECT 1 FROM com_demande_lignes l WHERE l.demande_id = d.id AND l.quantite > COALESCE((
               SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id
-               WHERE bl.demande_ligne_id = l.id AND b.statut IN ('brouillon', 'emis')), 0))`, { t: ctx.tenantId }) : [{ n: 0 }];
+               WHERE bl.demande_ligne_id = l.id AND b.statut IN ('brouillon', 'emis')), 0)) AND ${pd.sql}`, { t: ctx.tenantId, ...pd.r }) : [{ n: 0 }];
   return { a_examiner: a.n, a_corriger: c.n, a_commander: k.n };
 };
 
@@ -254,6 +274,7 @@ const valeursEntete = async (ctx, b, tr) => {
   const [m] = await Q('SELECT id, actif FROM com_magasins WHERE id = :m AND tenant_id = :t', { m: magasinId, t: ctx.tenantId }, tr);
   if (!m) throw new ErreurDemande(400, 'Magasin inconnu.');
   if (!m.actif) throw new ErreurDemande(400, 'Ce magasin est désactivé.');
+  if (!dansPerimetre(ctx, magasinId)) throw new ErreurDemande(403, 'Ce magasin n\'appartient pas à vos agences.');
   const priorite = txt(b.priorite) || 'normale';
   if (!PRIORITES.includes(priorite)) throw new ErreurDemande(400, 'Priorité inconnue.');
   let fournisseur = null;
@@ -530,7 +551,11 @@ const envoyerA = async (ctx, users, d, titre, message) => {
 // Best-effort : une notification qui échoue n'annule jamais la décision.
 const notifier = async (ctx, d, permission, titre, message) => {
   try {
-    const users = (await usersAvecPermission(ctx.tenantId, permission)).filter((u) => u.id !== d.demandeur_id && u.id !== ctx.userId);
+    const users = [];
+    for (const u of (await usersAvecPermission(ctx.tenantId, permission)).filter((x) => x.id !== d.demandeur_id && x.id !== ctx.userId)) {
+      const m = await perimetreMagasins(ctx.tenantId, u.id);   // jamais une demande hors de ses agences
+      if (!m || m.includes(Number(d.magasin_id))) users.push(u);
+    }
     await envoyerA(ctx, users, d, titre, message);
   } catch (e) { console.warn('[Commercial] notification :', e.message); }
 };
@@ -543,6 +568,7 @@ const notifierAuteur = async (ctx, d, message) => {
 };
 
 module.exports = {
+  perimetreMagasins, dansPerimetre, sqlPerimetre,
   ErreurDemande, STATUTS, contexte, lister, compteurs, lire, creer, modifier, supprimer, soumettre, decider, annuler,
   joindre, retirerPiece, lirePiece, evaluerStock,
 };

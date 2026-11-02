@@ -20,6 +20,7 @@ const { sequelize } = require('../../models');
 const { usersAvecPermission } = require('../permission.service');
 const { creerNotification } = require('../notification.service');
 const docs = require('./documents.service');
+const perim = () => require('./demandes.service');   // chargé à la demande (dépendance circulaire)
 const pdf = require('./bc_pdf.service');
 
 const T = sequelize.QueryTypes;
@@ -131,13 +132,14 @@ const formater = (b) => ({
 
 const charger = async (ctx, id, tr, verrou = false) => {
   const [b] = await Q(`${SQL_BC} WHERE b.tenant_id = :t AND b.id = :id${verrou ? ' FOR UPDATE OF b' : ''}`, { t: ctx.tenantId, id: entier(id, 'Bon de commande') }, tr);
-  if (!b) throw new ErreurBon(404, 'Bon de commande introuvable.');
+  if (!b || !perim().dansPerimetre(ctx, b.magasin_id)) throw new ErreurBon(404, 'Bon de commande introuvable.');
   return b;
 };
 
 const lister = async (ctx, { statut = '', q = '', du = '', au = '', fournisseur_id = '', demande_id = '' } = {}) => {
   exigerVue(ctx);
-  const conds = ['b.tenant_id = :t']; const r = { t: ctx.tenantId };
+  const pp = perim().sqlPerimetre(ctx, 'b.magasin_id');
+  const conds = ['b.tenant_id = :t', pp.sql]; const r = { t: ctx.tenantId, ...pp.r };
   if (statut) { if (!STATUTS[statut]) throw new ErreurBon(400, 'Statut inconnu.'); conds.push('b.statut = :statut'); r.statut = statut; }
   if (Number.parseInt(fournisseur_id, 10)) { conds.push('b.fournisseur_id = :f'); r.f = Number.parseInt(fournisseur_id, 10); }
   if (Number.parseInt(demande_id, 10)) { conds.push('b.demande_id = :d'); r.d = Number.parseInt(demande_id, 10); }
@@ -156,7 +158,8 @@ const aCommander = async (ctx) => {
   const ds = await Q(
     `SELECT d.id, d.numero, d.date_demande, d.service, d.priorite, d.montant_estime, d.decidee_le, u.username AS demandeur_nom, m.code AS magasin_code
        FROM com_demandes d JOIN users u ON u.id = d.demandeur_id JOIN com_magasins m ON m.id = d.magasin_id
-      WHERE d.tenant_id = :t AND d.statut = 'approuvee' ORDER BY d.decidee_le`, { t: ctx.tenantId });
+      WHERE d.tenant_id = :t AND d.statut = 'approuvee' AND ${perim().sqlPerimetre(ctx, 'd.magasin_id').sql} ORDER BY d.decidee_le`,
+    { t: ctx.tenantId, ...perim().sqlPerimetre(ctx, 'd.magasin_id').r });
   const out = [];
   for (const d of ds) {
     const r = await restes(ctx.tenantId, d.id);
@@ -171,7 +174,7 @@ const proposition = async (ctx, demandeId) => {
   exiger(ctx, 'com.bc.preparer', 'préparer les bons de commande');
   const [d] = await Q(`SELECT d.*, f.nom AS fournisseur_nom FROM com_demandes d LEFT JOIN registre_tiers f ON f.id = d.fournisseur_propose_id
                         WHERE d.id = :d AND d.tenant_id = :t`, { d: entier(demandeId, 'Demande'), t: ctx.tenantId });
-  if (!d) throw new ErreurBon(404, 'Demande introuvable.');
+  if (!d || !perim().dansPerimetre(ctx, d.magasin_id)) throw new ErreurBon(404, 'Demande introuvable.');
   if (d.statut !== 'approuvee') throw new ErreurBon(409, 'Seule une demande approuvée peut donner un bon de commande.');
   const lignes = (await restes(ctx.tenantId, d.id)).filter((l) => l.reste > 0);
   const fournisseurs = [...new Set([...lignes.map((l) => l.fournisseur_id).filter(Boolean), d.fournisseur_propose_id && Number(d.fournisseur_propose_id)].filter(Boolean))];
@@ -204,9 +207,10 @@ const ecrireLignes = async (ctx, tr, bc, lignes, sauf) => {
     let taxe = null;
     const taxeId = l.taxe_id === undefined ? src.taxe_id : (l.taxe_id ? entier(l.taxe_id, 'Taxe') : null);
     if (taxeId) {
-      [taxe] = await Q('SELECT id, code, taux, actif FROM com_taxes WHERE id = :x AND tenant_id = :t', { x: taxeId, t: ctx.tenantId }, tr);
+      [taxe] = await Q('SELECT id, code, taux, actif, usage FROM com_taxes WHERE id = :x AND tenant_id = :t', { x: taxeId, t: ctx.tenantId }, tr);
       if (!taxe) throw new ErreurBon(400, 'Taxe inconnue.');
       if (!taxe.actif) throw new ErreurBon(400, `La taxe ${taxe.code} est désactivée.`);
+      if (taxe.usage === 'vente') throw new ErreurBon(400, `La taxe ${taxe.code} est réservée aux ventes.`);
     }
     const prix = pu === null ? 0 : pu;
     const mht = arrondi(q * prix * (1 - remise / 100), dec);
@@ -230,6 +234,7 @@ const valeursEntete = async (ctx, b, tr) => {
   const magasin = entier(b.magasin_id, 'Lieu de livraison');
   const [m] = await Q('SELECT id FROM com_magasins WHERE id = :m AND tenant_id = :t', { m: magasin, t: ctx.tenantId }, tr);
   if (!m) throw new ErreurBon(400, 'Lieu de livraison inconnu.');
+  if (!perim().dansPerimetre(ctx, magasin)) throw new ErreurBon(403, 'Ce lieu de livraison n\'appartient pas à vos agences.');
   const champ = (v, max, nom) => { const s = txt(v); if (s.length > max) throw new ErreurBon(400, `${nom} : ${max} caractères au plus.`); return s; };
   return {
     fournisseur_id: fournisseur, magasin_id: magasin,
@@ -242,7 +247,7 @@ const creer = async (ctx, body = {}) => {
   exiger(ctx, 'com.bc.preparer', 'préparer les bons de commande');
   const id = await sequelize.transaction(async (tr) => {
     const [d] = await Q('SELECT * FROM com_demandes WHERE id = :d AND tenant_id = :t FOR UPDATE', { d: entier(body.demande_id, 'Demande'), t: ctx.tenantId }, tr);
-    if (!d) throw new ErreurBon(404, 'Demande introuvable.');
+    if (!d || !perim().dansPerimetre(ctx, d.magasin_id)) throw new ErreurBon(404, 'Demande introuvable.');
     if (d.statut !== 'approuvee') throw new ErreurBon(409, d.statut === 'rejetee'
       ? 'Une demande rejetée ne peut pas donner de bon de commande : une nouvelle demande et une nouvelle autorisation sont nécessaires.'
       : 'Seule une demande approuvée peut donner un bon de commande.');
@@ -609,9 +614,11 @@ const notifierEmission = (ctx) => async ({ demandeurId, numero, demande, demande
 };
 const notifierRevalidation = (ctx) => async (demandeId) => {
   try {
-    const [d] = await Q('SELECT numero FROM com_demandes WHERE id = :d', { d: demandeId });
+    const [d] = await Q('SELECT numero, magasin_id FROM com_demandes WHERE id = :d', { d: demandeId });
     for (const u of await usersAvecPermission(ctx.tenantId, 'com.da.approuver')) {
       if (u.id === ctx.userId) continue;
+      const m = await perim().perimetreMagasins(ctx.tenantId, u.id);
+      if (m && !m.includes(Number(d.magasin_id))) continue;
       await creerNotification({ tenantId: ctx.tenantId, destinataireId: u.id, type: 'com_demande',
         titre: `Revalidation demandée — ${d.numero}`, message: `${ctx.username} demande une nouvelle autorisation : prix ou fournisseur différents de ce qui a été approuvé.`,
         refType: 'com_demande', refId: demandeId });

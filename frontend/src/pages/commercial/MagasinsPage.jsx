@@ -5,20 +5,26 @@ import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { Entete, Statut, Tiroir, Section, Champ, Bascule, useListe, useDiffere, enregistrer } from '@/components/commercial/ui';
 
-const VIDE = { code: '', nom: '', description: '', localisation: '', responsable_id: '', actif: true };
+const VIDE = { code: '', nom: '', description: '', localisation: '', responsable_id: '', agence_id: '', actif: true };
 
 function FicheMagasin({ magasin, onFermer, onEnregistre, modifiable }) {
-  const [f, setF] = useState(magasin ? { ...VIDE, ...magasin, responsable_id: magasin.responsable_id || '' } : VIDE);
+  const [f, setF] = useState(magasin ? { ...VIDE, ...magasin, responsable_id: magasin.responsable_id || '', agence_id: String(magasin.agence_id || '') } : VIDE);
   const [users, setUsers] = useState([]);
+  const [agences, setAgences] = useState(null);
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   useEffect(() => {
     api.get('/commercial/utilisateurs').then((r) => { if (!r?.error) setUsers(r.utilisateurs.filter((u) => u.actif)); });
-  }, []);
+    api.get('/commercial/agences').then((r) => {
+      const l = r?.error ? [] : r;
+      setAgences(l);
+      if (!magasin && l.filter((a) => a.actif).length === 1) setF((x) => ({ ...x, agence_id: String(l.find((a) => a.actif).id) }));
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const valider = async () => {
     setEnCours(true);
-    const r = await enregistrer('/commercial/magasins', magasin?.id, { ...f, responsable_id: f.responsable_id || null });
+    const r = await enregistrer('/commercial/magasins', magasin?.id, { ...f, responsable_id: f.responsable_id || null, agence_id: f.agence_id || null });
     setEnCours(false);
     if (!r.ok) { setErreur(r.error); return; }
     onEnregistre(magasin ? 'Magasin modifié.' : 'Magasin créé.');
@@ -36,6 +42,13 @@ function FicheMagasin({ magasin, onFermer, onEnregistre, modifiable }) {
             <input id="mc" value={f.code} onChange={set('code')} maxLength={20} disabled={!modifiable} style={{ textTransform: 'uppercase' }} />
           </Champ>
           <Champ label="Nom" requis id="mn"><input id="mn" value={f.nom} onChange={set('nom')} maxLength={120} disabled={!modifiable} /></Champ>
+          <Champ label="Agence de rattachement" requis id="mag" pleine
+            aide={agences && agences.length === 0 ? 'Aucune agence : l\'agence « Siège » sera créée avec ce magasin.' : 'Un magasin appartient à une seule agence. Il n\'en change plus dès qu\'il a servi.'}>
+            <select id="mag" value={f.agence_id} onChange={set('agence_id')} disabled={!modifiable || !agences || agences.length === 0}>
+              {agences && agences.length > 0 && <option value="">— Choisir —</option>}
+              {(agences || []).filter((a) => a.actif || String(a.id) === f.agence_id).map((a) => <option key={a.id} value={a.id}>{a.code} — {a.nom}</option>)}
+            </select>
+          </Champ>
           <Champ label="Adresse ou localisation" id="ml" pleine><input id="ml" value={f.localisation} onChange={set('localisation')} maxLength={300} disabled={!modifiable} /></Champ>
           <Champ label="Description" id="md" pleine><textarea id="md" value={f.description} onChange={set('description')} maxLength={1000} disabled={!modifiable} /></Champ>
         </div>
@@ -73,7 +86,7 @@ export default function MagasinsPage() {
 
   return (
     <div className="cm-page">
-      <Entete titre="Magasins" description="Les lieux de stockage. Le stock de chaque article est suivi magasin par magasin.">
+      <Entete titre="Magasins" description="Les lieux de stockage, chacun rattaché à une agence. Le stock de chaque article est suivi magasin par magasin.">
         {modifiable && <button type="button" className="cm-btn cm-primaire" onClick={() => setFiche('nouveau')}>+ Nouveau magasin</button>}
       </Entete>
       <div className="cm-outils">
@@ -86,14 +99,15 @@ export default function MagasinsPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table">
-          <thead><tr><th>Code</th><th>Nom</th><th>Localisation</th><th>Responsable</th><th className="cm-num">Articles en stock</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Code</th><th>Nom</th><th>Agence</th><th>Localisation</th><th>Responsable</th><th className="cm-num">Articles en stock</th><th>Statut</th></tr></thead>
           <tbody>
-            {!donnees ? <tr><td colSpan={6} className="cm-vide">Chargement…</td></tr>
-              : liste.length === 0 ? <tr><td colSpan={6} className="cm-vide"><strong>Aucun magasin</strong>{modifiable ? 'Créez le premier lieu de stockage.' : ''}</td></tr>
+            {!donnees ? <tr><td colSpan={7} className="cm-vide">Chargement…</td></tr>
+              : liste.length === 0 ? <tr><td colSpan={7} className="cm-vide"><strong>Aucun magasin</strong>{modifiable ? 'Créez le premier lieu de stockage.' : ''}</td></tr>
                 : liste.map((m) => (
                   <tr key={m.id} className={'cm-cliquable' + (m.actif ? '' : ' cm-inactif')} onClick={() => setFiche(m)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') setFiche(m); }}>
                     <td><span className="cm-code">{m.code}</span></td>
                     <td><strong>{m.nom}</strong>{m.description && <span className="cm-sous">{m.description.slice(0, 80)}</span>}</td>
+                    <td>{m.agence_code}<span className="cm-sous">{m.agence_nom}</span></td>
                     <td>{m.localisation || '—'}</td>
                     <td>{m.responsable_nom || '—'}</td>
                     <td className="cm-num">{m.nb_articles_stock}</td>

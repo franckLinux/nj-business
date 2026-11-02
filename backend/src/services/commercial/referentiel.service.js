@@ -45,6 +45,26 @@ const nombre = (v, nom, { min = 0, max = Number.MAX_SAFE_INTEGER, vide = null } 
   if (!Number.isFinite(n) || n < min || n > max) throw new ErreurCom(400, `${nom} invalide.`);
   return n;
 };
+// Taxe d'achat ou de vente (054) : une taxe réservée aux ventes n'est jamais une taxe
+// d'achat, et inversement. Rien n'est copié d'un usage à l'autre.
+const METHODES = { cmup: 'CMUP (coût moyen unitaire pondéré)', fifo: 'FIFO (premier entré, premier sorti)' };
+const taxePour = async (tenantId, v, usage, tr) => {
+  if (v === undefined || v === null || v === '') return null;
+  const id = entier(v, usage === 'achat' ? 'Taxe d\'achat' : 'Taxe de vente');
+  const [x] = await Q('SELECT id, code, usage FROM com_taxes WHERE id = :id AND tenant_id = :t', { id, t: tenantId }, tr);
+  if (!x) throw new ErreurCom(400, 'Taxe inconnue.');
+  if (x.usage !== 'les_deux' && x.usage !== usage) {
+    throw new ErreurCom(400, `La taxe ${x.code} est réservée aux ${x.usage === 'achat' ? 'achats' : 'ventes'}.`);
+  }
+  return id;
+};
+const methode = (v) => {
+  const m = txt(v || 'cmup').toLowerCase();
+  if (!METHODES[m]) throw new ErreurCom(400, 'Méthode de valorisation inconnue (CMUP ou FIFO).');
+  return m;
+};
+const booleen = (v, defaut) => (v === undefined || v === null || v === '' ? defaut : v === true || v === 'true' || v === 1 || v === '1');
+
 const ids = (liste, nom) => [...new Set((Array.isArray(liste) ? liste : []).map((v) => entier(v, nom)))];
 
 const auditer = (transaction, { tenantId, userId, action, id, avant, apres }) => X(
@@ -117,18 +137,84 @@ const modifierSociete = async ({ tenantId, userId, body }) => {
   return lireSociete(tenantId);
 };
 
-// ── Magasins ─────────────────────────────────────────────────────────────
-const listerMagasins = async (tenantId, { q = '', actifs = '' } = {}) => {
+// ── Agences (054) : Société → Agences → Magasins ─────────────────────────
+const listerAgences = async (tenantId, { actifs = '' } = {}) => {
   exigerClient(tenantId);
   const rows = await Q(
-    `SELECT m.*, u.username AS responsable_nom,
+    `SELECT a.*, u.username AS responsable_nom,
+            COALESCE((SELECT json_agg(json_build_object('id', m.id, 'code', m.code, 'nom', m.nom, 'actif', m.actif) ORDER BY upper(m.code))
+                        FROM com_magasins m WHERE m.agence_id = a.id), '[]') AS magasins
+       FROM com_agences a LEFT JOIN users u ON u.id = a.responsable_id
+      WHERE a.tenant_id = :t AND (:actifs <> '1' OR a.actif)
+      ORDER BY a.actif DESC, upper(a.code)`, { t: tenantId, actifs: String(actifs) });
+  return rows.map((r) => ({ ...r, id: Number(r.id), magasins: r.magasins.map((m) => ({ ...m, id: Number(m.id) })) }));
+};
+
+// Agence par défaut d'un client qui n'en a encore aucune : « SIEGE ».
+const agenceParDefaut = async (tenantId, userId, tr) => {
+  const ag = await Q('SELECT id, actif FROM com_agences WHERE tenant_id = :t ORDER BY id', { t: tenantId }, tr);
+  if (ag.length) return ag.length === 1 ? Number(ag[0].id) : null;
+  const [r] = await Q(`INSERT INTO com_agences (tenant_id, code, nom, cree_par) VALUES (:t, 'SIEGE', 'Siège', :u) RETURNING id`, { t: tenantId, u: userId }, tr);
+  await auditer(tr, { tenantId, userId, action: 'COM_AGENCE_CREATION', id: r.id, apres: { code: 'SIEGE', nom: 'Siège', automatique: true } });
+  return Number(r.id);
+};
+
+const enregistrerAgence = async ({ tenantId, userId, id, body }) => {
+  exigerClient(tenantId);
+  try {
+    const aid = await sequelize.transaction(async (tr) => {
+      let avant = null;
+      if (id) {
+        [avant] = await Q('SELECT * FROM com_agences WHERE id = :id AND tenant_id = :t FOR UPDATE', { id: entier(id, 'Agence'), t: tenantId }, tr);
+        if (!avant) throw new ErreurCom(404, 'Agence introuvable.');
+      }
+      const b = { ...(avant || {}), ...body };
+      const code = txt(b.code).toUpperCase();
+      if (!CODE_RE.test(code)) throw new ErreurCom(400, 'Code de l\'agence : 1 à 20 lettres, chiffres, point, tiret ou souligné.');
+      const nom = longueur(b.nom, 120, 'Nom de l\'agence');
+      if (!nom) throw new ErreurCom(400, 'Le nom de l\'agence est obligatoire.');
+      let responsable = txt(b.responsable_id) || null;
+      if (responsable) {
+        const [u] = await Q('SELECT id FROM users WHERE id::text = :u AND tenant_id = :t', { u: responsable, t: tenantId }, tr);
+        if (!u) throw new ErreurCom(400, 'Responsable inconnu pour ce client.');
+        responsable = u.id;
+      }
+      const v = { code, nom, adresse: longueur(b.adresse, 300, 'Adresse'), responsable_id: responsable, actif: b.actif === undefined ? true : Boolean(b.actif) };
+      if (avant && avant.actif && !v.actif) {
+        const [m] = await Q('SELECT code FROM com_magasins WHERE agence_id = :a AND actif LIMIT 1', { a: avant.id }, tr);
+        if (m) throw new ErreurCom(409, `Le magasin ${m.code} de cette agence est encore actif : désactivez d'abord ses magasins.`);
+      }
+      if (avant) {
+        await X(`UPDATE com_agences SET code = :code, nom = :nom, adresse = :adresse, responsable_id = :responsable_id, actif = :actif,
+                   modifie_le = NOW() WHERE id = :id`, { ...v, id: avant.id }, tr);
+        const d = differences(avant, v);
+        if (d) await auditer(tr, { tenantId, userId, action: 'COM_AGENCE_MODIFICATION', id: avant.id, ...d });
+        return Number(avant.id);
+      }
+      const [r] = await Q(`INSERT INTO com_agences (tenant_id, code, nom, adresse, responsable_id, actif, cree_par)
+                           VALUES (:t, :code, :nom, :adresse, :responsable_id, :actif, :u) RETURNING id`, { ...v, t: tenantId, u: userId }, tr);
+      await auditer(tr, { tenantId, userId, action: 'COM_AGENCE_CREATION', id: r.id, apres: v });
+      return Number(r.id);
+    });
+    return (await listerAgences(tenantId)).find((a) => a.id === aid);
+  } catch (err) { return unicite(err, 'Ce code d\'agence existe déjà.'); }
+};
+
+// ── Magasins ─────────────────────────────────────────────────────────────
+const listerMagasins = async (tenantId, { q = '', actifs = '', agence_id = '', magasins = null } = {}) => {
+  exigerClient(tenantId);
+  const rows = await Q(
+    `SELECT m.*, u.username AS responsable_nom, ag.code AS agence_code, ag.nom AS agence_nom,
             (SELECT COUNT(DISTINCT s.article_id)::int FROM com_stock_mouvements s WHERE s.magasin_id = m.id) AS nb_articles_stock
-       FROM com_magasins m LEFT JOIN users u ON u.id = m.responsable_id
+       FROM com_magasins m LEFT JOIN users u ON u.id = m.responsable_id JOIN com_agences ag ON ag.id = m.agence_id
       WHERE m.tenant_id = :t AND (:actifs <> '1' OR m.actif)
+        AND (:ag = 0 OR m.agence_id = :ag)
+        AND (CAST(:mags AS BIGINT[]) IS NULL OR m.id = ANY(CAST(:mags AS BIGINT[])))
         AND (:q = '' OR lower(m.code) LIKE :like OR lower(m.nom) LIKE :like OR lower(m.localisation) LIKE :like)
       ORDER BY m.actif DESC, upper(m.code)`,
-    { t: tenantId, actifs: String(actifs), q: txt(q), like: `%${txt(q).toLowerCase()}%` });
-  return rows.map((r) => ({ ...r, id: Number(r.id) }));
+    { t: tenantId, actifs: String(actifs), ag: Number.parseInt(agence_id, 10) || 0, mags: magasins ? `{${magasins.join(',')}}` : null,
+      q: txt(q), like: `%${txt(q).toLowerCase()}%` });
+  return rows.map((r) => ({ ...r, id: Number(r.id), agence_id: Number(r.agence_id) }));
 };
 
 const valeursMagasin = async (tenantId, b, tr) => {
@@ -142,11 +228,30 @@ const valeursMagasin = async (tenantId, b, tr) => {
     if (!u) throw new ErreurCom(400, 'Responsable inconnu pour ce client.');
     responsable = u.id;
   }
+  let agence = b.agence_id === undefined || b.agence_id === null || b.agence_id === '' ? null : entier(b.agence_id, 'Agence');
+  if (!agence) agence = await agenceParDefaut(tenantId, b.__userId, tr);
+  if (!agence) throw new ErreurCom(400, 'Choisissez l\'agence de rattachement du magasin.');
+  const [ag] = await Q('SELECT id, actif FROM com_agences WHERE id = :a AND tenant_id = :t', { a: agence, t: tenantId }, tr);
+  if (!ag) throw new ErreurCom(400, 'Agence inconnue.');
+  if (!ag.actif && Number(b.__agenceAvant) !== agence) throw new ErreurCom(400, 'Cette agence est désactivée.');
   return {
     code, nom, description: longueur(b.description, 1000, 'Description'),
     localisation: longueur(b.localisation, 300, 'Localisation'), responsable_id: responsable,
-    actif: b.actif === undefined ? true : Boolean(b.actif),
+    agence_id: agence, actif: b.actif === undefined ? true : Boolean(b.actif),
   };
+};
+
+// Un magasin qui a déjà servi (stock, demandes, bons) ne change pas d'agence :
+// ses documents resteraient sinon rattachés à la mauvaise agence dans les états.
+const magasinUtilise = async (magasinId, tr) => {
+  for (const [table, col] of [['com_stock_mouvements', 'magasin_id'], ['com_demandes', 'magasin_id'], ['com_bons_commande', 'magasin_id']]) {
+    const [t] = await Q(`SELECT to_regclass('public.${table}') IS NOT NULL AS ok`, {}, tr);
+    if (t.ok) {
+      const [u] = await Q(`SELECT 1 FROM ${table} WHERE ${col} = :m LIMIT 1`, { m: magasinId }, tr);
+      if (u) return true;
+    }
+  }
+  return false;
 };
 
 const enregistrerMagasin = async ({ tenantId, userId, id, body }) => {
@@ -157,16 +262,20 @@ const enregistrerMagasin = async ({ tenantId, userId, id, body }) => {
         const mi = entier(id, 'Magasin');
         const [avant] = await Q('SELECT * FROM com_magasins WHERE id = :id AND tenant_id = :t FOR UPDATE', { id: mi, t: tenantId }, tr);
         if (!avant) throw new ErreurCom(404, 'Magasin introuvable.');
-        const v = await valeursMagasin(tenantId, { ...avant, ...body }, tr);
+        const v = await valeursMagasin(tenantId, { ...avant, ...body, __userId: userId, __agenceAvant: avant.agence_id }, tr);
+        if (Number(avant.agence_id) !== v.agence_id && await magasinUtilise(mi, tr)) {
+          throw new ErreurCom(409, 'Ce magasin a déjà des mouvements ou des documents : il ne change pas d\'agence. Créez un nouveau magasin dans l\'autre agence.');
+        }
         await X(`UPDATE com_magasins SET code = :code, nom = :nom, description = :description, localisation = :localisation,
-                   responsable_id = :responsable_id, actif = :actif, modifie_le = NOW() WHERE id = :id`, { ...v, id: mi }, tr);
+                   responsable_id = :responsable_id, agence_id = :agence_id, actif = :actif, modifie_le = NOW() WHERE id = :id`, { ...v, id: mi }, tr);
+        avant.agence_id = Number(avant.agence_id);
         const d = differences(avant, v);
         if (d) await auditer(tr, { tenantId, userId, action: 'COM_MAGASIN_MODIFICATION', id: mi, ...d });
         return mi;
       }
-      const v = await valeursMagasin(tenantId, body, tr);
-      const [r] = await Q(`INSERT INTO com_magasins (tenant_id, code, nom, description, localisation, responsable_id, actif, cree_par)
-                           VALUES (:t, :code, :nom, :description, :localisation, :responsable_id, :actif, :u) RETURNING id`,
+      const v = await valeursMagasin(tenantId, { ...body, __userId: userId }, tr);
+      const [r] = await Q(`INSERT INTO com_magasins (tenant_id, code, nom, description, localisation, responsable_id, agence_id, actif, cree_par)
+                           VALUES (:t, :code, :nom, :description, :localisation, :responsable_id, :agence_id, :actif, :u) RETURNING id`,
       { ...v, t: tenantId, u: userId }, tr);
       await auditer(tr, { tenantId, userId, action: 'COM_MAGASIN_CREATION', id: r.id, apres: v });
       return Number(r.id);
@@ -179,17 +288,22 @@ const enregistrerMagasin = async ({ tenantId, userId, id, body }) => {
 const listerFamilles = async (tenantId, { q = '', actifs = '' } = {}) => {
   exigerClient(tenantId);
   const rows = await Q(
-    `SELECT f.*,
+    `SELECT f.*, ta.code AS taxe_achat_code, ta.taux AS taxe_achat_taux, tv.code AS taxe_vente_code, tv.taux AS taxe_vente_taux,
             COALESCE((SELECT json_agg(json_build_object('id', r.id, 'nom', r.nom, 'actif', r.actif) ORDER BY lower(r.nom))
                         FROM com_famille_fournisseurs ff JOIN registre_tiers r ON r.id = ff.tiers_id
                        WHERE ff.famille_id = f.id), '[]') AS fournisseurs,
             (SELECT COUNT(*)::int FROM com_articles a WHERE a.famille_id = f.id) AS nb_articles
        FROM com_familles f
+       LEFT JOIN com_taxes ta ON ta.id = f.taxe_achat_id LEFT JOIN com_taxes tv ON tv.id = f.taxe_vente_id
       WHERE f.tenant_id = :t AND (:actifs <> '1' OR f.actif)
         AND (:q = '' OR lower(f.code) LIKE :like OR lower(f.nom) LIKE :like)
       ORDER BY f.actif DESC, upper(f.code)`,
     { t: tenantId, actifs: String(actifs), q: txt(q), like: `%${txt(q).toLowerCase()}%` });
-  return rows.map((r) => ({ ...r, id: Number(r.id), fournisseurs: r.fournisseurs.map((f) => ({ ...f, id: Number(f.id) })) }));
+  return rows.map((r) => ({
+    ...r, id: Number(r.id), taxe_achat_id: r.taxe_achat_id ? Number(r.taxe_achat_id) : null, taxe_vente_id: r.taxe_vente_id ? Number(r.taxe_vente_id) : null,
+    taxe_achat_taux: r.taxe_achat_taux === null ? null : Number(r.taxe_achat_taux), taxe_vente_taux: r.taxe_vente_taux === null ? null : Number(r.taxe_vente_taux),
+    fournisseurs: r.fournisseurs.map((f) => ({ ...f, id: Number(f.id) })),
+  }));
 };
 
 // Vérifie que des tiers existent pour ce client et peuvent fournir (fournisseur ou mixte).
@@ -215,15 +329,24 @@ const enregistrerFamille = async ({ tenantId, userId, id, body }) => {
       if (!CODE_RE.test(code)) throw new ErreurCom(400, 'Code de la famille : 1 à 20 lettres, chiffres, point, tiret ou souligné.');
       const nom = longueur(b.nom, 120, 'Nom de la famille');
       if (!nom) throw new ErreurCom(400, 'Le nom de la famille est obligatoire.');
-      const v = { code, nom, description: longueur(b.description, 1000, 'Description'), actif: b.actif === undefined ? true : Boolean(b.actif) };
+      const suivi = booleen(b.suivi_stock, true);
+      const v = {
+        code, nom, description: longueur(b.description, 1000, 'Description'), actif: b.actif === undefined ? true : Boolean(b.actif),
+        taxe_achat_id: await taxePour(tenantId, b.taxe_achat_id, 'achat', tr), taxe_vente_id: await taxePour(tenantId, b.taxe_vente_id, 'vente', tr),
+        suivi_stock: suivi, methode_valorisation: methode(b.methode_valorisation),
+      };
       let famId;
       if (avant) {
         famId = Number(avant.id);
-        await X('UPDATE com_familles SET code = :code, nom = :nom, description = :description, actif = :actif, modifie_le = NOW() WHERE id = :id',
-          { ...v, id: famId }, tr);
+        // Les articles existants gardent leurs paramètres : la famille ne fait que proposer.
+        await X(`UPDATE com_familles SET code = :code, nom = :nom, description = :description, actif = :actif, taxe_achat_id = :taxe_achat_id,
+                   taxe_vente_id = :taxe_vente_id, suivi_stock = :suivi_stock, methode_valorisation = :methode_valorisation, modifie_le = NOW() WHERE id = :id`,
+        { ...v, id: famId }, tr);
+        for (const k of ['taxe_achat_id', 'taxe_vente_id']) avant[k] = avant[k] ? Number(avant[k]) : null;
       } else {
-        const [r] = await Q(`INSERT INTO com_familles (tenant_id, code, nom, description, actif, cree_par)
-                             VALUES (:t, :code, :nom, :description, :actif, :u) RETURNING id`, { ...v, t: tenantId, u: userId }, tr);
+        const [r] = await Q(`INSERT INTO com_familles (tenant_id, code, nom, description, actif, taxe_achat_id, taxe_vente_id, suivi_stock, methode_valorisation, cree_par)
+                             VALUES (:t, :code, :nom, :description, :actif, :taxe_achat_id, :taxe_vente_id, :suivi_stock, :methode_valorisation, :u) RETURNING id`,
+        { ...v, t: tenantId, u: userId }, tr);
         famId = Number(r.id);
       }
       let fournisseurs = null;
@@ -248,13 +371,14 @@ const enregistrerFamille = async ({ tenantId, userId, id, body }) => {
 
 // ── Taxes ────────────────────────────────────────────────────────────────
 const TYPES_TAXE = { tva: 'TVA', precompte: 'Précompte / retenue', autre: 'Autre' };
+const USAGES_TAXE = { achat: 'Achats', vente: 'Ventes', les_deux: 'Achats et ventes' };
 const listerTaxes = async (tenantId, { actifs = '' } = {}) => {
   exigerClient(tenantId);
   const rows = await Q(
-    `SELECT x.*, (SELECT COUNT(*)::int FROM com_articles a WHERE a.taxe_id = x.id) AS nb_articles
+    `SELECT x.*, (SELECT COUNT(*)::int FROM com_articles a WHERE a.taxe_id = x.id OR a.taxe_vente_id = x.id) AS nb_articles
        FROM com_taxes x WHERE x.tenant_id = :t AND (:actifs <> '1' OR x.actif) ORDER BY x.actif DESC, upper(x.code)`,
     { t: tenantId, actifs: String(actifs) });
-  return rows.map((r) => ({ ...r, id: Number(r.id), taux: Number(r.taux), type_libelle: TYPES_TAXE[r.type] }));
+  return rows.map((r) => ({ ...r, id: Number(r.id), taux: Number(r.taux), type_libelle: TYPES_TAXE[r.type], usage_libelle: USAGES_TAXE[r.usage] }));
 };
 
 const dateOuNull = (v, nom) => {
@@ -285,7 +409,15 @@ const enregistrerTaxe = async ({ tenantId, userId, id, body }) => {
       const v = {
         code, intitule, taux, type: b.type || 'tva', description: longueur(b.description, 1000, 'Description'),
         debut: dateOuNull(b.debut, 'Date de début'), fin: dateOuNull(b.fin, 'Date de fin'), actif: b.actif === undefined ? true : Boolean(b.actif),
+        usage: b.usage || 'les_deux',
       };
+      if (!USAGES_TAXE[v.usage]) throw new ErreurCom(400, 'Usage de la taxe inconnu (achats, ventes ou les deux).');
+      // Une taxe déjà choisie comme taxe d'achat (ou de vente) ne peut pas perdre cet usage.
+      if (avant && v.usage !== 'les_deux') {
+        const col = v.usage === 'achat' ? ['taxe_vente_id', 'taxe_vente_id'] : ['taxe_id', 'taxe_achat_id'];
+        const [u] = await Q(`SELECT 1 FROM com_articles WHERE ${col[0]} = :x UNION ALL SELECT 1 FROM com_familles WHERE ${col[1]} = :x LIMIT 1`, { x: avant.id }, tr);
+        if (u) throw new ErreurCom(409, `Cette taxe sert déjà de taxe ${v.usage === 'achat' ? 'de vente' : 'd\'achat'} sur des articles ou des familles.`);
+      }
       if (v.debut && v.fin && v.fin < v.debut) throw new ErreurCom(400, 'La fin de validité précède le début.');
       // Un taux déjà repris dans un document ne change jamais : on crée une nouvelle taxe datée.
       if (avant && Number(avant.taux) !== taux && await tauxUtilise(Number(avant.id), tr)) {
@@ -293,13 +425,13 @@ const enregistrerTaxe = async ({ tenantId, userId, id, body }) => {
       }
       if (avant) {
         await X(`UPDATE com_taxes SET code = :code, intitule = :intitule, taux = :taux, type = :type, description = :description,
-                   debut = :debut, fin = :fin, actif = :actif, modifie_le = NOW() WHERE id = :id`, { ...v, id: Number(avant.id) }, tr);
+                   debut = :debut, fin = :fin, actif = :actif, usage = :usage, modifie_le = NOW() WHERE id = :id`, { ...v, id: Number(avant.id) }, tr);
         const d = differences({ ...avant, debut: avant.debut ? String(avant.debut).slice(0, 10) : null, fin: avant.fin ? String(avant.fin).slice(0, 10) : null }, v);
         if (d) await auditer(tr, { tenantId, userId, action: 'COM_TAXE_MODIFICATION', id: avant.id, ...d });
         return Number(avant.id);
       }
-      const [r] = await Q(`INSERT INTO com_taxes (tenant_id, code, intitule, taux, type, description, debut, fin, actif, cree_par)
-                           VALUES (:t, :code, :intitule, :taux, :type, :description, :debut, :fin, :actif, :u) RETURNING id`,
+      const [r] = await Q(`INSERT INTO com_taxes (tenant_id, code, intitule, taux, type, description, debut, fin, actif, usage, cree_par)
+                           VALUES (:t, :code, :intitule, :taux, :type, :description, :debut, :fin, :actif, :usage, :u) RETURNING id`,
       { ...v, t: tenantId, u: userId }, tr);
       await auditer(tr, { tenantId, userId, action: 'COM_TAXE_CREATION', id: r.id, apres: v });
       return Number(r.id);
@@ -425,6 +557,7 @@ const enregistrerBanque = async (tr, { tenantId, userId, tid, b }) => {
 // ── Articles ─────────────────────────────────────────────────────────────
 const SQL_ARTICLES = `
   SELECT a.*, f.code AS famille_code, f.nom AS famille_nom, x.code AS taxe_code, x.taux AS taxe_taux,
+         xv.code AS taxe_vente_code, xv.taux AS taxe_vente_taux,
          COALESCE((SELECT json_agg(json_build_object('id', r.id, 'nom', r.nom) ORDER BY lower(r.nom))
                      FROM com_article_fournisseurs af JOIN registre_tiers r ON r.id = af.tiers_id
                     WHERE af.article_id = a.id), '[]') AS fournisseurs_directs,
@@ -436,13 +569,16 @@ const SQL_ARTICLES = `
                     WHERE am.article_id = a.id), '[]') AS magasins
     FROM com_articles a
     JOIN com_familles f ON f.id = a.famille_id
-    LEFT JOIN com_taxes x ON x.id = a.taxe_id`;
+    LEFT JOIN com_taxes x ON x.id = a.taxe_id
+    LEFT JOIN com_taxes xv ON xv.id = a.taxe_vente_id`;
 
 const formaterArticle = (r) => ({
   ...r, id: Number(r.id), famille_id: Number(r.famille_id), taxe_id: r.taxe_id ? Number(r.taxe_id) : null,
   prix_achat_indicatif: r.prix_achat_indicatif === null ? null : Number(r.prix_achat_indicatif),
   seuil_alerte: r.seuil_alerte === null ? null : Number(r.seuil_alerte),
   taxe_taux: r.taxe_taux === null || r.taxe_taux === undefined ? null : Number(r.taxe_taux),
+  taxe_vente_id: r.taxe_vente_id ? Number(r.taxe_vente_id) : null,
+  taxe_vente_taux: r.taxe_vente_taux === null || r.taxe_vente_taux === undefined ? null : Number(r.taxe_vente_taux),
   fournisseurs_directs: r.fournisseurs_directs.map((x) => ({ ...x, id: Number(x.id) })),
   fournisseurs_famille: r.fournisseurs_famille.map((x) => ({ ...x, id: Number(x.id) })),
   magasins: r.magasins.map((x) => ({ ...x, id: Number(x.id) })),
@@ -504,22 +640,37 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
       if (!designation) throw new ErreurCom(400, 'La désignation est obligatoire.');
       if (b.famille_id === undefined || b.famille_id === null || b.famille_id === '') throw new ErreurCom(400, 'La famille d\'articles est obligatoire.');
       const familleId = entier(b.famille_id, 'Famille');
-      const [fam] = await Q('SELECT id, actif FROM com_familles WHERE id = :id AND tenant_id = :t', { id: familleId, t: tenantId }, tr);
+      const [fam] = await Q('SELECT * FROM com_familles WHERE id = :id AND tenant_id = :t', { id: familleId, t: tenantId }, tr);
       if (!fam) throw new ErreurCom(400, 'Famille inconnue.');
       if (!fam.actif && Number(avant?.famille_id) !== familleId) throw new ErreurCom(400, 'Cette famille est désactivée.');
       if (b.suivi_comptable === undefined || b.suivi_comptable === null || b.suivi_comptable === '') {
         throw new ErreurCom(400, 'Indiquez si l\'article est suivi en comptabilité (oui / non).');
       }
-      let taxeId = b.taxe_id === undefined || b.taxe_id === null || b.taxe_id === '' ? null : entier(b.taxe_id, 'Taxe');
-      if (taxeId) {
-        const [x] = await Q('SELECT id FROM com_taxes WHERE id = :id AND tenant_id = :t', { id: taxeId, t: tenantId }, tr);
-        if (!x) throw new ErreurCom(400, 'Taxe inconnue.');
+      // Création : ce que l'écran n'envoie pas est repris de la famille (054) ; ensuite,
+      // chaque article garde ses propres paramètres (modifier la famille ne le touche plus).
+      if (!avant) {
+        if (body.taxe_id === undefined) b.taxe_id = fam.taxe_achat_id;
+        if (body.taxe_vente_id === undefined) b.taxe_vente_id = fam.taxe_vente_id;
+        if (body.suivi_stock === undefined) b.suivi_stock = fam.suivi_stock;
+        if (body.methode_valorisation === undefined) b.methode_valorisation = fam.methode_valorisation;
+      }
+      const taxeId = await taxePour(tenantId, b.taxe_id, 'achat', tr);
+      const taxeVenteId = await taxePour(tenantId, b.taxe_vente_id, 'vente', tr);
+      const suiviStock = booleen(b.suivi_stock, true);
+      const methodeV = methode(b.methode_valorisation);
+      if (avant) {
+        const [mv] = await Q('SELECT COUNT(*)::int AS n, COUNT(*) FILTER (WHERE type <> \'stock_initial\')::int AS autres FROM com_stock_mouvements WHERE article_id = :a', { a: avant.id }, tr);
+        if (avant.suivi_stock && !suiviStock && mv.n) throw new ErreurCom(409, 'Cet article a déjà du stock enregistré : il reste suivi en stock.');
+        // Jusqu'au moteur de stock (lot 4), seul le stock d'ouverture existe, sans coût :
+        // la méthode peut encore changer. Après, elle ne changera que par inventaire de bascule.
+        if (avant.methode_valorisation !== methodeV && mv.autres) throw new ErreurCom(409, 'Des mouvements valorisés existent : la méthode ne se change que par un inventaire de bascule.');
       }
       const v = {
         reference, designation, description: longueur(b.description, 2000, 'Description'), famille_id: familleId,
         unite: longueur(b.unite || 'unité', 20, 'Unité'),
         prix_achat_indicatif: nombre(b.prix_achat_indicatif, 'Prix d\'achat indicatif', { vide: null }),
-        taxe_id: taxeId, seuil_alerte: nombre(b.seuil_alerte, 'Seuil d\'alerte', { vide: null }),
+        taxe_id: taxeId, taxe_vente_id: taxeVenteId, suivi_stock: suiviStock, methode_valorisation: methodeV,
+        seuil_alerte: nombre(b.seuil_alerte, 'Seuil d\'alerte', { vide: null }),
         suivi_comptable: b.suivi_comptable === true || b.suivi_comptable === 'true' || b.suivi_comptable === 1 || b.suivi_comptable === '1',
         actif: b.actif === undefined ? true : Boolean(b.actif),
       };
@@ -527,19 +678,21 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
       if (avant) {
         artId = Number(avant.id);
         await X(`UPDATE com_articles SET reference = :reference, designation = :designation, description = :description, famille_id = :famille_id,
-                   unite = :unite, prix_achat_indicatif = :prix_achat_indicatif, taxe_id = :taxe_id, seuil_alerte = :seuil_alerte,
+                   unite = :unite, prix_achat_indicatif = :prix_achat_indicatif, taxe_id = :taxe_id, taxe_vente_id = :taxe_vente_id,
+                   suivi_stock = :suivi_stock, methode_valorisation = :methode_valorisation, seuil_alerte = :seuil_alerte,
                    suivi_comptable = :suivi_comptable, actif = :actif, modifie_par = :u, modifie_le = NOW() WHERE id = :id`,
         { ...v, u: userId, id: artId }, tr);
         const norm = { ...avant, famille_id: Number(avant.famille_id), taxe_id: avant.taxe_id ? Number(avant.taxe_id) : null,
+          taxe_vente_id: avant.taxe_vente_id ? Number(avant.taxe_vente_id) : null,
           prix_achat_indicatif: avant.prix_achat_indicatif === null ? null : Number(avant.prix_achat_indicatif),
           seuil_alerte: avant.seuil_alerte === null ? null : Number(avant.seuil_alerte) };
         const d = differences(norm, v);
         if (d) await auditer(tr, { tenantId, userId, action: 'COM_ARTICLE_MODIFICATION', id: artId, ...d });
       } else {
         const [r] = await Q(`INSERT INTO com_articles (tenant_id, reference, designation, description, famille_id, unite, prix_achat_indicatif,
-                               taxe_id, seuil_alerte, suivi_comptable, actif, cree_par, modifie_par)
+                               taxe_id, taxe_vente_id, suivi_stock, methode_valorisation, seuil_alerte, suivi_comptable, actif, cree_par, modifie_par)
                              VALUES (:t, :reference, :designation, :description, :famille_id, :unite, :prix_achat_indicatif,
-                               :taxe_id, :seuil_alerte, :suivi_comptable, :actif, :u, :u) RETURNING id`, { ...v, t: tenantId, u: userId }, tr);
+                               :taxe_id, :taxe_vente_id, :suivi_stock, :methode_valorisation, :seuil_alerte, :suivi_comptable, :actif, :u, :u) RETURNING id`, { ...v, t: tenantId, u: userId }, tr);
         artId = Number(r.id);
         await auditer(tr, { tenantId, userId, action: 'COM_ARTICLE_CREATION', id: artId, apres: v });
       }
@@ -622,8 +775,9 @@ const enregistrerStockInitial = async ({ tenantId, userId, body }) => {
   if (!date) throw new ErreurCom(400, 'La date de l\'inventaire d\'ouverture est obligatoire.');
   if (date > new Date().toISOString().slice(0, 10)) throw new ErreurCom(400, 'La date de l\'inventaire ne peut pas être dans le futur.');
   await sequelize.transaction(async (tr) => {
-    const [a] = await Q('SELECT id, reference FROM com_articles WHERE id = :a AND tenant_id = :t', { a: aid, t: tenantId }, tr);
+    const [a] = await Q('SELECT id, reference, suivi_stock FROM com_articles WHERE id = :a AND tenant_id = :t', { a: aid, t: tenantId }, tr);
     if (!a) throw new ErreurCom(404, 'Article introuvable.');
+    if (!a.suivi_stock) throw new ErreurCom(400, 'Cet article n\'est pas suivi en stock : aucun stock ne peut lui être saisi.');
     const [m] = await Q('SELECT id, code, actif FROM com_magasins WHERE id = :m AND tenant_id = :t', { m: mid, t: tenantId }, tr);
     if (!m) throw new ErreurCom(404, 'Magasin introuvable.');
     if (!m.actif) throw new ErreurCom(400, 'Ce magasin est désactivé.');
@@ -650,21 +804,42 @@ const enregistrerStockInitial = async ({ tenantId, userId, body }) => {
 const utilisateurs = async (tenantId) => {
   exigerClient(tenantId);
   const perm = require('../permission.service');
-  const users = await Q(`SELECT u.id, u.username, u.email, u.role, u.actif, r.nom AS profil
+  const users = await Q(`SELECT u.id, u.username, u.email, u.role, u.actif, r.nom AS profil,
+                                COALESCE((SELECT json_agg(ua.agence_id ORDER BY ua.agence_id) FROM com_utilisateur_agences ua WHERE ua.user_id = u.id), '[]') AS agences
                            FROM users u LEFT JOIN roles r ON r.id = u.custom_role_id
                           WHERE u.tenant_id = :t ORDER BY u.actif DESC, lower(u.username)`, { t: tenantId });
   const out = [];
   for (const u of users) {
     const p = await perm.getEffectivePermissions({ tenantId, userId: u.id, role: u.role });
-    out.push({ ...u, permissions: (p || []).filter((c) => c.startsWith('com.')) });
+    out.push({ ...u, agences: u.agences.map(Number), permissions: (p || []).filter((c) => c.startsWith('com.')) });
   }
   const catalogue = await Q("SELECT code, nom, description FROM permissions WHERE module = 'commercial' ORDER BY code", {});
-  return { utilisateurs: out, catalogue };
+  return { utilisateurs: out, catalogue, agences: await listerAgences(tenantId) };
+};
+
+// Périmètre d'une personne : aucune agence = tout le client ; sinon ces agences seulement.
+const definirAgencesUtilisateur = async ({ tenantId, userId, id, body }) => {
+  exigerClient(tenantId);
+  const agences = ids(body.agence_ids, 'Agence');
+  await sequelize.transaction(async (tr) => {
+    const [u] = await Q('SELECT id, username FROM users WHERE id::text = :u AND tenant_id = :t', { u: txt(id), t: tenantId }, tr);
+    if (!u) throw new ErreurCom(404, 'Utilisateur introuvable pour ce client.');
+    if (agences.length) {
+      const ok = await Q('SELECT id FROM com_agences WHERE tenant_id = :t AND id IN (:a)', { t: tenantId, a: agences }, tr);
+      if (ok.length !== agences.length) throw new ErreurCom(400, 'Une des agences choisies est inconnue.');
+    }
+    const avant = (await Q('SELECT agence_id FROM com_utilisateur_agences WHERE user_id = :u', { u: u.id }, tr)).map((r) => Number(r.agence_id));
+    await X('DELETE FROM com_utilisateur_agences WHERE user_id = :u', { u: u.id }, tr);
+    for (const a of agences) await X('INSERT INTO com_utilisateur_agences (user_id, agence_id, tenant_id) VALUES (:u, :a, :t)', { u: u.id, a, t: tenantId }, tr);
+    await auditer(tr, { tenantId, userId, action: 'COM_PERIMETRE_AGENCES', id: u.id, avant: { username: u.username, agences: avant }, apres: { username: u.username, agences } });
+  });
+  return utilisateurs(tenantId);
 };
 
 module.exports = {
   ErreurCom,
   lireSociete, modifierSociete,
+  listerAgences, enregistrerAgence, definirAgencesUtilisateur,
   listerMagasins, enregistrerMagasin,
   listerFamilles, enregistrerFamille,
   listerTaxes, enregistrerTaxe,

@@ -26,9 +26,9 @@ export default function BonFormPage() {
   useEffect(() => {
     (async () => {
       const [fo, ma, tx] = await Promise.all([
-        api.get('/commercial/tiers?type=fournisseur&actifs=1'), api.get('/commercial/magasins?actifs=1'), api.get('/commercial/taxes?actifs=1'),
+        api.get('/commercial/tiers?type=fournisseur&actifs=1'), api.get('/commercial/magasins?actifs=1&perimetre=1'), api.get('/commercial/taxes?actifs=1'),
       ]);
-      const r = { fournisseurs: fo?.error ? [] : fo, magasins: ma?.error ? [] : ma, taxes: tx?.error ? [] : tx };
+      const r = { fournisseurs: fo?.error ? [] : fo, magasins: ma?.error ? [] : ma, taxes: tx?.error ? [] : tx.filter((t) => t.usage !== 'vente') };
       setRefs(r);
       if (id) {
         const b = await api.get(`/commercial/bons-commande/${id}`);

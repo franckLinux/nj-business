@@ -12,23 +12,24 @@ import { api } from '@/lib/api';
 import '@/styles/commercial.css';
 
 const TITRES = {
-  '/commercial': 'NJ COMMERCIAL — Démarrage',
-  '/commercial/societe': 'Paramétrage — Société',
-  '/commercial/magasins': 'Paramétrage — Magasins',
-  '/commercial/familles': 'Paramétrage — Familles d\'articles',
-  '/commercial/articles': 'Paramétrage — Articles',
-  '/commercial/fournisseurs': 'Paramétrage — Fournisseurs',
-  '/commercial/clients': 'Paramétrage — Clients',
-  '/commercial/taxes': 'Paramétrage — Taxes',
-  '/commercial/utilisateurs': 'Paramétrage — Utilisateurs et rôles',
-  '/commercial/demandes': 'Achats — Demandes d\'achat',
-  '/commercial/demandes/nouvelle': 'Achats — Nouvelle demande',
-  '/commercial/autorisations': 'Achats — Autorisations',
+  '/commercial/mise-en-route': 'Configuration — Mise en route',
+  '/commercial/agences': 'Configuration — Agences',
+  '/commercial/societe': 'Configuration — Société',
+  '/commercial/magasins': 'Configuration — Magasins',
+  '/commercial/familles': 'Configuration — Familles d\'articles',
+  '/commercial/articles': 'Configuration — Articles',
+  '/commercial/fournisseurs': 'Configuration — Fournisseurs',
+  '/commercial/clients': 'Configuration — Clients',
+  '/commercial/taxes': 'Configuration — Taxes',
+  '/commercial/utilisateurs': 'Configuration — Utilisateurs et rôles',
+  '/commercial/demandes': 'Achats — Expressions de besoin',
+  '/commercial/demandes/nouvelle': 'Achats — Nouvelle expression de besoin',
+  '/commercial/autorisations': 'Contrôles — Autorisations d\'achat',
   '/commercial/bons': 'Achats — Bons de commande',
   '/commercial/bons/nouveau': 'Achats — Préparer un bon de commande',
-  '/commercial/tableau-bord': 'Achats — Tableau de bord',
-  '/commercial/documents': 'Achats — Documents justificatifs',
-  '/commercial/historique': 'Achats — Historique',
+  '/commercial/tableau-bord': 'NJ COMMERCIAL — Tableau de bord',
+  '/commercial/documents': 'Contrôles — Documents justificatifs',
+  '/commercial/historique': 'Contrôles — Historique',
 };
 const titre = (chemin) => TITRES[chemin]
   || (/^\/commercial\/demandes\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier la demande'
@@ -36,16 +37,52 @@ const titre = (chemin) => TITRES[chemin]
       : /^\/commercial\/bons\/\d+\/modifier$/.test(chemin) ? 'Achats — Modifier le bon de commande'
         : /^\/commercial\/bons\/\d+$/.test(chemin) ? 'Achats — Bon de commande' : 'NJ COMMERCIAL');
 
-// Entrées du menu : [chemin, libellé, permission(s) — une suffit, icône]
-const PARAMETRAGE = [
-  ['/commercial/societe', 'Société', ['com.parametrage.voir'], 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1'],
-  ['/commercial/magasins', 'Magasins', ['com.parametrage.voir', 'com.articles.voir'], 'M3 9l1-5h16l1 5M3 9h18v11H3zM9 20v-6h6v6'],
-  ['/commercial/familles', 'Familles d\'articles', ['com.parametrage.voir', 'com.articles.voir'], 'M3 7h7l2 2h9v10H3z'],
-  ['/commercial/articles', 'Articles', ['com.articles.voir', 'com.da.creer'], 'M21 16V8l-9-5-9 5v8l9 5 9-5zM3.3 7L12 12l8.7-5M12 22V12'],
-  ['/commercial/fournisseurs', 'Fournisseurs', ['com.tiers.voir'], 'M1 3h15v13H1zM16 8h4l3 3v5h-7M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z'],
-  ['/commercial/clients', 'Clients', ['com.tiers.voir'], 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'],
-  ['/commercial/taxes', 'Taxes', ['com.parametrage.voir'], 'M19 5L5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z'],
-  ['/commercial/utilisateurs', 'Utilisateurs et rôles', ['com.parametrage.modifier'], 'M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1'],
+// Menu en quatre rubriques (lot 1) : la saisie dans « Traitements », la décision
+// et le suivi dans « Contrôles et reporting ». Une entrée n'apparaît qu'avec une
+// de ses permissions, et seulement quand son lot est livré (aucune entrée vide).
+const I = {
+  tableau: 'M6 20v-7M12 20V6M18 20v-10M3 20h18',
+  depart: 'M4 4h16v16H4zM4 10h16M10 4v16',
+  societe: 'M3 21h18M5 21V7l7-4 7 4v14M9 9h1m4 0h1M9 13h1m4 0h1M9 17h1m4 0h1',
+  agence: 'M3 21h18M4 21V10l8-6 8 6v11M9 21v-6h6v6',
+  magasin: 'M3 9l1-5h16l1 5M3 9h18v11H3zM9 20v-6h6v6',
+  famille: 'M3 7h7l2 2h9v10H3z',
+  article: 'M21 16V8l-9-5-9 5v8l9 5 9-5zM3.3 7L12 12l8.7-5M12 22V12',
+  fournisseur: 'M1 3h15v13H1zM16 8h4l3 3v5h-7M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  client: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  taxe: 'M19 5L5 19M6.5 9a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM17.5 20a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  utilisateur: 'M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1',
+  besoin: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M9 13h6M9 17h4',
+  bon: 'M6 2h9l5 5v15H6zM14 2v6h6M9 13h6M9 17h6M9 9h2',
+  autorisation: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4',
+  piece: 'M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48',
+  historique: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2',
+};
+const RUBRIQUES = [
+  { titre: 'Tableau de bord', groupes: [{ entrees: [
+    { to: '/commercial/tableau-bord', libelle: 'Tableau de bord', codes: ['com.tableau_bord.voir'], icone: I.tableau },
+  ] }] },
+  { titre: 'Configuration', groupes: [{ entrees: [
+    { to: '/commercial/mise-en-route', libelle: 'Mise en route', codes: ['com.parametrage.voir', 'com.articles.voir', 'com.da.creer', 'com.tiers.voir'], icone: I.depart },
+    { to: '/commercial/societe', libelle: 'Société', codes: ['com.parametrage.voir'], icone: I.societe },
+    { to: '/commercial/agences', libelle: 'Agences', codes: ['com.parametrage.voir'], icone: I.agence },
+    { to: '/commercial/magasins', libelle: 'Magasins', codes: ['com.parametrage.voir', 'com.articles.voir'], icone: I.magasin },
+    { to: '/commercial/familles', libelle: 'Familles d\'articles', codes: ['com.parametrage.voir', 'com.articles.voir'], icone: I.famille },
+    { to: '/commercial/articles', libelle: 'Articles', codes: ['com.articles.voir', 'com.da.creer'], icone: I.article },
+    { to: '/commercial/fournisseurs', libelle: 'Fournisseurs', codes: ['com.tiers.voir'], icone: I.fournisseur },
+    { to: '/commercial/clients', libelle: 'Clients', codes: ['com.tiers.voir'], icone: I.client },
+    { to: '/commercial/taxes', libelle: 'Taxes', codes: ['com.parametrage.voir'], icone: I.taxe },
+    { to: '/commercial/utilisateurs', libelle: 'Utilisateurs et rôles', codes: ['com.parametrage.modifier'], icone: I.utilisateur },
+  ] }] },
+  { titre: 'Traitements', groupes: [{ titre: 'Achats', entrees: [
+    { to: '/commercial/demandes', libelle: 'Expressions de besoin', codes: ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'], icone: I.besoin, badge: 'a_corriger', badgeTitre: 'Vos demandes à corriger' },
+    { to: '/commercial/bons', libelle: 'Bons de commande', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.bon, badge: 'a_commander', badgeTitre: 'Demandes approuvées à commander' },
+  ] }] },
+  { titre: 'Contrôles et reporting', groupes: [{ entrees: [
+    { to: '/commercial/autorisations', libelle: 'Autorisations d\'achat', codes: ['com.da.approuver', 'com.da.approuver_direction'], icone: I.autorisation, badge: 'a_examiner', badgeTitre: 'Demandes qui attendent votre décision' },
+    { to: '/commercial/documents', libelle: 'Documents justificatifs', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.piece },
+    { to: '/commercial/historique', libelle: 'Historique', codes: ['com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.historique },
+  ] }] },
 ];
 
 export const peutUn = (can, codes) => codes.some((c) => can(c));
@@ -82,55 +119,27 @@ function CommercialSidebar({ open, onClose }) {
         <button type="button" className="sidebar-close" onClick={onClose} aria-label="Fermer le menu">✕</button>
       </div>
       <nav className="sidebar-nav">
-        <NavLink to="/commercial" end className={navClass}>
-          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
-          Démarrage
-        </NavLink>
-        {peutUn(can, [...DROITS_DEMANDES, ...DROITS_BONS]) && <div className="cm-sidebar-label">Achats</div>}
-        {can('com.tableau_bord.voir') && (
-          <NavLink to="/commercial/tableau-bord" className={navClass}>
-            <svg viewBox="0 0 24 24"><line x1="6" y1="20" x2="6" y2="13" /><line x1="12" y1="20" x2="12" y2="6" /><line x1="18" y1="20" x2="18" y2="10" /><line x1="3" y1="20" x2="21" y2="20" /></svg>
-            Tableau de bord
-          </NavLink>
-        )}
-        {peutUn(can, DROITS_DEMANDES) && (<>
-          <NavLink to="/commercial/demandes" className={navClass}>
-            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="9" y1="13" x2="15" y2="13" /><line x1="9" y1="17" x2="13" y2="17" /></svg>
-            <span style={{ flex: 1 }}>Demandes d'achat</span>
-            {badge.a_corriger > 0 && <span className="cm-badge-menu" title="Vos demandes à corriger">{badge.a_corriger}</span>}
-          </NavLink>
-          {peutUn(can, DROITS_AUTORISATIONS) && (
-            <NavLink to="/commercial/autorisations" className={navClass}>
-              <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><polyline points="9 12 11 14 15 10" /></svg>
-              <span style={{ flex: 1 }}>Autorisations</span>
-              {badge.a_examiner > 0 && <span className="cm-badge-menu" title="Demandes qui attendent votre décision">{badge.a_examiner}</span>}
-            </NavLink>
-          )}
-        </>)}
-        {peutUn(can, DROITS_BONS) && (<>
-          <NavLink to="/commercial/bons" className={navClass}>
-            <svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6z" /><polyline points="14 2 14 8 20 8" /><path d="M9 13h6M9 17h6M9 9h2" /></svg>
-            <span style={{ flex: 1 }}>Bons de commande</span>
-            {badge.a_commander > 0 && <span className="cm-badge-menu" title="Demandes approuvées à commander">{badge.a_commander}</span>}
-          </NavLink>
-          <NavLink to="/commercial/documents" className={navClass}>
-            <svg viewBox="0 0 24 24"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
-            Documents justificatifs
-          </NavLink>
-        </>)}
-        {peutUn(can, DROITS_HISTORIQUE) && (
-          <NavLink to="/commercial/historique" className={navClass}>
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg>
-            Historique
-          </NavLink>
-        )}
-        <div className="cm-sidebar-label">Paramétrage</div>
-        {PARAMETRAGE.filter(([, , codes]) => peutUn(can, codes)).map(([to, libelle, , d]) => (
-          <NavLink key={to} to={to} className={navClass}>
-            <svg viewBox="0 0 24 24"><path d={d} /></svg>
-            {libelle}
-          </NavLink>
-        ))}
+        {RUBRIQUES.map((r) => {
+          const groupes = r.groupes.map((g) => ({ ...g, entrees: g.entrees.filter((e) => peutUn(can, e.codes)) })).filter((g) => g.entrees.length);
+          if (!groupes.length) return null;
+          return (
+            <div key={r.titre} className="cm-rubrique">
+              <div className="cm-sidebar-label">{r.titre}</div>
+              {groupes.map((g) => (
+                <div key={g.titre || r.titre}>
+                  {g.titre && <div className="cm-sidebar-sous">{g.titre}</div>}
+                  {g.entrees.map((e) => (
+                    <NavLink key={e.to} to={e.to} end={e.end} className={navClass}>
+                      <svg viewBox="0 0 24 24"><path d={e.icone} /></svg>
+                      <span style={{ flex: 1 }}>{e.libelle}</span>
+                      {e.badge && badge[e.badge] > 0 && <span className="cm-badge-menu" title={e.badgeTitre}>{badge[e.badge]}</span>}
+                    </NavLink>
+                  ))}
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </nav>
       <div className="sidebar-footer">
         <div className="user-pill" role="button" tabIndex={0} title="Mon compte" style={{ cursor: 'pointer' }}
