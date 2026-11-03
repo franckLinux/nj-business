@@ -130,6 +130,25 @@ test('Société : identité reprise de l\'Entité, paramètres du module enregis
   assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { prefixe_da: 'trop-long!' })).status, 400);
 });
 
+test('Société : compléments d\'identité pour les seuls champs vides de la caisse, sans toucher la caisse', async () => {
+  await sql("UPDATE tenants SET ville = 'Douala', nui = '' WHERE id = $1", [A]);
+  const r = await appel('PUT', '/commercial/societe', 'dirA', { identite_complement: { nui: 'M0123456789X', ville: 'Yaoundé', telephone: '699 00 00 00' } });
+  assert.equal(r.status, 200, r.message);
+  assert.equal(r.data.identite.nui, 'M0123456789X', 'complété');
+  assert.equal(r.data.sources.nui, 'module');
+  assert.equal(r.data.identite.ville, 'Douala', 'la caisse fait foi');
+  assert.equal(r.data.complement.ville, undefined, 'champ de la caisse ignoré');
+  const [t] = await sql('SELECT nui, ville FROM tenants WHERE id = $1', [A]);
+  assert.deepEqual([t.nui, t.ville], ['', 'Douala'], 'la caisse n\'est pas modifiée');
+  assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { identite_complement: { email: 'pas-un-mail' } })).status, 400);
+  assert.equal((await appel('PUT', '/commercial/societe', 'colA', { identite_complement: { nui: 'X' } })).status, 403);
+  // La caisse renseigne le champ plus tard : sa valeur l'emporte.
+  await sql("UPDATE tenants SET nui = 'P9999999999Z' WHERE id = $1", [A]);
+  const l = (await appel('GET', '/commercial/societe', 'dirA')).data;
+  assert.equal(l.identite.nui, 'P9999999999Z');
+  assert.equal(l.sources.nui, 'caisse');
+});
+
 test('Magasins : création, code unique sans tenir compte de la casse, désactivation', async () => {
   let r = await appel('POST', '/commercial/magasins', 'dirA', { code: 'mag01', nom: 'Magasin central', localisation: 'Yaoundé', responsable_id: U.colA.id });
   assert.equal(r.status, 201, r.message);

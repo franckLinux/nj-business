@@ -443,8 +443,19 @@ const revalider = async (ctx, id, body = {}, notifier) => {
 
 // ── Émission ─────────────────────────────────────────────────────────────
 const donneesPdf = async (ctx, b, lignes, tr) => {
-  const [s] = await Q(`SELECT t.nom AS raison_sociale, t.sigle, t.forme_juridique, t.logo_url, t.adresse, t.boite_postale, t.ville, t.pays,
-                              t.telephone, t.email, t.nui, t.registre_commerce, COALESCE(p.nom_commercial, '') AS nom_commercial,
+  // Identité : la caisse fait foi ; à défaut, le complément saisi dans Société (migration 059).
+  const [s] = await Q(`SELECT t.nom AS raison_sociale, t.logo_url,
+                              COALESCE(NULLIF(btrim(t.sigle), ''), p.identite_complement->>'sigle', '') AS sigle,
+                              COALESCE(NULLIF(btrim(t.forme_juridique), ''), p.identite_complement->>'forme_juridique', '') AS forme_juridique,
+                              COALESCE(NULLIF(btrim(t.adresse), ''), p.identite_complement->>'adresse', '') AS adresse,
+                              COALESCE(NULLIF(btrim(t.boite_postale), ''), p.identite_complement->>'boite_postale', '') AS boite_postale,
+                              COALESCE(NULLIF(btrim(t.ville), ''), p.identite_complement->>'ville', '') AS ville,
+                              COALESCE(NULLIF(btrim(t.pays), ''), p.identite_complement->>'pays', '') AS pays,
+                              COALESCE(NULLIF(btrim(t.telephone), ''), p.identite_complement->>'telephone', '') AS telephone,
+                              COALESCE(NULLIF(btrim(t.email), ''), p.identite_complement->>'email', '') AS email,
+                              COALESCE(NULLIF(btrim(t.nui), ''), p.identite_complement->>'nui', '') AS nui,
+                              COALESCE(NULLIF(btrim(t.registre_commerce), ''), p.identite_complement->>'registre_commerce', '') AS registre_commerce,
+                              COALESCE(p.nom_commercial, '') AS nom_commercial,
                               COALESCE(p.mentions_documents, '') AS mentions_documents
                          FROM tenants t LEFT JOIN com_parametres p ON p.tenant_id = t.id WHERE t.id = :t`, { t: ctx.tenantId }, tr);
   const [f] = await Q(`SELECT r.nom, r.nui, r.telephone, r.email, r.adresse, COALESCE(c.nom_commercial, '') AS nom_commercial, COALESCE(c.ville, '') AS ville,
@@ -623,7 +634,7 @@ const lirePiece = async (ctx, id, docId) => {
 const verifier = async (jeton) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(String(jeton || ''))) return { etat: 'inconnu' };
   const [b] = await Q(
-    `SELECT b.numero_complet, b.statut, b.emis_le, b.annule_le, b.pdf_sha256, b.revision, t.nom AS societe, t.nui AS societe_nui,
+    `SELECT b.numero_complet, b.statut, b.emis_le, b.annule_le, b.pdf_sha256, b.revision, t.nom AS societe, COALESCE(NULLIF(btrim(t.nui), ''), p.identite_complement->>'nui', '') AS societe_nui,
             COALESCE(p.nom_commercial, '') AS nom_commercial, f.nom AS fournisseur,
             (SELECT numero_complet FROM com_bons_commande x WHERE x.remplace_id = b.id AND x.statut = 'emis' LIMIT 1) AS remplace_par
        FROM com_bons_commande b JOIN tenants t ON t.id = b.tenant_id JOIN registre_tiers f ON f.id = b.fournisseur_id

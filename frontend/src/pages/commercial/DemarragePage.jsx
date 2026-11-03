@@ -6,7 +6,7 @@ import { useApp } from '@/context/AppContext';
 import { Entete } from '@/components/commercial/ui';
 
 const ETAPES = [
-  ['societe', '/commercial/configuration/societe', 'Société', 'Identité reprise de l\'Entité, mentions des documents, numérotation, règles du circuit.', ['com.parametrage.voir']],
+  ['societe', '/commercial/configuration/societe', 'Société', 'Identité reprise de la caisse (à compléter si besoin), règles des achats et du stock.', ['com.parametrage.voir']],
   ['agences', '/commercial/configuration/agences', 'Agences', 'Les sites de l\'entreprise ; chacun regroupe ses magasins.', ['com.parametrage.voir']],
   ['magasins', '/commercial/configuration/magasins', 'Magasins', 'Les lieux de stockage, rattachés à une agence, avec leur responsable.', ['com.parametrage.voir', 'com.articles.voir']],
   ['fournisseurs', '/commercial/configuration/fournisseurs', 'Fournisseurs', 'Le registre des tiers, complété des informations d\'achat.', ['com.tiers.voir']],

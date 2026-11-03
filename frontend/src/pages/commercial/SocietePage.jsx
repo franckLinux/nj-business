@@ -1,4 +1,7 @@
-// NJ COMMERCIAL — Société : identité reprise de l'Entité (non dupliquée) + paramètres du module.
+// NJ COMMERCIAL — Société : identité reprise de l'Entité (caisse) + règles du module.
+// Un champ que la caisse ne renseigne pas peut être complété ici : il est gardé dans le
+// module commercial (la caisse n'est jamais modifiée) et cède la place à la valeur de la
+// caisse dès qu'elle existe.
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
@@ -7,9 +10,9 @@ import { useToast } from '@/context/ToastContext';
 import { Entete, Section, Champ, Bascule } from '@/components/commercial/ui';
 
 const LIGNES = [
-  ['raison_sociale', 'Raison sociale'], ['sigle', 'Sigle'], ['forme_juridique', 'Forme juridique'], ['adresse', 'Adresse du siège'],
-  ['boite_postale', 'Boîte postale'], ['ville', 'Ville'], ['pays', 'Pays'], ['telephone', 'Téléphone'], ['email', 'E-mail'],
-  ['nui', 'NUI (identifiant fiscal)'], ['registre_commerce', 'Registre de commerce'], ['devise', 'Devise principale'],
+  ['raison_sociale', 'Raison sociale'], ['sigle', 'Sigle', 30], ['forme_juridique', 'Forme juridique', 60], ['adresse', 'Adresse du siège', 300],
+  ['boite_postale', 'Boîte postale', 60], ['ville', 'Ville', 100], ['pays', 'Pays', 100], ['telephone', 'Téléphone', 60], ['email', 'E-mail', 150],
+  ['nui', 'NUI (identifiant fiscal)', 60], ['registre_commerce', 'Registre de commerce', 80], ['devise', 'Devise principale'],
 ];
 
 export default function SocietePage() {
@@ -18,6 +21,7 @@ export default function SocietePage() {
   const modifiable = can('com.parametrage.modifier');
   const [d, setD] = useState(null);
   const [f, setF] = useState(null);
+  const [c, setC] = useState({});        // compléments d'identité (champs vides dans la caisse)
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
 
@@ -25,6 +29,7 @@ export default function SocietePage() {
     const r = await api.get('/commercial/societe');
     if (r?.error) { setErreur(r.error); return; }
     setD(r);
+    setC(r.complement || {});
     const p = r.parametres;
     setF({ ...p, seuil_direction: p.seuil_direction === null ? '' : String(p.seuil_direction), tolerance_ecart_pct: String(p.tolerance_ecart_pct) });
   };
@@ -34,7 +39,7 @@ export default function SocietePage() {
   const enregistrer = async (e) => {
     e.preventDefault();
     setEnCours(true);
-    const r = await api.put('/commercial/societe', f);
+    const r = await api.put('/commercial/societe', { ...f, identite_complement: c });
     setEnCours(false);
     if (r?.error) { setErreur(r.error); return; }
     setErreur(''); toast('Paramètres de la société enregistrés.', 'success'); charger();
@@ -44,7 +49,7 @@ export default function SocietePage() {
   const id = d.identite;
   return (
     <form className="cm-page" onSubmit={enregistrer}>
-      <Entete titre="Société" description="L'identité vient de Configuration → Entité : elle n'est saisie qu'une fois et sert à la caisse comme aux achats.">
+      <Entete titre="Société" description="L'identité vient de la caisse (Configuration → Entité). Ce qu'elle ne renseigne pas peut être complété ici pour les documents du module commercial.">
         {modifiable && <button type="submit" className="cm-btn cm-primaire" disabled={enCours}>{enCours ? 'Enregistrement…' : 'Enregistrer'}</button>}
       </Entete>
       {erreur && <div className="cm-erreur" role="alert">{erreur}</div>}
@@ -54,33 +59,34 @@ export default function SocietePage() {
             {id.logo_url ? <img src={id.logo_url} alt="Logo" style={{ maxHeight: 56, maxWidth: 140, objectFit: 'contain' }} />
               : <span className="cm-pastille cm-off">Pas de logo</span>}
           </div>
-          <dl style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: '7px 12px', fontSize: 13, margin: 0 }}>
-            {LIGNES.map(([k, l]) => (
-              <div key={k} style={{ display: 'contents' }}>
-                <dt style={{ color: 'var(--text-muted)' }}>{l}</dt>
-                <dd style={{ margin: 0, fontWeight: 600, wordBreak: 'break-word' }}>{id[k] || <span style={{ color: 'var(--text-light)', fontWeight: 400 }}>non renseigné</span>}</dd>
-              </div>
-            ))}
+          <dl className="cm-identite">
+            {LIGNES.map(([k, l, max]) => {
+              const caisse = d.identite_caisse?.[k];
+              const aCompleter = max && !caisse;
+              return (
+                <div key={k} className="cm-identite-ligne">
+                  <dt><label htmlFor={aCompleter && modifiable ? `id-${k}` : undefined}>{l}</label></dt>
+                  <dd>
+                    {caisse ? <><span className="cm-identite-val">{caisse}</span><span className="cm-source" title="Renseigné dans la caisse (Configuration → Entité)">caisse</span></>
+                      : aCompleter && modifiable ? (
+                        <input id={`id-${k}`} className="cm-identite-saisie" value={c[k] || ''} maxLength={max} placeholder="À compléter"
+                          type={k === 'email' ? 'email' : 'text'} onChange={(e) => setC((x) => ({ ...x, [k]: e.target.value }))} />
+                      ) : aCompleter && c[k] ? <><span className="cm-identite-val">{c[k]}</span><span className="cm-source cm-source-module">module</span></>
+                        : <span className="cm-identite-vide">non renseigné</span>}
+                  </dd>
+                </div>
+              );
+            })}
           </dl>
+          {modifiable && LIGNES.some(([k, , max]) => max && !d.identite_caisse?.[k]) && (
+            <p className="cm-aide" style={{ marginTop: 10 }}>
+              Les champs à compléter ne sont pas renseignés dans la caisse. Ce que vous saisissez ici sert aux documents du module commercial
+              (bons de commande…) ; la caisse n'est pas modifiée, et sa valeur l'emportera si elle est renseignée plus tard.
+            </p>
+          )}
           {can('config.edit') && <p className="cm-aide" style={{ marginTop: 12 }}><Link to="/config">Modifier dans Configuration → Entité</Link></p>}
         </Section>
         <div>
-          <Section titre="Documents d'achat">
-            <div className="cm-grille">
-              <Champ label="Nom commercial" id="nc" pleine aide="Affiché à côté de la raison sociale sur les documents.">
-                <input id="nc" value={f.nom_commercial} onChange={set('nom_commercial')} maxLength={150} disabled={!modifiable} />
-              </Champ>
-              <Champ label="Mentions des documents" id="md" pleine aide="Ex. conditions générales d'achat, adresse de livraison par défaut.">
-                <textarea id="md" value={f.mentions_documents} onChange={set('mentions_documents')} maxLength={1000} disabled={!modifiable} />
-              </Champ>
-              <Champ label="Préfixe des demandes" id="pda" aide={`Ex. ${f.prefixe_da || 'DA'}-${new Date().getFullYear()}-0001`}>
-                <input id="pda" value={f.prefixe_da} onChange={set('prefixe_da')} maxLength={6} disabled={!modifiable} style={{ textTransform: 'uppercase' }} />
-              </Champ>
-              <Champ label="Préfixe des bons de commande" id="pbc" aide={`Ex. ${f.prefixe_bc || 'BC'}-${new Date().getFullYear()}-0001`}>
-                <input id="pbc" value={f.prefixe_bc} onChange={set('prefixe_bc')} maxLength={6} disabled={!modifiable} style={{ textTransform: 'uppercase' }} />
-              </Champ>
-            </div>
-          </Section>
           <Section titre="Règles du circuit d'achat">
             <div className="cm-grille">
               <Champ label={`Seuil de validation par la direction (${id.devise || 'FCFA'})`} id="sd" pleine

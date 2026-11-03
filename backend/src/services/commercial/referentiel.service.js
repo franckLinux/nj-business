@@ -102,6 +102,23 @@ const PARAMS = {
   autovalidation_stock: (v) => Boolean(v),
 };
 
+// Identité : la caisse (Entité) fait foi ; le module ne complète que ses champs vides,
+// dans com_parametres.identite_complement (migration 059), sans écrire dans la caisse.
+const CHAMPS_COMPLEMENT = {
+  sigle: 30, forme_juridique: 60, adresse: 300, boite_postale: 60, ville: 100, pays: 100,
+  telephone: 60, email: 150, site_web: 200, nui: 60, registre_commerce: 80,
+};
+const vide = (v) => v === null || v === undefined || String(v).trim() === '';
+const fusionnerIdentite = (caisse, complement = {}) => {
+  const identite = { ...caisse }; const sources = {};
+  for (const k of Object.keys(CHAMPS_COMPLEMENT)) {
+    if (!vide(caisse[k])) sources[k] = 'caisse';
+    else if (!vide(complement[k])) { identite[k] = complement[k]; sources[k] = 'module'; } else sources[k] = null;
+  }
+  sources.raison_sociale = 'caisse';
+  return { identite, sources };
+};
+
 const lireSociete = async (tenantId) => {
   exigerClient(tenantId);
   const [t] = await Q(
@@ -118,7 +135,10 @@ const lireSociete = async (tenantId) => {
     parametres[k] = parametres[k] === null ? null : Number(parametres[k]);
   }
   delete parametres.tenant_id;
-  return { identite: t, parametres, parametres_enregistres: Boolean(p) };
+  const complement = parametres.identite_complement || {};
+  delete parametres.identite_complement;
+  const { identite, sources } = fusionnerIdentite(t, complement);
+  return { identite, identite_caisse: t, complement, sources, parametres, parametres_enregistres: Boolean(p) };
 };
 
 const modifierSociete = async ({ tenantId, userId, body }) => {
@@ -137,6 +157,26 @@ const modifierSociete = async ({ tenantId, userId, body }) => {
     }
     const d = differences(actuel, n);
     if (d) await auditer(tr, { tenantId, userId, action: 'COM_PARAMETRES', id: tenantId, ...d });
+    // Compléments d'identité : seulement les champs que la caisse n'a pas.
+    if (body.identite_complement && typeof body.identite_complement === 'object') {
+      const soc = await lireSociete(tenantId);
+      const nouveau = {};
+      for (const [k, max] of Object.entries(CHAMPS_COMPLEMENT)) {
+        if (!vide(soc.identite_caisse[k])) continue;                 // la caisse fait foi
+        const v = body.identite_complement[k] === undefined ? soc.complement[k] : txt(body.identite_complement[k]);
+        if (vide(v)) continue;
+        if (String(v).length > max) throw new ErreurCom(400, `${k.replace('_', ' ')} : ${max} caractères au plus.`);
+        if (k === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new ErreurCom(400, 'E-mail invalide.');
+        nouveau[k] = v;
+      }
+      const dc = differences(soc.complement, nouveau);
+      const retires = Object.keys(soc.complement).filter((k) => !(k in nouveau));
+      if (dc || retires.length) {
+        await X('UPDATE com_parametres SET identite_complement = CAST(:c AS jsonb), modifie_par = :u, modifie_le = NOW() WHERE tenant_id = :t',
+          { c: JSON.stringify(nouveau), u: userId, t: tenantId }, tr);
+        await auditer(tr, { tenantId, userId, action: 'COM_IDENTITE_COMPLEMENT', id: tenantId, avant: soc.complement, apres: nouveau });
+      }
+    }
   });
   return lireSociete(tenantId);
 };
