@@ -51,6 +51,8 @@ import { DROITS_STOCK, DROITS_SAISIE } from '@/components/commercial/stock';
 import { ReceptionsPage, ReceptionFormPage, ReceptionPage } from '@/pages/commercial/ReceptionsPages';
 import { RetoursFournPage, RetourFournFormPage, RetourFournPage } from '@/pages/commercial/RetoursFournPages';
 import { FacturesFournPage, FactureFournFormPage, FactureFournPage, ValidationAchatsPage } from '@/pages/commercial/FacturesFournPages';
+import { DevisListePage, DevisFormPage, DevisPage, CommandesClientsPage, CommandeClientPage, LivraisonsPage, LivraisonFormPage, LivraisonPage,
+  ValidationVentesPage, DROITS_VENTES, DROITS_VALIDATION_VENTES } from '@/pages/commercial/VentesPages';
 // Lot 5 : qui voit les documents d'achat.
 const DROITS_RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'com.receptions.annuler', 'com.retours_fourn.saisir', 'com.retours_fourn.valider',
   'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
@@ -121,7 +123,9 @@ function EntreeCommercial() {
   if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
   if (can('com.tableau_bord.voir')) return <Navigate to="/commercial/tableau-bord" replace />;
   if (can('com.da.creer') || can('com.da.voir_tout')) return <Navigate to="/commercial/demandes" replace />;
+  if (can('com.ventes.devis') || can('com.ventes.valider')) return <Navigate to="/commercial/devis" replace />;
   if (can('com.stock.voir')) return <Navigate to="/commercial/stock" replace />;
+  if (can('com.ventes.preparer') || can('com.ventes.livrer')) return <Navigate to="/commercial/livraisons" replace />;
   if (can('com.receptions.saisir')) return <Navigate to="/commercial/receptions" replace />;
   if (can('com.factures_fourn.saisir') || can('com.factures_fourn.voir')) return <Navigate to="/commercial/factures-fournisseurs" replace />;
   if (can('com.stock.valider')) return <Navigate to="/commercial/stock/validation" replace />;
@@ -129,6 +133,7 @@ function EntreeCommercial() {
   if (saisie) return <Navigate to={`/commercial/stock/${saisie[1]}`} replace />;
   if (can('com.stock.journal')) return <Navigate to="/commercial/stock/mouvements" replace />;
   if (can('com.stock.valorisation')) return <Navigate to="/commercial/stock/valorisation" replace />;
+  if (can('com.ventes.voir') || can('com.ventes.commandes')) return <Navigate to="/commercial/commandes-clients" replace />;
   return <Navigate to="/commercial/configuration/mise-en-route" replace />;
 }
 
@@ -212,6 +217,17 @@ function AuthenticatedApp() {
         <Route path="factures-fournisseurs/:id"    element={<AutoriseCm codes={DROITS_FACTURES}><FactureFournPage /></AutoriseCm>} />
         <Route path="factures-fournisseurs/:id/modifier" element={<AutoriseCm codes={['com.factures_fourn.saisir']}><FactureFournFormPage key="m" /></AutoriseCm>} />
         <Route path="validation-achats"            element={<AutoriseCm codes={['com.receptions.valider', 'com.retours_fourn.valider', 'com.factures_fourn.valider']}><ValidationAchatsPage /></AutoriseCm>} />
+        <Route path="devis"                        element={<AutoriseCm codes={DROITS_VENTES}><DevisListePage /></AutoriseCm>} />
+        <Route path="devis/nouveau"                element={<AutoriseCm codes={['com.ventes.devis']}><DevisFormPage key="n" /></AutoriseCm>} />
+        <Route path="devis/:id"                    element={<AutoriseCm codes={DROITS_VENTES}><DevisPage /></AutoriseCm>} />
+        <Route path="devis/:id/modifier"           element={<AutoriseCm codes={['com.ventes.devis']}><DevisFormPage key="m" /></AutoriseCm>} />
+        <Route path="commandes-clients"            element={<AutoriseCm codes={DROITS_VENTES}><CommandesClientsPage /></AutoriseCm>} />
+        <Route path="commandes-clients/:id"        element={<AutoriseCm codes={DROITS_VENTES}><CommandeClientPage /></AutoriseCm>} />
+        <Route path="livraisons"                   element={<AutoriseCm codes={DROITS_VENTES}><LivraisonsPage /></AutoriseCm>} />
+        <Route path="livraisons/nouvelle"          element={<AutoriseCm codes={['com.ventes.preparer']}><LivraisonFormPage key="n" /></AutoriseCm>} />
+        <Route path="livraisons/:id"               element={<AutoriseCm codes={DROITS_VENTES}><LivraisonPage /></AutoriseCm>} />
+        <Route path="livraisons/:id/modifier"      element={<AutoriseCm codes={['com.ventes.preparer']}><LivraisonFormPage key="m" /></AutoriseCm>} />
+        <Route path="validation-ventes"            element={<AutoriseCm codes={DROITS_VALIDATION_VENTES}><ValidationVentesPage /></AutoriseCm>} />
         <Route path="*"            element={<Navigate to="/commercial" replace />} />
       </Route>
       <Route element={<GardeCaisse><Layout /></GardeCaisse>}>

@@ -29,5 +29,9 @@ export const ICONES = {
   reception: 'M3 7l9-4 9 4v10l-9 4-9-4zM12 11v6M9 14l3 3 3-3',
   retour: 'M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3',
   facture: 'M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4',
+  devis: 'M6 2h9l5 5v15H6zM14 2v6h6M12 11v7M14.5 12.5h-3.25a1.25 1.25 0 0 0 0 2.5h1.5a1.25 1.25 0 0 1 0 2.5H9.5',
+  commandeClient: 'M3 3h2l2.4 12.2a2 2 0 0 0 2 1.6h8.8a2 2 0 0 0 2-1.6L22 7H6M9 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM18 21a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+  livraison: 'M1 3h15v13H1zM16 8h4l3 3v5h-7M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  valideVente: 'M20 6L9 17l-5-5M16 3h5v5',
   valideAchat: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
 };

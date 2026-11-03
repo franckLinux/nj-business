@@ -155,6 +155,46 @@ router.post  ('/factures-fournisseurs/:id/annulation',   ...P('com.factures_four
 router.post  ('/factures-fournisseurs/:id/pieces',       ...FF_VUE, c.joindreDoc('facture'));
 router.get   ('/factures-fournisseurs/:id/pieces/:doc',  ...FF_VUE, c.pieceDoc('facture'));
 
+// ── Lot 6 : ventes (devis → commande client → préparation / livraison) ────
+const VT_VUE = [...base, requireAnyPermission('com.ventes.voir', 'com.ventes.devis', 'com.ventes.valider', 'com.ventes.valider_direction',
+  'com.ventes.commandes', 'com.ventes.preparer', 'com.ventes.livrer', 'com.ventes.annuler')];
+const VT_VALIDER = [...base, requireAnyPermission('com.ventes.valider', 'com.ventes.valider_direction')];
+router.get   ('/ventes/compteurs',                       ...VT_VUE, c.getVentesCompteurs);
+router.get   ('/devis',                                  ...VT_VUE, c.getDevisListe);
+router.get   ('/devis/:id',                              ...VT_VUE, c.getDevis);
+router.get   ('/devis/:id/pdf',                          ...VT_VUE, c.getPdfDevis);
+router.post  ('/devis',                                  ...P('com.ventes.devis'), c.postDevis);
+router.put   ('/devis/:id',                              ...P('com.ventes.devis'), c.putDevis);
+router.delete('/devis/:id',                              ...P('com.ventes.devis'), c.deleteDevis);
+router.post  ('/devis/:id/soumission',                   ...P('com.ventes.devis'), c.postSoumissionDevis);
+router.post  ('/devis/:id/validation',                   ...VT_VALIDER, c.postValidationDevis);
+router.post  ('/devis/:id/renvoi',                       ...VT_VALIDER, c.postRenvoiDevis);
+router.post  ('/devis/:id/annulation',                   ...P('com.ventes.annuler'), c.postAnnulationDevis);
+router.post  ('/devis/:id/refus',                        ...P('com.ventes.commandes'), c.postRefusDevis);
+router.post  ('/devis/:id/acceptation',                  ...P('com.ventes.commandes'), c.postAcceptationDevis);
+router.post  ('/devis/:id/duplication',                  ...P('com.ventes.devis'), c.postDuplicationDevis);
+router.post  ('/devis/:id/pieces',                       ...VT_VUE, c.joindreVente('devis'));
+router.get   ('/devis/:id/pieces/:doc',                  ...VT_VUE, c.pieceVente('devis'));
+router.get   ('/commandes-clients',                      ...VT_VUE, c.getCommandesClients);
+router.get   ('/commandes-clients/:id',                  ...VT_VUE, c.getCommandeClient);
+router.post  ('/commandes-clients/:id/annulation',       ...P('com.ventes.annuler'), c.postAnnulationCommande);
+router.post  ('/commandes-clients/:id/pieces',           ...VT_VUE, c.joindreVente('commande'));
+router.get   ('/commandes-clients/:id/pieces/:doc',      ...VT_VUE, c.pieceVente('commande'));
+router.get   ('/livraisons/a-livrer',                    ...VT_VUE, c.getALivrer);
+router.get   ('/livraisons/proposition/:cmd',            ...P('com.ventes.preparer'), c.getPropositionLivraison);
+router.get   ('/livraisons',                             ...VT_VUE, c.getLivraisons);
+router.get   ('/livraisons/:id',                         ...VT_VUE, c.getLivraison);
+router.get   ('/livraisons/:id/pdf',                     ...VT_VUE, c.getPdfLivraison);
+router.post  ('/livraisons',                             ...P('com.ventes.preparer'), c.postLivraison);
+router.put   ('/livraisons/:id',                         ...P('com.ventes.preparer'), c.putLivraison);
+router.delete('/livraisons/:id',                         ...P('com.ventes.preparer'), c.deleteLivraison);
+router.post  ('/livraisons/:id/preparation',             ...P('com.ventes.preparer'), c.postPreparationLivraison);
+router.post  ('/livraisons/:id/renvoi',                  ...P('com.ventes.livrer'), c.postRenvoiLivraison);
+router.post  ('/livraisons/:id/validation',              ...P('com.ventes.livrer'), c.postValidationLivraison);
+router.post  ('/livraisons/:id/annulation',              ...P('com.ventes.annuler'), c.postAnnulationLivraison);
+router.post  ('/livraisons/:id/pieces',                  ...VT_VUE, c.joindreVente('livraison'));
+router.get   ('/livraisons/:id/pieces/:doc',             ...VT_VUE, c.pieceVente('livraison'));
+
 router.get   ('/tableau-bord',                           ...P('com.tableau_bord.voir'), c.getTableau);
 router.get   ('/documents',                              ...BC_VUE, c.getDocuments);
 router.get   ('/historique',                             ...[...base, requireAnyPermission('com.da.voir_tout', 'com.tableau_bord.voir')], c.getHistorique);

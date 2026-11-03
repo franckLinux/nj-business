@@ -302,3 +302,79 @@ Object.assign(module.exports, {
     }
   },
 });
+
+// ── Lot 6 : ventes ───────────────────────────────────────────────────────
+const vt = require('../services/commercial/ventes.service');
+const repondreVt = (quoi, fn, statut = 200) => async (req, res) => {
+  try {
+    const ctx = await da.contexte(req);
+    res.status(statut).json(await fn(ctx, req));
+  } catch (err) {
+    if (err instanceof vt.ErreurVente || err instanceof ErreurDocument || err instanceof da.ErreurDemande) return res.status(err.status).json({ error: err.message });
+    if (err.status === 503) return res.status(503).json({ error: err.message });
+    if (/INTANGIBLE/.test(err.message || '')) return res.status(409).json({ error: err.message.replace(/^.*?: /, '') });
+    if (err?.original?.code === '23505' || err?.parent?.code === '23505') {
+      return res.status(409).json({ error: /uq_com_cdc_devis/.test(err.original?.constraint || err.parent?.constraint || err.message || '')
+        ? 'Ce devis a déjà donné une commande.' : 'Enregistrement en double refusé.' });
+    }
+    if (err?.original?.code === '23514' || err?.parent?.code === '23514') return res.status(400).json({ error: 'Donnée refusée par les règles de la base.' });
+    console.error(`[Commercial] ${quoi} :`, err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+const pdfVente = (fn) => async (req, res) => {
+  try {
+    const ctx = await da.contexte(req);
+    const f = await fn(ctx, req);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${f.nom}"`);
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.end(f.contenu);
+  } catch (err) {
+    if (err instanceof vt.ErreurVente || err.status === 503) return res.status(err.status).json({ error: err.message });
+    console.error('[Commercial] PDF vente :', err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+Object.assign(module.exports, {
+  getVentesCompteurs:     repondreVt('ventes.compteurs', (ctx) => vt.compteurs(ctx)),
+  getDevisListe:          repondreVt('devis', (ctx, req) => vt.listerDevis(ctx, req.query)),
+  getDevis:               repondreVt('devis', (ctx, req) => vt.lireDevis(ctx, req.params.id)),
+  postDevis:              repondreVt('devis.création', (ctx, req) => vt.creerDevis(ctx, req.body || {}), 201),
+  putDevis:               repondreVt('devis.modif', (ctx, req) => vt.modifierDevis(ctx, req.params.id, req.body || {})),
+  deleteDevis:            repondreVt('devis.suppression', (ctx, req) => vt.supprimerDevis(ctx, req.params.id)),
+  postSoumissionDevis:    repondreVt('devis.soumission', (ctx, req) => vt.soumettreDevis(ctx, req.params.id)),
+  postValidationDevis:    repondreVt('devis.validation', (ctx, req) => vt.validerDevis(ctx, req.params.id)),
+  postRenvoiDevis:        repondreVt('devis.renvoi', (ctx, req) => vt.renvoyerDevis(ctx, req.params.id, req.body || {})),
+  postAnnulationDevis:    repondreVt('devis.annulation', (ctx, req) => vt.annulerDevis(ctx, req.params.id, req.body || {})),
+  postRefusDevis:         repondreVt('devis.refus', (ctx, req) => vt.refuserDevis(ctx, req.params.id, req.body || {})),
+  postAcceptationDevis:   repondreVt('devis.acceptation', (ctx, req) => vt.accepterDevis(ctx, req.params.id, req.body || {}), 201),
+  postDuplicationDevis:   repondreVt('devis.duplication', (ctx, req) => vt.dupliquerDevis(ctx, req.params.id), 201),
+  getPdfDevis:            pdfVente((ctx, req) => vt.pdfDevis(ctx, req.params.id)),
+  getCommandesClients:    repondreVt('commandes clients', (ctx, req) => vt.listerCommandes(ctx, req.query)),
+  getCommandeClient:      repondreVt('commande client', (ctx, req) => vt.lireCommande(ctx, req.params.id)),
+  postAnnulationCommande: repondreVt('commande.annulation', (ctx, req) => vt.annulerCommande(ctx, req.params.id, req.body || {})),
+  getALivrer:             repondreVt('à livrer', (ctx) => vt.aLivrer(ctx)),
+  getPropositionLivraison: repondreVt('livraison.proposition', (ctx, req) => vt.propositionLivraison(ctx, req.params.cmd, req.query.magasin_id)),
+  getLivraisons:          repondreVt('livraisons', (ctx, req) => vt.listerLivraisons(ctx, req.query)),
+  getLivraison:           repondreVt('livraison', (ctx, req) => vt.lireLivraison(ctx, req.params.id)),
+  postLivraison:          repondreVt('livraison.création', (ctx, req) => vt.creerLivraison(ctx, req.body || {}), 201),
+  putLivraison:           repondreVt('livraison.modif', (ctx, req) => vt.modifierLivraison(ctx, req.params.id, req.body || {})),
+  deleteLivraison:        repondreVt('livraison.suppression', (ctx, req) => vt.supprimerLivraison(ctx, req.params.id)),
+  postPreparationLivraison: repondreVt('livraison.préparation', (ctx, req) => vt.preparerLivraison(ctx, req.params.id)),
+  postRenvoiLivraison:    repondreVt('livraison.renvoi', (ctx, req) => vt.renvoyerLivraison(ctx, req.params.id, req.body || {})),
+  postValidationLivraison: repondreVt('livraison.validation', (ctx, req) => vt.validerLivraison(ctx, req.params.id)),
+  postAnnulationLivraison: repondreVt('livraison.annulation', (ctx, req) => vt.annulerLivraison(ctx, req.params.id, req.body || {})),
+  getPdfLivraison:        pdfVente((ctx, req) => vt.pdfLivraison(ctx, req.params.id)),
+  joindreVente:   (sorte) => repondreVt(`${sorte}.pièce`, (ctx, req) => vt.joindre(ctx, sorte, req.params.id, req.body || {}), 201),
+  pieceVente:     (sorte) => async (req, res) => {
+    try {
+      const ctx = await da.contexte(req);
+      await envoyerFichier(res, await vt.lirePiece(ctx, sorte, req.params.id, req.params.doc));
+    } catch (err) {
+      if (err instanceof vt.ErreurVente || err instanceof bc.ErreurBon) return res.status(err.status).json({ error: err.message });
+      console.error('[Commercial] pièce vente :', err.message);
+      return res.status(500).json({ error: 'Erreur serveur.' });
+    }
+  },
+});

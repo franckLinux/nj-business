@@ -218,6 +218,7 @@ const mouvements = async (ctx, { article_id = '', magasin_id = '', type = '', du
          SELECT x.numero FROM com_stock_documents x WHERE s.document_type IN ('entree', 'sortie', 'transfert', 'inventaire') AND x.id = s.document_id
          UNION ALL SELECT x.numero FROM com_receptions x WHERE s.document_type = 'reception' AND x.id = s.document_id
          UNION ALL SELECT x.numero FROM com_retours_fournisseurs x WHERE s.document_type = 'retour_fournisseur' AND x.id = s.document_id
+         UNION ALL SELECT x.numero FROM com_livraisons x WHERE s.document_type = 'livraison' AND x.id = s.document_id
        ) d ON true
        LEFT JOIN users u ON u.id = s.cree_par
       WHERE s.tenant_id = :t

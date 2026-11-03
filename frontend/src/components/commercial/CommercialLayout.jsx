@@ -48,6 +48,12 @@ const TITRES = {
   '/commercial/stock/validation': 'Contrôles — Validation des stocks',
   '/commercial/stock/mouvements': 'Contrôles — Mouvements de stock',
   '/commercial/stock/valorisation': 'Contrôles — Valorisation du stock',
+  '/commercial/devis': 'Ventes — Devis',
+  '/commercial/devis/nouveau': 'Ventes — Nouveau devis',
+  '/commercial/commandes-clients': 'Ventes — Commandes clients',
+  '/commercial/livraisons': 'Ventes — Livraisons',
+  '/commercial/livraisons/nouvelle': 'Ventes — Préparer une livraison',
+  '/commercial/validation-ventes': 'Contrôles — Validation des ventes',
 };
 const ONGLETS_TITRES = { 'mise-en-route': 'Mise en route', societe: 'Société', agences: 'Agences', magasins: 'Magasins', utilisateurs: 'Utilisateurs et rôles',
   familles: 'Familles d\'articles', unites: 'Unités de mesure', articles: 'Articles', taxes: 'Taxes', fournisseurs: 'Fournisseurs', clients: 'Clients' };
@@ -61,7 +67,10 @@ const titre = (chemin) => TITRES[chemin]
         : /^\/commercial\/stock\/documents\//.test(chemin) ? 'Stock — Document de stock'
         : /^\/commercial\/receptions\/\d+/.test(chemin) ? 'Achats — Réception'
           : /^\/commercial\/retours-fournisseurs\/\d+/.test(chemin) ? 'Achats — Retour fournisseur'
-            : /^\/commercial\/factures-fournisseurs\/\d+/.test(chemin) ? 'Achats — Facture fournisseur' : 'NJ COMMERCIAL');
+            : /^\/commercial\/factures-fournisseurs\/\d+/.test(chemin) ? 'Achats — Facture fournisseur'
+              : /^\/commercial\/devis\/\d+/.test(chemin) ? 'Ventes — Devis'
+                : /^\/commercial\/commandes-clients\/\d+/.test(chemin) ? 'Ventes — Commande client'
+                  : /^\/commercial\/livraisons\/\d+/.test(chemin) ? 'Ventes — Livraison' : 'NJ COMMERCIAL');
 
 // Menu en quatre rubriques (lot 1) : la saisie dans « Traitements », la décision
 // et le suivi dans « Contrôles et reporting ». Une entrée n'apparaît qu'avec une
@@ -71,6 +80,8 @@ const STOCK = ['com.stock.voir', 'com.stock.entree', 'com.stock.sortie', 'com.st
 const RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'com.receptions.annuler', 'com.retours_fourn.saisir', 'com.retours_fourn.valider',
   'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
 const FACTURES = ['com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler'];
+const VENTES = ['com.ventes.voir', 'com.ventes.devis', 'com.ventes.valider', 'com.ventes.valider_direction', 'com.ventes.commandes',
+  'com.ventes.preparer', 'com.ventes.livrer', 'com.ventes.annuler'];
 const LISTE = (code) => [code, 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal'];
 // Menu : deux accès directs (Tableau de bord, Configuration à onglets) puis des
 // tiroirs repliables par domaine. Le tiroir de la page ouverte s'ouvre seul ; les
@@ -89,6 +100,11 @@ const RUBRIQUES = [
       { to: '/commercial/retours-fournisseurs', libelle: 'Retours fournisseurs', codes: RECEPTIONS, icone: I.retour },
       { to: '/commercial/factures-fournisseurs', libelle: 'Factures fournisseurs', codes: FACTURES, icone: I.facture },
     ] },
+    { id: 'ventes', titre: 'Ventes', icone: I.devis, entrees: [
+      { to: '/commercial/devis', libelle: 'Devis', codes: VENTES, icone: I.devis },
+      { to: '/commercial/commandes-clients', libelle: 'Commandes clients', codes: VENTES, icone: I.commandeClient },
+      { to: '/commercial/livraisons', libelle: 'Livraisons', codes: VENTES, icone: I.livraison, badge: 'commandes_a_livrer', badgeTitre: 'Commandes clients à livrer' },
+    ] },
     { id: 'stock', titre: 'Stock', icone: I.stock, entrees: [
       { to: '/commercial/stock', end: true, libelle: 'État du stock', codes: ['com.stock.voir'], icone: I.stock, badge: 'sous_seuil', badgeTitre: 'Articles sous le seuil d\'alerte' },
       { to: '/commercial/stock/entrees', libelle: 'Entrées en stock', codes: LISTE('com.stock.entree'), icone: I.entree },
@@ -101,6 +117,7 @@ const RUBRIQUES = [
     { id: 'validations', titre: 'Validations', icone: I.autorisation, entrees: [
       { to: '/commercial/autorisations', libelle: 'Autorisations d\'achat', codes: ['com.da.approuver', 'com.da.approuver_direction'], icone: I.autorisation, badge: 'a_examiner', badgeTitre: 'Demandes qui attendent votre décision' },
       { to: '/commercial/validation-achats', libelle: 'Validation des achats', codes: ['com.receptions.valider', 'com.retours_fourn.valider', 'com.factures_fourn.valider'], icone: I.valideAchat, badge: 'achats_a_valider', badgeTitre: 'Réceptions, retours et factures à valider' },
+      { to: '/commercial/validation-ventes', libelle: 'Validation des ventes', codes: ['com.ventes.valider', 'com.ventes.valider_direction', 'com.ventes.livrer'], icone: I.valideVente, badge: 'ventes_a_valider', badgeTitre: 'Devis et livraisons à valider' },
       { to: '/commercial/stock/validation', libelle: 'Validation des stocks', codes: ['com.stock.valider'], icone: I.valider, badge: 'a_valider', badgeTitre: 'Documents de stock à valider' },
     ] },
     { id: 'suivi', titre: 'Suivi et états', icone: I.historique, entrees: [
@@ -167,6 +184,11 @@ function CommercialSidebar({ open, onClose }) {
     if (peutUn(can, RECEPTIONS)) {
       api.get('/commercial/achats/compteurs').then((r) => {
         if (r && !r.error) setBadge((b) => ({ ...b, bons_a_recevoir: r.bons_a_recevoir, achats_a_valider: r.receptions_a_valider + r.retours_a_valider + r.factures_a_valider }));
+      });
+    }
+    if (peutUn(can, VENTES)) {
+      api.get('/commercial/ventes/compteurs').then((r) => {
+        if (r && !r.error) setBadge((b) => ({ ...b, commandes_a_livrer: r.commandes_a_livrer, ventes_a_valider: r.devis_a_valider + r.devis_a_valider_direction + r.livraisons_a_valider }));
       });
     }
   }, [can, location.pathname]);

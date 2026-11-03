@@ -20,17 +20,19 @@ export const MODULE_META = {
   commercial: { label: 'NJ COMMERCIAL', color: '#eef2ff', text: '#3730a3' },
 };
 
-// NJ COMMERCIAL : un seul module en base, présenté en trois blocs (configuration,
-// achats, stock) pour que chaque fonction se retrouve facilement à cocher.
+// NJ COMMERCIAL : un seul module en base, présenté en quatre blocs (configuration,
+// achats, stock, ventes) pour que chaque fonction se retrouve facilement à cocher.
 const SOUS_GROUPES = {
   'commercial:config': { label: 'NJ COMMERCIAL — Configuration', color: '#eef2ff', text: '#3730a3' },
   'commercial:achats': { label: 'NJ COMMERCIAL — Achats', color: '#f5f3ff', text: '#6d28d9' },
   'commercial:stock': { label: 'NJ COMMERCIAL — Stock', color: '#ecfdf5', text: '#047857' },
+  'commercial:ventes': { label: 'NJ COMMERCIAL — Ventes', color: '#ecfeff', text: '#0e7490' },
 };
 const ORDRE_STOCK = ['voir', 'initial', 'entree', 'sortie', 'transfert', 'inventaire', 'valider', 'annuler', 'journal', 'valorisation'];
 export const groupeDe = (p) => {
   if (p.module !== 'commercial') return p.module;
   if (p.code.startsWith('com.stock.')) return 'commercial:stock';
+  if (p.code.startsWith('com.ventes.')) return 'commercial:ventes';
   if (/^com\.(da|bc|documents|tableau_bord|receptions|retours_fourn|factures_fourn)\./.test(p.code)) return 'commercial:achats';
   return 'commercial:config';
 };

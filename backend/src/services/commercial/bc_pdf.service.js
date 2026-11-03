@@ -258,4 +258,4 @@ const rendre = async (o) => {
   return fin;
 };
 
-module.exports = { rendre, decimales, montantEnLettres };
+module.exports = { rendre, decimales, montantEnLettres, montant, qte, dateFr, logoBuffer, dependances, COULEURS: { BLEU, GRIS, TRAIT, FOND } };

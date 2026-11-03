@@ -208,12 +208,17 @@ const PROFILS_COMMERCIAL = [
       'com.factures_fourn.voir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler']],
   ['stock_magasinier', 'Magasinier', 'Saisit entrées, sorties, transferts et comptages d\'inventaire', '#0d9488',
     ['com.articles.voir', 'com.stock.voir', 'com.stock.entree', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.inventaire', 'com.stock.journal',
-      'com.receptions.saisir', 'com.retours_fourn.saisir']],
+      'com.receptions.saisir', 'com.retours_fourn.saisir', 'com.ventes.voir', 'com.ventes.preparer']],
   ['stock_gestionnaire', 'Gestionnaire de stock', 'Valide les documents de stock, suit la valorisation', '#0f766e',
     ['com.parametrage.voir', 'com.articles.voir', 'com.stock.initial', 'com.stock.voir', 'com.stock.entree', 'com.stock.sortie',
       'com.stock.transfert', 'com.stock.inventaire', 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation',
       'com.tableau_bord.voir', 'com.receptions.saisir', 'com.receptions.valider', 'com.receptions.annuler',
-      'com.retours_fourn.saisir', 'com.retours_fourn.valider']],
+      'com.retours_fourn.saisir', 'com.retours_fourn.valider', 'com.ventes.voir', 'com.ventes.preparer', 'com.ventes.livrer']],
+  ['ventes_commercial', 'Commercial (ventes)', 'Établit les devis et enregistre les commandes des clients', '#0891b2',
+    ['com.articles.voir', 'com.tiers.voir', 'com.stock.voir', 'com.ventes.voir', 'com.ventes.devis', 'com.ventes.commandes']],
+  ['ventes_responsable', 'Responsable commercial', 'Valide les devis, suit les commandes et livraisons, annule', '#0e7490',
+    ['com.articles.voir', 'com.tiers.voir', 'com.stock.voir', 'com.ventes.voir', 'com.ventes.devis', 'com.ventes.valider',
+      'com.ventes.commandes', 'com.ventes.livrer', 'com.ventes.annuler', 'com.tableau_bord.voir']],
 ];
 const PREPARATIONS = {
   commercial: async (client, tenantId) => {

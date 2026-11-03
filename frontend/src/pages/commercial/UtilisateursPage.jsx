@@ -53,12 +53,18 @@ const STOCK = [
   ['com.stock.transfert', 'Transferts'], ['com.stock.inventaire', 'Inventaires'], ['com.stock.valider', 'Valide'],
   ['com.stock.annuler', 'Annule'], ['com.stock.journal', 'Mouvements'], ['com.stock.valorisation', 'Valeurs'],
 ];
+const VENTES = [
+  ['com.ventes.voir', 'Consulte'], ['com.ventes.devis', 'Devis'], ['com.ventes.valider', 'Valide (resp.)'], ['com.ventes.valider_direction', 'Valide (direction)'],
+  ['com.ventes.commandes', 'Commandes'], ['com.ventes.preparer', 'Prépare'], ['com.ventes.livrer', 'Valide livraisons'], ['com.ventes.annuler', 'Annule'],
+];
 const PROFILS = [
   ['Demandeur achats', 'Exprime ses besoins et suit ses demandes.'],
   ['Gestionnaire des achats (GAS)', 'Vérifie stocks et fournisseurs, prépare les bons de commande, saisit le stock d\'ouverture.'],
   ['Responsable des achats', 'Approuve ou rejette, émet et annule les bons, voit les coordonnées bancaires.'],
   ['Magasinier', 'Saisit entrées, sorties, transferts et comptages ; voit les quantités et les mouvements, pas les valeurs.'],
-  ['Gestionnaire de stock', 'Valide, renvoie et annule les documents de stock ; voit coûts et valorisation.'],
+  ['Gestionnaire de stock', 'Valide, renvoie et annule les documents de stock ; voit coûts et valorisation ; valide les livraisons clients.'],
+  ['Commercial (ventes)', 'Établit les devis, enregistre l\'acceptation du client et la commande.'],
+  ['Responsable commercial', 'Valide les devis (jusqu\'au seuil des ventes), valide les livraisons, annule.'],
   ['Directeur (rôle)', 'Tous les droits du module, dont l\'approbation au-delà du seuil.'],
 ];
 
@@ -70,11 +76,11 @@ export default function UtilisateursPage() {
   const liste = donnees?.utilisateurs || [];
   const agences = donnees?.agences || [];
   const [vue, setVue] = useState('achats');
-  const COLONNES = vue === 'stock' ? STOCK : vue === 'docs' ? DOCS_ACHAT : ACHATS;
+  const COLONNES = vue === 'stock' ? STOCK : vue === 'docs' ? DOCS_ACHAT : vue === 'ventes' ? VENTES : ACHATS;
   const codes = (ids) => (ids.length ? agences.filter((a) => ids.includes(a.id)).map((a) => a.code).join(', ') : 'Toutes');
   return (
     <div className="cm-page">
-      <Entete titre="Utilisateurs et rôles" description="Les droits d'achat et de stock de chaque personne, tels que le serveur les applique. Personne n'approuve sa propre demande ni ne valide son propre document de stock.">
+      <Entete titre="Utilisateurs et rôles" description="Les droits d'achat, de stock et de vente de chaque personne, tels que le serveur les applique. Personne n'approuve sa propre demande ni ne valide son propre document de stock.">
         {can('users.view') && <Link to="/config" className="cm-btn cm-secondaire" style={{ textDecoration: 'none' }}>Gérer dans Configuration</Link>}
       </Entete>
       <div className="cm-note">
@@ -89,6 +95,7 @@ export default function UtilisateursPage() {
         <button type="button" role="tab" aria-selected={vue === 'achats'} onClick={() => setVue('achats')}>Droits achats</button>
         <button type="button" role="tab" aria-selected={vue === 'docs'} onClick={() => setVue('docs')}>Réceptions et factures</button>
         <button type="button" role="tab" aria-selected={vue === 'stock'} onClick={() => setVue('stock')}>Droits stock</button>
+        <button type="button" role="tab" aria-selected={vue === 'ventes'} onClick={() => setVue('ventes')}>Droits ventes</button>
       </div>
       <div className="cm-table-wrap">
         <table className="cm-table" style={{ minWidth: 1060 }}>

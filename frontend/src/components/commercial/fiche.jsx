@@ -142,19 +142,22 @@ export function MouvementsDoc({ mouvements }) {
 const ACTIONS = {
   CREATION: 'Document saisi', MODIFICATION: 'Brouillon modifié', SOUMISSION: 'Soumis pour validation', RENVOI: 'Renvoyé pour correction',
   VALIDATION: 'Validé', ANNULATION: 'Annulé', PIECE_AJOUT: 'Pièce jointe', SUPPRESSION: 'Supprimé',
+  VALIDATION_RESPONSABLE: 'Validé par le responsable (direction requise)', VALIDATION_DIRECTION: 'Validé par la direction',
+  ACCEPTATION: 'Accepté par le client', REFUS_CLIENT: 'Refusé par le client', DUPLICATION: 'Créé par duplication',
+  PREPARATION: 'Préparation terminée',
 };
-const CLASSES = { VALIDATION: 'cm-f-ok', ANNULATION: 'cm-f-ko', RENVOI: 'cm-f-info' };
+const CLASSES = { VALIDATION: 'cm-f-ok', VALIDATION_DIRECTION: 'cm-f-ok', ACCEPTATION: 'cm-f-ok', ANNULATION: 'cm-f-ko', REFUS_CLIENT: 'cm-f-ko', RENVOI: 'cm-f-info' };
 export function HistoriqueDoc({ historique }) {
   return (
     <Section titre="Historique">
       <ol className="cm-fil">
         {historique.map((h, i) => {
-          const cle = h.action.replace(/^COM_(RECEPTION|RETOUR_FOURN|FACTURE_FOURN)_/, '');
+          const cle = h.action.replace(/^COM_(RECEPTION|RETOUR_FOURN|FACTURE_FOURN|DEVIS|COMMANDE_CLIENT|LIVRAISON|VENTE)_/, '');
           return (
             <li key={i} className={CLASSES[cle] || ''}>
               <strong>{ACTIONS[cle] || h.action}</strong>
               <span className="cm-quand">{dateFr(h.le, true)} · {h.par_nom || 'système'}</span>
-              {(h.nouvelle_valeur?.motif || h.nouvelle_valeur?.nom) && <div className="cm-mot">{h.nouvelle_valeur.motif || h.nouvelle_valeur.nom}</div>}
+              {(h.nouvelle_valeur?.motif || h.nouvelle_valeur?.nom || h.nouvelle_valeur?.commande || h.nouvelle_valeur?.origine) && <div className="cm-mot">{h.nouvelle_valeur.motif || h.nouvelle_valeur.nom || (h.nouvelle_valeur.commande ? `Commande ${h.nouvelle_valeur.commande}` : `Copie de ${h.nouvelle_valeur.origine}`)}</div>}
             </li>
           );
         })}
