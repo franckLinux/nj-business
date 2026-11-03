@@ -130,23 +130,30 @@ test('Société : identité reprise de l\'Entité, paramètres du module enregis
   assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { prefixe_da: 'trop-long!' })).status, 400);
 });
 
-test('Société : compléments d\'identité pour les seuls champs vides de la caisse, sans toucher la caisse', async () => {
-  await sql("UPDATE tenants SET ville = 'Douala', nui = '' WHERE id = $1", [A]);
-  const r = await appel('PUT', '/commercial/societe', 'dirA', { identite_complement: { nui: 'M0123456789X', ville: 'Yaoundé', telephone: '699 00 00 00' } });
+test('Société : identité de l\'Entité ; remplissage seulement pour un client sans NJ CAISSE PRO', async () => {
+  const caisse = (actif) => sql(`INSERT INTO tenant_modules (tenant_id, module_code, actif) VALUES ($1, 'caisse', $2)
+                                 ON CONFLICT (tenant_id, module_code) DO UPDATE SET actif = $2`, [A, actif]);
+  // Sans la caisse : l'écran Société remplit l'Entité.
+  await caisse(false);
+  let r = await appel('GET', '/commercial/societe', 'dirA');
+  assert.equal(r.data.mode_identite, 'remplissage');
+  assert.ok(r.data.formes_juridiques.some((f) => f.code === 'SARL'));
+  r = await appel('PUT', '/commercial/societe', 'dirA', { identite: { nom: 'Kamga Distribution', forme_juridique: 'sarl', nui: 'm0123456789x', ville: 'Douala' } });
   assert.equal(r.status, 200, r.message);
-  assert.equal(r.data.identite.nui, 'M0123456789X', 'complété');
-  assert.equal(r.data.sources.nui, 'module');
-  assert.equal(r.data.identite.ville, 'Douala', 'la caisse fait foi');
-  assert.equal(r.data.complement.ville, undefined, 'champ de la caisse ignoré');
-  const [t] = await sql('SELECT nui, ville FROM tenants WHERE id = $1', [A]);
-  assert.deepEqual([t.nui, t.ville], ['', 'Douala'], 'la caisse n\'est pas modifiée');
-  assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { identite_complement: { email: 'pas-un-mail' } })).status, 400);
-  assert.equal((await appel('PUT', '/commercial/societe', 'colA', { identite_complement: { nui: 'X' } })).status, 403);
-  // La caisse renseigne le champ plus tard : sa valeur l'emporte.
-  await sql("UPDATE tenants SET nui = 'P9999999999Z' WHERE id = $1", [A]);
-  const l = (await appel('GET', '/commercial/societe', 'dirA')).data;
-  assert.equal(l.identite.nui, 'P9999999999Z');
-  assert.equal(l.sources.nui, 'caisse');
+  const [t] = await sql('SELECT nom, forme_juridique, nui, ville FROM tenants WHERE id = $1', [A]);
+  assert.deepEqual([t.nom, t.forme_juridique, t.nui, t.ville], ['Kamga Distribution', 'SARL', 'M0123456789X', 'Douala'], 'Entité renseignée');
+  assert.equal(r.data.identite.nui, 'M0123456789X');
+  assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { identite: { forme_juridique: 'XYZ' } })).status, 400);
+  assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { identite: { nom: ' ' } })).status, 400);
+  assert.equal((await appel('PUT', '/commercial/societe', 'colA', { identite: { ville: 'X' } })).status, 403);
+  // Avec la caisse : lecture seule, l'identité se modifie dans la caisse.
+  await caisse(true);
+  r = await appel('GET', '/commercial/societe', 'dirA');
+  assert.equal(r.data.mode_identite, 'caisse');
+  assert.equal(r.data.identite.ville, 'Douala', 'même Entité, reprise par la caisse');
+  const refus = await appel('PUT', '/commercial/societe', 'dirA', { identite: { ville: 'Yaoundé' } });
+  assert.equal(refus.status, 409);
+  assert.equal((await sql('SELECT ville FROM tenants WHERE id = $1', [A]))[0].ville, 'Douala');
 });
 
 test('Magasins : création, code unique sans tenir compte de la casse, désactivation', async () => {

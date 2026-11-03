@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { api, configureApi } from '@/lib/api';
 import { MOIS, moisCourant, anneeCourante } from '@/lib/format';
 import { syncManager } from '@/lib/syncManager';
+import { moduleActif, systemeInstalle, utiliseAccueil } from '@/lib/modules';
 
 // Équivalent React de l'objet `state` global de legacy/js/app.js.
 // Mêmes clés de localStorage que l'app vanilla (caisse_token / caisse_user) :
@@ -113,12 +114,16 @@ export function AppProvider({ children }) {
     }
   }, []);
 
-  // Chargement des référentiels dès qu'une session est active.
+  // Chargement des référentiels de la caisse dès qu'une session est active —
+  // seulement si l'espace a NJ CAISSE PRO : pour un client qui n'a que d'autres
+  // modules (NJ COMMERCIAL…), ces routes répondent 403 MODULE_INACTIF et
+  // renverraient la personne à l'accueil.
+  const caisseOuverte = !utiliseAccueil(user) || !systemeInstalle(user) || moduleActif(user, 'caisse');
   useEffect(() => {
-    if (!token) return;
+    if (!token || !caisseOuverte) return;
     loadRubriques();
     loadJournaux();
-  }, [token, activeTenantId, loadRubriques, loadJournaux]);
+  }, [token, activeTenantId, caisseOuverte, loadRubriques, loadJournaux]);
 
   // Les permissions gouvernent tout l'affichage : on les rafraîchit à chaque
   // chargement de page, sinon une permission accordée par un administrateur

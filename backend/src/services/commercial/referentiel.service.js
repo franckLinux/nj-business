@@ -102,21 +102,20 @@ const PARAMS = {
   autovalidation_stock: (v) => Boolean(v),
 };
 
-// Identité : la caisse (Entité) fait foi ; le module ne complète que ses champs vides,
-// dans com_parametres.identite_complement (migration 059), sans écrire dans la caisse.
-const CHAMPS_COMPLEMENT = {
-  sigle: 30, forme_juridique: 60, adresse: 300, boite_postale: 60, ville: 100, pays: 100,
-  telephone: 60, email: 150, site_web: 200, nui: 60, registre_commerce: 80,
+// Identité : toujours celle de l'Entité (table tenants), comme dans la caisse.
+//   • client qui a NJ CAISSE PRO : lecture seule ici (elle se modifie dans la caisse) ;
+//   • client sans la caisse : « mode remplissage », l'écran Société écrit l'Entité,
+//     que la caisse reprendra telle quelle si elle est activée plus tard.
+const CHAMPS_ENTITE = {
+  nom: 200, sigle: 30, forme_juridique: 20, adresse: 300, boite_postale: 60, ville: 100, pays: 100,
+  telephone: 60, email: 150, site_web: 200, nui: 20, registre_commerce: 80,
 };
-const vide = (v) => v === null || v === undefined || String(v).trim() === '';
-const fusionnerIdentite = (caisse, complement = {}) => {
-  const identite = { ...caisse }; const sources = {};
-  for (const k of Object.keys(CHAMPS_COMPLEMENT)) {
-    if (!vide(caisse[k])) sources[k] = 'caisse';
-    else if (!vide(complement[k])) { identite[k] = complement[k]; sources[k] = 'module'; } else sources[k] = null;
-  }
-  sources.raison_sociale = 'caisse';
-  return { identite, sources };
+const caisseActive = async (tenantId, tr) => {
+  const [t] = await Q("SELECT to_regclass('public.tenant_modules') IS NOT NULL AS ok", {}, tr);
+  if (!t.ok) return true;                                   // système de modules absent : la caisse est là
+  const [m] = await Q(`SELECT 1 AS ok FROM tenant_modules tm JOIN modules m ON m.code = tm.module_code
+                        WHERE tm.tenant_id = :t AND tm.module_code = 'caisse' AND tm.actif AND m.statut = 'operationnel'`, { t: tenantId }, tr);
+  return Boolean(m);
 };
 
 const lireSociete = async (tenantId) => {
@@ -135,10 +134,9 @@ const lireSociete = async (tenantId) => {
     parametres[k] = parametres[k] === null ? null : Number(parametres[k]);
   }
   delete parametres.tenant_id;
-  const complement = parametres.identite_complement || {};
-  delete parametres.identite_complement;
-  const { identite, sources } = fusionnerIdentite(t, complement);
-  return { identite, identite_caisse: t, complement, sources, parametres, parametres_enregistres: Boolean(p) };
+  const { FORMES_JURIDIQUES } = require('../../controllers/config.controller');
+  return { identite: t, mode_identite: (await caisseActive(tenantId)) ? 'caisse' : 'remplissage',
+    formes_juridiques: FORMES_JURIDIQUES, parametres, parametres_enregistres: Boolean(p) };
 };
 
 const modifierSociete = async ({ tenantId, userId, body }) => {
@@ -157,24 +155,27 @@ const modifierSociete = async ({ tenantId, userId, body }) => {
     }
     const d = differences(actuel, n);
     if (d) await auditer(tr, { tenantId, userId, action: 'COM_PARAMETRES', id: tenantId, ...d });
-    // Compléments d'identité : seulement les champs que la caisse n'a pas.
-    if (body.identite_complement && typeof body.identite_complement === 'object') {
-      const soc = await lireSociete(tenantId);
-      const nouveau = {};
-      for (const [k, max] of Object.entries(CHAMPS_COMPLEMENT)) {
-        if (!vide(soc.identite_caisse[k])) continue;                 // la caisse fait foi
-        const v = body.identite_complement[k] === undefined ? soc.complement[k] : txt(body.identite_complement[k]);
-        if (vide(v)) continue;
-        if (String(v).length > max) throw new ErreurCom(400, `${k.replace('_', ' ')} : ${max} caractères au plus.`);
-        if (k === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new ErreurCom(400, 'E-mail invalide.');
-        nouveau[k] = v;
+    // Identité de l'Entité : modifiable ici seulement pour un client sans NJ CAISSE PRO.
+    if (body.identite && typeof body.identite === 'object') {
+      if (await caisseActive(tenantId, tr)) throw new ErreurCom(409, 'Ce client utilise NJ CAISSE PRO : son identité se modifie dans la caisse (Configuration → Entité).');
+      const { FORMES_JURIDIQUES } = require('../../controllers/config.controller');
+      const [avantT] = await Q(`SELECT ${Object.keys(CHAMPS_ENTITE).join(', ')} FROM tenants WHERE id = :t FOR UPDATE`, { t: tenantId }, tr);
+      const n = {};
+      for (const [k, max] of Object.entries(CHAMPS_ENTITE)) {
+        if (body.identite[k] === undefined) continue;          // champ absent : inchangé
+        let v = txt(body.identite[k]);
+        if (v.length > max) throw new ErreurCom(400, `${k.replace('_', ' ')} : ${max} caractères au plus.`);
+        if (k === 'sigle' || k === 'nui' || k === 'forme_juridique') v = v.toUpperCase();
+        if (k === 'email') v = v.toLowerCase();
+        n[k] = v;
       }
-      const dc = differences(soc.complement, nouveau);
-      const retires = Object.keys(soc.complement).filter((k) => !(k in nouveau));
-      if (dc || retires.length) {
-        await X('UPDATE com_parametres SET identite_complement = CAST(:c AS jsonb), modifie_par = :u, modifie_le = NOW() WHERE tenant_id = :t',
-          { c: JSON.stringify(nouveau), u: userId, t: tenantId }, tr);
-        await auditer(tr, { tenantId, userId, action: 'COM_IDENTITE_COMPLEMENT', id: tenantId, avant: soc.complement, apres: nouveau });
+      if (n.nom !== undefined && !n.nom) throw new ErreurCom(400, 'La raison sociale est obligatoire.');
+      if (n.forme_juridique && !FORMES_JURIDIQUES.some((f) => f.code === n.forme_juridique)) throw new ErreurCom(400, 'Forme juridique inconnue.');
+      if (n.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n.email)) throw new ErreurCom(400, 'E-mail invalide.');
+      const d = differences(avantT, n);
+      if (d) {
+        await X(`UPDATE tenants SET ${Object.keys(n).map((k) => `${k} = :${k}`).join(', ')} WHERE id = :t`, { ...n, t: tenantId }, tr);
+        await auditer(tr, { tenantId, userId, action: 'COM_IDENTITE_ENTITE', id: tenantId, ...d });
       }
     }
   });
