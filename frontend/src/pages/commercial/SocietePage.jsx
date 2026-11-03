@@ -1,4 +1,4 @@
-// NJ COMMERCIAL — Société : identité de l'Entité (comme dans la caisse) + documents d'achat + règles du stock.
+// NJ COMMERCIAL — Société : identité de l'Entité (comme dans la caisse) + règles du stock.
 //   • client qui a NJ CAISSE PRO : identité en lecture seule (elle se modifie dans la caisse) ;
 //   • client sans la caisse : « mode remplissage », l'identité se saisit ici et alimente
 //     l'Entité, que la caisse reprendra si elle est activée plus tard.
@@ -106,22 +106,6 @@ export default function SocietePage() {
           )}
         </Section>
         <div>
-          <Section titre="Documents d'achat">
-            <div className="cm-grille">
-              <Champ label="Nom commercial" id="nc" pleine aide="Affiché à côté de la raison sociale sur les documents.">
-                <input id="nc" value={f.nom_commercial} onChange={set('nom_commercial')} maxLength={150} disabled={!modifiable} />
-              </Champ>
-              <Champ label="Mentions des documents" id="md" pleine aide="Ex. conditions générales d'achat, adresse de livraison par défaut.">
-                <textarea id="md" value={f.mentions_documents} onChange={set('mentions_documents')} maxLength={1000} disabled={!modifiable} />
-              </Champ>
-              <Champ label="Préfixe des demandes" id="pda" aide={`Ex. ${f.prefixe_da || 'DA'}-${new Date().getFullYear()}-0001`}>
-                <input id="pda" value={f.prefixe_da} onChange={set('prefixe_da')} maxLength={6} disabled={!modifiable} style={{ textTransform: 'uppercase' }} />
-              </Champ>
-              <Champ label="Préfixe des bons de commande" id="pbc" aide={`Ex. ${f.prefixe_bc || 'BC'}-${new Date().getFullYear()}-0001`}>
-                <input id="pbc" value={f.prefixe_bc} onChange={set('prefixe_bc')} maxLength={6} disabled={!modifiable} style={{ textTransform: 'uppercase' }} />
-              </Champ>
-            </div>
-          </Section>
           <Section titre="Règles du stock">
             <div className="cm-grille">
               <div className="cm-champ cm-pleine">
