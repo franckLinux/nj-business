@@ -6,15 +6,15 @@ import { useApp } from '@/context/AppContext';
 import { Entete } from '@/components/commercial/ui';
 
 const ETAPES = [
-  ['societe', '/commercial/societe', 'Société', 'Identité reprise de l\'Entité, mentions des documents, numérotation, règles du circuit.', ['com.parametrage.voir']],
-  ['agences', '/commercial/agences', 'Agences', 'Les sites de l\'entreprise ; chacun regroupe ses magasins.', ['com.parametrage.voir']],
-  ['magasins', '/commercial/magasins', 'Magasins', 'Les lieux de stockage, rattachés à une agence, avec leur responsable.', ['com.parametrage.voir', 'com.articles.voir']],
-  ['fournisseurs', '/commercial/fournisseurs', 'Fournisseurs', 'Le registre des tiers, complété des informations d\'achat.', ['com.tiers.voir']],
-  ['familles', '/commercial/familles', 'Familles d\'articles', 'Classer les articles ; taxes d\'achat et de vente, suivi en stock et valorisation proposés aux articles.', ['com.parametrage.voir', 'com.articles.voir']],
-  ['unites', '/commercial/unites', 'Unités de mesure', 'Pièce, carton, kg… et leurs décimales ; la conversion se règle sur chaque article.', ['com.parametrage.voir', 'com.articles.voir']],
-  ['taxes', '/commercial/taxes', 'Taxes', 'Les taxes applicables, avec leur taux.', ['com.parametrage.voir']],
-  ['articles', '/commercial/articles', 'Articles', 'Le catalogue, le suivi comptable et le stock d\'ouverture.', ['com.articles.voir', 'com.da.creer']],
-  ['utilisateurs', '/commercial/utilisateurs', 'Utilisateurs et rôles', 'Qui demande, qui prépare, qui approuve.', ['com.parametrage.modifier']],
+  ['societe', '/commercial/configuration/societe', 'Société', 'Identité reprise de l\'Entité, mentions des documents, numérotation, règles du circuit.', ['com.parametrage.voir']],
+  ['agences', '/commercial/configuration/agences', 'Agences', 'Les sites de l\'entreprise ; chacun regroupe ses magasins.', ['com.parametrage.voir']],
+  ['magasins', '/commercial/configuration/magasins', 'Magasins', 'Les lieux de stockage, rattachés à une agence, avec leur responsable.', ['com.parametrage.voir', 'com.articles.voir']],
+  ['fournisseurs', '/commercial/configuration/fournisseurs', 'Fournisseurs', 'Le registre des tiers, complété des informations d\'achat.', ['com.tiers.voir']],
+  ['familles', '/commercial/configuration/familles', 'Familles d\'articles', 'Classer les articles ; taxes d\'achat et de vente, suivi en stock et valorisation proposés aux articles.', ['com.parametrage.voir', 'com.articles.voir']],
+  ['unites', '/commercial/configuration/unites', 'Unités de mesure', 'Pièce, carton, kg… et leurs décimales ; la conversion se règle sur chaque article.', ['com.parametrage.voir', 'com.articles.voir']],
+  ['taxes', '/commercial/configuration/taxes', 'Taxes', 'Les taxes applicables, avec leur taux.', ['com.parametrage.voir']],
+  ['articles', '/commercial/configuration/articles', 'Articles', 'Le catalogue, le suivi comptable et le stock d\'ouverture.', ['com.articles.voir', 'com.da.creer']],
+  ['utilisateurs', '/commercial/configuration/utilisateurs', 'Utilisateurs et rôles', 'Qui demande, qui prépare, qui approuve.', ['com.parametrage.modifier']],
 ];
 
 export default function DemarragePage() {

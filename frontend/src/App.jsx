@@ -35,22 +35,13 @@ import CommercialLayout, { peutUn, DROITS_DEMANDES, DROITS_AUTORISATIONS, DROITS
 import DemandesPage from '@/pages/commercial/DemandesPage';
 import DemandeFormPage from '@/pages/commercial/DemandeFormPage';
 import DemandePage from '@/pages/commercial/DemandePage';
-import DemarragePage from '@/pages/commercial/DemarragePage';
-import AgencesPage from '@/pages/commercial/AgencesPage';
-import UnitesPage from '@/pages/commercial/UnitesPage';
-import SocietePage from '@/pages/commercial/SocietePage';
-import MagasinsPage from '@/pages/commercial/MagasinsPage';
-import FamillesPage from '@/pages/commercial/FamillesPage';
-import ArticlesPage from '@/pages/commercial/ArticlesPage';
-import TiersPage from '@/pages/commercial/TiersPage';
-import TaxesPage from '@/pages/commercial/TaxesPage';
-import UtilisateursPage from '@/pages/commercial/UtilisateursPage';
 import BonsPage from '@/pages/commercial/BonsPage';
 import BonFormPage from '@/pages/commercial/BonFormPage';
 import BonPage from '@/pages/commercial/BonPage';
 import TableauBordPage from '@/pages/commercial/TableauBordPage';
 import DocumentsPage from '@/pages/commercial/DocumentsPage';
 import HistoriquePage from '@/pages/commercial/HistoriquePage';
+import ConfigurationPage from '@/pages/commercial/ConfigurationPage';
 import StockEtatPage from '@/pages/commercial/StockEtatPage';
 import StockDocsPage from '@/pages/commercial/StockDocsPage';
 import StockDocFormPage from '@/pages/commercial/StockDocFormPage';
@@ -138,10 +129,16 @@ function EntreeCommercial() {
   if (saisie) return <Navigate to={`/commercial/stock/${saisie[1]}`} replace />;
   if (can('com.stock.journal')) return <Navigate to="/commercial/stock/mouvements" replace />;
   if (can('com.stock.valorisation')) return <Navigate to="/commercial/stock/valorisation" replace />;
-  return <Navigate to="/commercial/mise-en-route" replace />;
+  return <Navigate to="/commercial/configuration/mise-en-route" replace />;
 }
 
 // Garde d'un écran du module : une permission parmi plusieurs suffit.
+// Anciennes adresses de configuration (/commercial/articles…) → onglet correspondant.
+function RedirectionConfig({ onglet }) {
+  const { search } = useLocation();
+  return <Navigate to={`/commercial/configuration/${onglet}${search}`} replace />;
+}
+
 function AutoriseCm({ codes, children }) {
   const { user, can } = useApp();
   if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
@@ -176,17 +173,12 @@ function AuthenticatedApp() {
       <Route path="accueil" element={utiliseAccueil(user) ? <AccueilPage /> : <Navigate to="/" replace />} />
       <Route path="commercial" element={<GardeCommercial><CommercialLayout /></GardeCommercial>}>
         <Route index element={<EntreeCommercial />} />
-        <Route path="mise-en-route" element={<DemarragePage />} />
-        <Route path="agences"      element={<AutoriseCm codes={['com.parametrage.voir']}><AgencesPage /></AutoriseCm>} />
-        <Route path="unites"       element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><UnitesPage /></AutoriseCm>} />
-        <Route path="societe"      element={<AutoriseCm codes={['com.parametrage.voir']}><SocietePage /></AutoriseCm>} />
-        <Route path="magasins"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><MagasinsPage /></AutoriseCm>} />
-        <Route path="familles"     element={<AutoriseCm codes={['com.parametrage.voir', 'com.articles.voir']}><FamillesPage /></AutoriseCm>} />
-        <Route path="articles"     element={<AutoriseCm codes={['com.articles.voir', 'com.da.creer']}><ArticlesPage /></AutoriseCm>} />
-        <Route path="fournisseurs" element={<AutoriseCm codes={['com.tiers.voir']}><TiersPage key="f" type="fournisseur" /></AutoriseCm>} />
-        <Route path="clients"      element={<AutoriseCm codes={['com.tiers.voir']}><TiersPage key="c" type="client" /></AutoriseCm>} />
-        <Route path="taxes"        element={<AutoriseCm codes={['com.parametrage.voir']}><TaxesPage /></AutoriseCm>} />
-        <Route path="utilisateurs" element={<AutoriseCm codes={['com.parametrage.modifier']}><UtilisateursPage /></AutoriseCm>} />
+        {/* Configuration : une page à onglets ; les anciennes adresses y mènent. */}
+        <Route path="configuration"         element={<ConfigurationPage />} />
+        <Route path="configuration/:onglet" element={<ConfigurationPage />} />
+        {['mise-en-route', 'societe', 'agences', 'magasins', 'utilisateurs', 'familles', 'unites', 'articles', 'taxes', 'fournisseurs', 'clients'].map((o) => (
+          <Route key={o} path={o} element={<RedirectionConfig onglet={o} />} />
+        ))}
         <Route path="demandes"              element={<AutoriseCm codes={DROITS_DEMANDES}><DemandesPage key="d" /></AutoriseCm>} />
         <Route path="demandes/nouvelle"     element={<AutoriseCm codes={['com.da.creer']}><DemandeFormPage key="n" /></AutoriseCm>} />
         <Route path="demandes/:id"          element={<AutoriseCm codes={DROITS_DEMANDES}><DemandePage /></AutoriseCm>} />

@@ -301,3 +301,63 @@ a.cm-tuile:hover { border-color: #93c5fd; box-shadow: 0 6px 18px rgba(37, 99, 23
   .cm-histo-lib { font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg); height: 38px; }
   .cm-histo-val { display: none; }
 }
+
+/* ── Menu en tiroirs (NJ COMMERCIAL) ─────────────────────────────────────── */
+.cm-acces-directs { padding-top: 8px; }
+.cm-tiroir-menu { margin: 1px 10px; border-radius: 10px; }
+.cm-tiroir-tete-menu {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 8px; border: 0; border-radius: 10px;
+  background: transparent; color: rgba(255, 255, 255, .82); font: inherit; font-size: 13.5px; font-weight: 650; text-align: left; cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.cm-tiroir-tete-menu:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+.cm-tiroir-tete-menu:focus-visible { outline: 2px solid #93c5fd; outline-offset: -2px; }
+.cm-tiroir-tete-menu svg { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.cm-tiroir-titre-menu { flex: 1; }
+.cm-tiroir-menu.contient-actif > .cm-tiroir-tete-menu { color: #fff; }
+.cm-tiroir-menu .cm-chevron { width: 15px; height: 15px; opacity: .55; transition: transform .2s ease; }
+.cm-tiroir-menu.ouvert .cm-chevron { transform: rotate(90deg); }
+.cm-tiroir-corps-menu { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .22s ease; }
+.cm-tiroir-menu.ouvert .cm-tiroir-corps-menu { grid-template-rows: 1fr; }
+.cm-tiroir-corps-menu > div { overflow: hidden; margin-left: 16px; border-left: 1px solid rgba(255, 255, 255, .12); }
+.cm-tiroir-corps-menu .nav-item { margin-left: 6px; padding-top: 7px; padding-bottom: 7px; font-size: 13px; }
+.cm-tiroir-menu:not(.ouvert) .cm-tiroir-corps-menu .nav-item { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .cm-tiroir-corps-menu, .cm-tiroir-menu .cm-chevron { transition: none; }
+}
+
+/* ── Configuration à onglets ─────────────────────────────────────────────── */
+.cm-config { max-width: 1180px; }
+.cm-config-tete h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.01em; color: var(--text-primary, #0f172a); }
+.cm-config-tete p { margin: 4px 0 0; font-size: 13.5px; color: var(--text-muted); }
+.cm-config-barre {
+  display: flex; align-items: stretch; margin: 16px 0 18px; padding: 6px; gap: 0;
+  background: #fff; border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+  flex-wrap: wrap; row-gap: 8px; column-gap: 14px; padding: 8px 8px 6px;
+}
+.cm-config-groupe { display: flex; flex-direction: column; gap: 3px; padding: 0; flex: none; }
+
+.cm-config-groupe-lib { padding: 2px 8px 0; font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.cm-config-onglets { display: flex; gap: 2px; }
+.cm-config-onglet {
+  display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border: 0; border-radius: 9px; scroll-snap-align: center;
+  background: transparent; color: #475569; font: inherit; font-size: 13.5px; font-weight: 600; white-space: nowrap; cursor: pointer;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.cm-config-onglet svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.cm-config-onglet:hover { background: #f1f5f9; color: #0f172a; }
+.cm-config-onglet:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cm-config-onglet.actif { background: var(--accent); color: #fff; box-shadow: 0 2px 6px rgba(37, 99, 235, .28); }
+.cm-config-panneau > .cm-page { max-width: none; }
+@media (max-width: 760px) {
+  .cm-config-tete h1 { font-size: 19px; }
+  .cm-config-barre {
+    margin: 12px 0 14px; padding: 5px; border-radius: 12px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  }
+  .cm-config-barre::-webkit-scrollbar { display: none; }
+  .cm-config-barre { column-gap: 6px; }
+  .cm-config-groupe-lib { display: none; }
+  .cm-config-onglet { padding: 8px 10px; font-size: 13px; }
+}
