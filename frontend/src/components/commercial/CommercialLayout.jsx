@@ -26,12 +26,12 @@ const TITRES = {
   '/commercial/utilisateurs': 'Configuration — Utilisateurs et rôles',
   '/commercial/demandes': 'Achats — Expressions de besoin',
   '/commercial/demandes/nouvelle': 'Achats — Nouvelle expression de besoin',
-  '/commercial/autorisations': 'Contrôles — Autorisations d\'achat',
+  '/commercial/autorisations': 'Validations — Autorisations d\'achat',
   '/commercial/bons': 'Achats — Bons de commande',
   '/commercial/bons/nouveau': 'Achats — Préparer un bon de commande',
   '/commercial/tableau-bord': 'NJ COMMERCIAL — Tableau de bord',
-  '/commercial/documents': 'Contrôles — Documents justificatifs',
-  '/commercial/historique': 'Contrôles — Historique',
+  '/commercial/documents': 'Suivi et états — Documents justificatifs',
+  '/commercial/historique': 'Suivi et états — Historique',
   '/commercial/stock': 'Suivi et états — État du stock',
   '/commercial/receptions': 'Achats — Réceptions',
   '/commercial/receptions/nouvelle': 'Achats — Nouvelle réception',
@@ -39,21 +39,21 @@ const TITRES = {
   '/commercial/retours-fournisseurs/nouveau': 'Achats — Retour au fournisseur',
   '/commercial/factures-fournisseurs': 'Achats — Factures fournisseurs',
   '/commercial/factures-fournisseurs/nouvelle': 'Achats — Saisie d\'une facture fournisseur',
-  '/commercial/validation-achats': 'Contrôles — Validation des achats',
+  '/commercial/validation-achats': 'Validations — Validation des achats',
   '/commercial/stock/nouveau': 'Stock — Nouveau document',
   '/commercial/stock/entrees': 'Stock — Entrées en stock',
   '/commercial/stock/sorties': 'Stock — Sorties diverses',
   '/commercial/stock/transferts': 'Stock — Transferts',
   '/commercial/stock/inventaires': 'Stock — Inventaires',
-  '/commercial/stock/validation': 'Contrôles — Validation des stocks',
-  '/commercial/stock/mouvements': 'Contrôles — Mouvements de stock',
-  '/commercial/stock/valorisation': 'Contrôles — Valorisation du stock',
+  '/commercial/stock/validation': 'Validations — Validation des stocks',
+  '/commercial/stock/mouvements': 'Suivi et états — Mouvements de stock',
+  '/commercial/stock/valorisation': 'Suivi et états — Valorisation du stock',
   '/commercial/devis': 'Ventes — Devis',
   '/commercial/devis/nouveau': 'Ventes — Nouveau devis',
   '/commercial/commandes-clients': 'Ventes — Commandes clients',
   '/commercial/livraisons': 'Ventes — Livraisons',
   '/commercial/livraisons/nouvelle': 'Ventes — Préparer une livraison',
-  '/commercial/validation-ventes': 'Contrôles — Validation des ventes',
+  '/commercial/validation-ventes': 'Validations — Validation des ventes',
 };
 const ONGLETS_TITRES = { 'mise-en-route': 'Mise en route', societe: 'Société', agences: 'Agences', magasins: 'Magasins', utilisateurs: 'Utilisateurs et rôles',
   familles: 'Familles d\'articles', unites: 'Unités de mesure', articles: 'Articles', taxes: 'Taxes', fournisseurs: 'Fournisseurs', clients: 'Clients' };
@@ -128,11 +128,14 @@ const RUBRIQUES = [
     ] },
   ] },
 ];
-// Entrée correspondant à la page ouverte : le préfixe le plus long l'emporte
-// (une fiche /commercial/stock/documents/12 relève de « État du stock », dans « Suivi et états »).
+// Entrée correspondant à la page ouverte : le préfixe le plus long l'emporte ; une entrée
+// « end » (État du stock) ne vaut que pour son adresse exacte. Les fiches et saisies de
+// documents de stock relèvent du tiroir Stock (Traitements).
 const TOUTES = RUBRIQUES.flatMap((r) => [...(r.entrees || []), ...(r.groupes || []).flatMap((g) => g.entrees)]);
-const entreeActive = (chemin) => TOUTES.filter((e) => chemin === e.to || chemin.startsWith(`${e.to}/`))
+const entreeActive = (chemin) => TOUTES.filter((e) => chemin === e.to || (!e.end && chemin.startsWith(`${e.to}/`)))
   .sort((x, y) => y.to.length - x.to.length)[0]?.to;
+const GROUPE_PAR_CHEMIN = [[/^\/commercial\/stock\/(documents|nouveau)/, 'stock']];
+const groupeDuChemin = (chemin) => GROUPE_PAR_CHEMIN.find(([re]) => re.test(chemin))?.[1];
 const CLE_TIROIRS = 'njc.menu.tiroirs';
 const lireTiroirs = () => { try { return JSON.parse(localStorage.getItem(CLE_TIROIRS)) || {}; } catch { return {}; } };
 
@@ -202,10 +205,10 @@ function CommercialSidebar({ open, onClose }) {
     return n;
   });
   // La page ouverte rend toujours son tiroir visible (même s'il avait été replié).
+  const groupeOuvert = RUBRIQUES.flatMap((r) => r.groupes || []).find((x) => x.entrees.some((e) => e.to === actif))?.id || groupeDuChemin(location.pathname);
   useEffect(() => {
-    const g = RUBRIQUES.flatMap((r) => r.groupes || []).find((x) => x.entrees.some((e) => e.to === actif));
-    if (g && tiroirs[g.id] === false) basculer(g.id, true);
-  }, [actif]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (groupeOuvert && tiroirs[groupeOuvert] === false) basculer(groupeOuvert, true);
+  }, [groupeOuvert]); // eslint-disable-line react-hooks/exhaustive-deps
   const onLogout = () => { if (window.confirm('Se déconnecter ?')) { logout(); navigate('/', { replace: true }); } };
   return (
     <aside className={'sidebar' + (open ? ' open' : '')} aria-label="Menu NJ COMMERCIAL">
@@ -232,8 +235,8 @@ function CommercialSidebar({ open, onClose }) {
               <div className="cm-sidebar-label">{r.titre}</div>
               {groupes.map((g) => (
                 <Tiroir key={g.id} g={g} badge={badge} actif={actif}
-                  ouvert={tiroirs[g.id] ?? g.entrees.some((e) => e.to === actif)}
-                  onBasculer={() => basculer(g.id, !(tiroirs[g.id] ?? g.entrees.some((e) => e.to === actif)))} />
+                  ouvert={tiroirs[g.id] ?? g.id === groupeOuvert}
+                  onBasculer={() => basculer(g.id, !(tiroirs[g.id] ?? g.id === groupeOuvert))} />
               ))}
             </div>
           );

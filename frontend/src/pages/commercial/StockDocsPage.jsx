@@ -1,11 +1,12 @@
 // NJ COMMERCIAL — liste des documents de stock d'un type (entrées, sorties, transferts,
 // inventaires) ou, en mode « validation », de tous les documents qui attendent un valideur.
 import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Entete, useListe, useDiffere } from '@/components/commercial/ui';
 import { dateFr } from '@/components/commercial/achats';
 import { TYPES_STOCK, TYPE_PAR_ROUTE, STATUTS_STOCK, StatutStock, SAISIE_STOCK } from '@/components/commercial/stock';
+import StockDocFormPage from '@/pages/commercial/StockDocFormPage';
 
 export default function StockDocsPage({ validation = false }) {
   const { route } = useParams();
@@ -17,7 +18,11 @@ export default function StockDocsPage({ validation = false }) {
   const [du, setDu] = useState('');
   const [au, setAu] = useState('');
   const qd = useDiffere(q);
-  const { donnees, erreur } = useListe(`/commercial/stock/documents?type=${type}&statut=${statut}&q=${encodeURIComponent(qd)}&du=${du}&au=${au}`);
+  // Saisie ouverte sur place (?saisie=1) : Fermer, la soumission ou le bouton Retour ramènent à la liste.
+  const [params, setParams] = useSearchParams();
+  const saisie = !validation && params.get('saisie') === '1' && can(SAISIE_STOCK[type]);
+  const ouvrir = (oui) => setParams((p) => { const n = new URLSearchParams(p); if (oui) n.set('saisie', '1'); else n.delete('saisie'); return n; });
+  const { donnees, erreur, recharger } = useListe(`/commercial/stock/documents?type=${type}&statut=${statut}&q=${encodeURIComponent(qd)}&du=${du}&au=${au}`);
   const liste = donnees || [];
   const t = TYPES_STOCK[type];
   return (
@@ -26,10 +31,14 @@ export default function StockDocsPage({ validation = false }) {
         description={validation
           ? 'Documents soumis qui attendent une validation. Le stock ne bouge qu\'à la validation, et jamais par la personne qui a saisi le document.'
           : t.aide}>
-        {!validation && can(SAISIE_STOCK[type]) && (
-          <button type="button" className="cm-btn cm-primaire" onClick={() => navigate(`/commercial/stock/nouveau?type=${type}`)}>+ {t.libelle}</button>
+        {!validation && !saisie && can(SAISIE_STOCK[type]) && (
+          <button type="button" className="cm-btn cm-primaire" onClick={() => ouvrir(true)}>+ {t.libelle}</button>
         )}
       </Entete>
+      {saisie ? (
+        <StockDocFormPage key={type} integre typeInitial={type} retour={t.pluriel} onFermer={() => ouvrir(false)}
+          onFini={() => { ouvrir(false); recharger(); }} />
+      ) : (<>
       <div className="cm-outils">
         <input className="cm-recherche" type="search" placeholder="Numéro, motif, article…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher un document" />
         <select className="cm-select" value={statut} onChange={(e) => setStatut(e.target.value)} aria-label="Statut">
@@ -61,6 +70,7 @@ export default function StockDocsPage({ validation = false }) {
           </tbody>
         </table>
       </div>
+      </>)}
     </div>
   );
 }

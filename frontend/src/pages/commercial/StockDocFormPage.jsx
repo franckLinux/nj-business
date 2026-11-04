@@ -10,9 +10,9 @@ import { TYPES_STOCK, lireNombre } from '@/components/commercial/stock';
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 const virgule = (n) => (n === null || n === undefined ? '' : String(n).replace('.', ','));
 
-// `integre` : saisie ouverte directement dans l'état du stock (sans changer de page) ;
-// `onFermer` revient à l'état, `onFini(document)` après enregistrement ou soumission.
-export default function StockDocFormPage({ integre = false, typeInitial, onFermer, onFini }) {
+// `integre` : saisie ouverte directement dans la liste de son type (sans changer de page) ;
+// `onFermer` revient à la liste, `onFini(document)` après enregistrement ou soumission.
+export default function StockDocFormPage({ integre = false, typeInitial, retour, onFermer, onFini }) {
   const { id: idRoute } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
@@ -121,7 +121,7 @@ export default function StockDocFormPage({ integre = false, typeInitial, onFerme
   return (
     <div className={integre ? 'cm-saisie-integree' : 'cm-page'}>
       {integre
-        ? <button type="button" className="cm-retour cm-lien" onClick={onFermer}>‹ État du stock</button>
+        ? <button type="button" className="cm-retour cm-lien" onClick={onFermer}>‹ {retour || t.pluriel}</button>
         : <Link to={id ? `/commercial/stock/documents/${id}` : `/commercial/stock/${t.route}`} className="cm-retour">‹ {id ? numero : t.pluriel}</Link>}
       <div className="cm-fiche-tete">
         <h2>{id ? `${integre ? 'Brouillon' : 'Modifier'} ${numero}` : `Nouveau : ${t.libelle.toLowerCase()}`}</h2>

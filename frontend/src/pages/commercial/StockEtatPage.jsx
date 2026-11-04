@@ -1,19 +1,14 @@
 // NJ COMMERCIAL — État du stock : quantité, coût moyen et valeur par article et par magasin.
-// Tout vient des mouvements validés ; rien n'est saisi ici.
+// Tout vient des mouvements validés ; rien n'est saisi ici (états seulement, menu « Suivi et états »).
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
-import StockDocFormPage from '@/pages/commercial/StockDocFormPage';
 import { Entete, useListe, useDiffere, fmtMontant, fmtQte } from '@/components/commercial/ui';
-import { TYPES_STOCK, SAISIE_STOCK } from '@/components/commercial/stock';
 
 export default function StockEtatPage() {
   const { can } = useApp();
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  // Saisie ouverte sur place (?saisie=entree…) : le bouton Retour du navigateur ramène à l'état.
-  const saisie = TYPES_STOCK[params.get('saisie')] && can(SAISIE_STOCK[params.get('saisie')]) ? params.get('saisie') : '';
-  const ouvrir = (k) => setParams((p) => { const n = new URLSearchParams(p); if (k) n.set('saisie', k); else n.delete('saisie'); return n; });
+  const [params] = useSearchParams();
   const [q, setQ] = useState('');
   const [magasin, setMagasin] = useState(params.get('magasin_id') || '');
   const [famille, setFamille] = useState('');
@@ -21,7 +16,7 @@ export default function StockEtatPage() {
   const qd = useDiffere(q);
   const { donnees: magasins } = useListe('/commercial/magasins?perimetre=1');
   const { donnees: familles } = useListe('/commercial/familles');
-  const { donnees, erreur, recharger } = useListe(`/commercial/stock/etat?q=${encodeURIComponent(qd)}&magasin_id=${magasin}&famille_id=${famille}`
+  const { donnees, erreur } = useListe(`/commercial/stock/etat?q=${encodeURIComponent(qd)}&magasin_id=${magasin}&famille_id=${famille}`
     + `${filtre === 'alertes' ? '&alertes=1' : ''}${filtre === 'a_valoriser' ? '&a_valoriser=1' : ''}`);
   const liste = (donnees || []).filter((l) => filtre || l.quantite !== 0 || l.a_valoriser);
   const valeurs = can('com.stock.valorisation');
@@ -29,17 +24,7 @@ export default function StockEtatPage() {
   return (
     <div className="cm-page">
       <Entete titre="État du stock"
-        description="Quantités et valeurs calculées à partir des seuls mouvements validés, au coût moyen (CMUP) ou premier entré, premier sorti (FIFO) selon l'article.">
-        {Object.entries(TYPES_STOCK).filter(([k]) => can(SAISIE_STOCK[k])).map(([k, t], i) => (
-          <button key={k} type="button" className={'cm-btn ' + ((saisie ? saisie === k : i === 0) ? 'cm-primaire' : 'cm-secondaire')}
-            aria-pressed={saisie === k}
-            onClick={() => { if (saisie && saisie !== k && !window.confirm('Abandonner la saisie en cours ?')) return; ouvrir(k); }}>{t.libelle}</button>
-        ))}
-      </Entete>
-      {saisie ? (
-        <StockDocFormPage key={saisie} integre typeInitial={saisie} onFermer={() => ouvrir('')}
-          onFini={() => { ouvrir(''); recharger(); }} />
-      ) : (<>
+        description="Quantités et valeurs calculées à partir des seuls mouvements validés, au coût moyen (CMUP) ou premier entré, premier sorti (FIFO) selon l'article. Consultation seulement : les entrées, sorties, transferts et inventaires se saisissent dans Traitements → Stock." />
       <div className="cm-outils">
         <input className="cm-recherche" type="search" placeholder="Référence ou désignation…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Rechercher un article" />
         <select className="cm-select" value={magasin} onChange={(e) => setMagasin(e.target.value)} aria-label="Magasin">
@@ -86,7 +71,6 @@ export default function StockEtatPage() {
         </table>
       </div>
       <p className="cm-aide" style={{ marginTop: 10 }}>Cliquez sur une ligne pour voir ses mouvements. « À valoriser » : stock d'ouverture saisi sans coût, compté pour 0 dans la valeur.</p>
-      </>)}
     </div>
   );
 }
