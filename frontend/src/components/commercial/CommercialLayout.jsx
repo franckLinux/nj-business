@@ -32,7 +32,7 @@ const TITRES = {
   '/commercial/tableau-bord': 'NJ COMMERCIAL — Tableau de bord',
   '/commercial/documents': 'Contrôles — Documents justificatifs',
   '/commercial/historique': 'Contrôles — Historique',
-  '/commercial/stock': 'Stock — État du stock',
+  '/commercial/stock': 'Suivi et états — État du stock',
   '/commercial/receptions': 'Achats — Réceptions',
   '/commercial/receptions/nouvelle': 'Achats — Nouvelle réception',
   '/commercial/retours-fournisseurs': 'Achats — Retours fournisseurs',
@@ -106,7 +106,6 @@ const RUBRIQUES = [
       { to: '/commercial/livraisons', libelle: 'Livraisons', codes: VENTES, icone: I.livraison, badge: 'commandes_a_livrer', badgeTitre: 'Commandes clients à livrer' },
     ] },
     { id: 'stock', titre: 'Stock', icone: I.stock, entrees: [
-      { to: '/commercial/stock', end: true, libelle: 'État du stock', codes: ['com.stock.voir'], icone: I.stock, badge: 'sous_seuil', badgeTitre: 'Articles sous le seuil d\'alerte' },
       { to: '/commercial/stock/entrees', libelle: 'Entrées en stock', codes: LISTE('com.stock.entree'), icone: I.entree },
       { to: '/commercial/stock/sorties', libelle: 'Sorties diverses', codes: LISTE('com.stock.sortie'), icone: I.sortie },
       { to: '/commercial/stock/transferts', libelle: 'Transferts', codes: LISTE('com.stock.transfert'), icone: I.transfert },
@@ -121,6 +120,7 @@ const RUBRIQUES = [
       { to: '/commercial/stock/validation', libelle: 'Validation des stocks', codes: ['com.stock.valider'], icone: I.valider, badge: 'a_valider', badgeTitre: 'Documents de stock à valider' },
     ] },
     { id: 'suivi', titre: 'Suivi et états', icone: I.historique, entrees: [
+      { to: '/commercial/stock', end: true, libelle: 'État du stock', codes: ['com.stock.voir'], icone: I.stock, badge: 'sous_seuil', badgeTitre: 'Articles sous le seuil d\'alerte' },
       { to: '/commercial/stock/mouvements', libelle: 'Mouvements de stock', codes: ['com.stock.journal'], icone: I.mouvements },
       { to: '/commercial/stock/valorisation', libelle: 'Valorisation du stock', codes: ['com.stock.valorisation'], icone: I.valeur },
       { to: '/commercial/documents', libelle: 'Documents justificatifs', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.piece },
@@ -129,7 +129,7 @@ const RUBRIQUES = [
   ] },
 ];
 // Entrée correspondant à la page ouverte : le préfixe le plus long l'emporte
-// (une fiche /commercial/stock/documents/12 relève de « État du stock »).
+// (une fiche /commercial/stock/documents/12 relève de « État du stock », dans « Suivi et états »).
 const TOUTES = RUBRIQUES.flatMap((r) => [...(r.entrees || []), ...(r.groupes || []).flatMap((g) => g.entrees)]);
 const entreeActive = (chemin) => TOUTES.filter((e) => chemin === e.to || chemin.startsWith(`${e.to}/`))
   .sort((x, y) => y.to.length - x.to.length)[0]?.to;
