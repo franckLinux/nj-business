@@ -2,7 +2,22 @@
 
 Script : `backend/tools/demo-commercial.js`.
 
-## Lancer (sur le serveur, dans le dossier backend)
+## Lancer sans terminal (cPanel / Passenger)
+
+1. Déployer le backend et le dist, comme d'habitude.
+2. Dans le `.env` du serveur :
+   ```
+   DEMO_COMMERCIAL=true
+   DEMO_MOT_DE_PASSE=Nkolo-Demo-2026!
+   ```
+   (garder `AUTO_SETUP=true` si c'est par lui que les migrations sont jouées : la démo est alors créée juste après elles).
+3. Redémarrer l'application (« Restart » dans Setup Node.js App).
+4. Se connecter avec `demo.directeur` et ce mot de passe. Le journal de l'application affiche `[Démo] ✅ Démonstration prête` (jamais le mot de passe).
+5. Remettre `DEMO_COMMERCIAL=false`, vider `DEMO_MOT_DE_PASSE`, redémarrer.
+
+Aux démarrages suivants, si la démo existe déjà, rien ne se passe.
+
+## Lancer avec un terminal (dans le dossier backend)
 
 ```
 DEMO_MOT_DE_PASSE='…' node tools/demo-commercial.js
@@ -12,7 +27,7 @@ Sans `DEMO_MOT_DE_PASSE`, un mot de passe est tiré au hasard et affiché une se
 
 ## Ce qui est créé
 
-- Un client **fictif** séparé : « DÉMO — Ets Nkolo Distribution (fictif) », identifiant `demo-nj-commercial`, NJ COMMERCIAL activé, caisse non utilisée.
+- Un client **fictif** séparé : « DÉMO — Ets Nkolo Distribution (fictif) », identifiant `demo-nj-commercial`, NJ COMMERCIAL activé (NJ CAISSE PRO reste actif, comme pour tout client : le directeur passe par l'accueil NJ BUSINESS ; les autres comptes entrent directement dans NJ COMMERCIAL).
 - Huit comptes, même mot de passe, notifications « plateforme » seulement (aucun e-mail) :
   `demo.directeur`, `demo.demandeur`, `demo.achats`, `demo.respachats`, `demo.magasinier`, `demo.stock`, `demo.commercial`, `demo.respcommercial`.
 - Paramétrage : 2 agences, 2 magasins (Yaoundé, Douala), 6 unités, TVA 19,25 %, 3 fournisseurs, 4 clients, 4 familles (dont une en FIFO et une de prestations), 10 articles.

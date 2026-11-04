@@ -16,8 +16,16 @@
 //  • Aucune notification par e-mail : les comptes de démo sont en « plateforme ».
 //  • Pour fermer la démo : Plateforme › client › Suspendre (un client qui a des
 //    mouvements de stock se suspend, il ne se supprime pas).
+//
+//  SANS TERMINAL (hébergement cPanel / Passenger) : dans le .env du serveur,
+//      DEMO_COMMERCIAL=true
+//      DEMO_MOT_DE_PASSE=…            (obligatoire dans ce mode, 8 caractères au moins)
+//  puis redémarrer l'application : la démo est créée une fois au démarrage (après
+//  les migrations si AUTO_SETUP=true) ; aux démarrages suivants, elle existe déjà et
+//  rien ne se passe. Le résultat est dans les journaux, sans le mot de passe.
+//  Repasser ensuite DEMO_COMMERCIAL=false et retirer DEMO_MOT_DE_PASSE.
 // ============================================================================
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+if (require.main === module) require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { sequelize } = require('../src/models');
@@ -45,19 +53,22 @@ const COMPTES = [
   ['respcommercial', 'collaborateur', 'ventes_responsable', 'Responsable commercial : valide les devis'],
 ];
 
-(async () => {
-  console.log('\nNJ COMMERCIAL — compte de démonstration\n');
+class DemoDejaLa extends Error {}
+
+async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = false } = {}) {
+  console.log(auto ? '[Démo] Création du compte de démonstration NJ COMMERCIAL…' : '\nNJ COMMERCIAL — compte de démonstration\n');
   // ── 0. Garde-fous ──────────────────────────────────────────────────────
   const [mig] = await Q("SELECT COUNT(*)::int AS n FROM schema_migrations WHERE version LIKE '059_%'");
   if (!mig.n) throw new Error('Migration 059 non jouée : lancez d\'abord « node db/migrate.js ».');
   const [existe] = await Q('SELECT id FROM tenants WHERE slug = :s', { s: SLUG });
-  if (existe) throw new Error(`Le client de démonstration « ${SLUG} » existe déjà : rien n'a été modifié.`);
+  if (existe) throw new DemoDejaLa(`Le client de démonstration « ${SLUG} » existe déjà : rien n'a été modifié.`);
   const noms = COMPTES.map(([c]) => `demo.${c}`);
   const pris = await Q('SELECT username FROM users WHERE lower(username) IN (:n)', { n: noms });
-  if (pris.length) throw new Error(`Comptes déjà utilisés : ${pris.map((u) => u.username).join(', ')}. Rien n'a été modifié.`);
+  if (pris.length) throw new DemoDejaLa(`Comptes déjà utilisés : ${pris.map((u) => u.username).join(', ')}. Rien n'a été modifié.`);
 
   if (!process.env.VERIFICATION_URL && !process.env.APP_URL) throw new Error('APP_URL (ou VERIFICATION_URL) absente du .env : les bons de commande ne peuvent pas être émis. Rien n\'a été modifié.');
-  const mdp = process.env.DEMO_MOT_DE_PASSE || `Demo-${crypto.randomBytes(4).toString('hex')}!`;
+  if (auto && !motDePasse) throw new Error('DEMO_MOT_DE_PASSE absent du .env : obligatoire avec DEMO_COMMERCIAL=true. Rien n\'a été modifié.');
+  const mdp = motDePasse || `Demo-${crypto.randomBytes(4).toString('hex')}!`;
   if (mdp.length < 8) throw new Error('DEMO_MOT_DE_PASSE : 8 caractères au moins.');
 
   // ── 1. Client fictif, module, comptes ──────────────────────────────────
@@ -67,10 +78,8 @@ const COMPTES = [
   const tenantId = t.id;
   etape('Client fictif créé');
   await modules.definir({ tenantId, code: 'commercial', actif: true, motif: 'Compte de démonstration NJ COMMERCIAL', userId: null });
-  // Démo du seul module commercial : la caisse n'est pas utilisée (l'identité de la
-  // société se saisit alors dans NJ COMMERCIAL › Configuration › Société).
-  await modules.definir({ tenantId, code: 'caisse', actif: false, motif: 'Démonstration de NJ COMMERCIAL seul', userId: null }).catch(() => {});
-  etape('NJ COMMERCIAL activé (profils métier créés) ; caisse non utilisée');
+  // NJ CAISSE PRO reste actif, comme pour tout client de la plateforme (module socle).
+  etape('NJ COMMERCIAL activé (profils métier créés)');
   const hash = await bcrypt.hash(mdp, 10);
   const U = {};
   for (const [cle, role, profil] of COMPTES) {
@@ -240,17 +249,37 @@ const COMPTES = [
   await devis(cli.hotel, 'Papier pour la réception', [{ article_id: A.papier, quantite: 10 }]);
   etape('Ventes : 8 devis (brouillon, à valider, direction, validé, accepté, refusé), 3 commandes, 3 livraisons');
 
+  if (auto) {
+    console.log(`[Démo] ✅ Démonstration prête : client ${SLUG}, comptes ${COMPTES.map(([c]) => `demo.${c}`).join(', ')} (mot de passe : DEMO_MOT_DE_PASSE du .env).`);
+    return { ok: true };
+  }
   console.log('\n✅ Démonstration prête.\n');
   console.log(`   Client : DÉMO — Ets Nkolo Distribution (fictif)   identifiant : ${SLUG}`);
-  console.log(`   Mot de passe commun : ${mdp}${process.env.DEMO_MOT_DE_PASSE ? ' (celui que vous avez fourni)' : '   ← notez-le, il n\'est affiché qu\'une fois'}\n`);
+  console.log(`   Mot de passe commun : ${mdp}${motDePasse ? ' (celui que vous avez fourni)' : '   ← notez-le, il n\'est affiché qu\'une fois'}\n`);
   for (const [cle, , , role] of COMPTES) console.log(`   demo.${cle.padEnd(15)} ${role}`);
   console.log('\n   Pour fermer la démo : Plateforme › client › Suspendre.\n');
-  await sequelize.close();
-})().catch(async (e) => {
-  console.error(`\n❌ ${e.message}\n`);
-  if (e.message && !/existe déjà|déjà utilisés|Migration 059|DEMO_MOT_DE_PASSE|Rien n'a été modifié/.test(e.message)) {
-    console.error('   La démonstration est incomplète : suspendez le client « demo-nj-commercial » (Plateforme) avant de recommencer avec un autre identifiant.\n');
-  }
-  await sequelize.close().catch(() => {});
-  process.exit(1);
-});
+  return { ok: true };
+}
+
+// Message d'échec commun (terminal ou démarrage automatique).
+const expliquer = (e) => {
+  if (e instanceof DemoDejaLa) return e.message;
+  if (/Migration 059|DEMO_MOT_DE_PASSE|Rien n'a été modifié/.test(e.message || '')) return e.message;
+  return `${e.message} — démonstration incomplète : suspendez le client « ${SLUG} » (Plateforme).`;
+};
+
+// Démarrage du serveur (DEMO_COMMERCIAL=true) : jamais bloquant, jamais d'arrêt du process.
+const creerDemoAuDemarrage = () => creerDemo({ auto: true })
+  .catch((e) => (e instanceof DemoDejaLa ? console.log(`[Démo] ${e.message}`) : console.error(`[Démo] ❌ ${expliquer(e)}`)));
+
+module.exports = { creerDemo, creerDemoAuDemarrage };
+
+if (require.main === module) {
+  creerDemo()
+    .then(() => sequelize.close())
+    .catch(async (e) => {
+      console.error(`\n❌ ${expliquer(e)}\n`);
+      await sequelize.close().catch(() => {});
+      process.exit(1);
+    });
+}

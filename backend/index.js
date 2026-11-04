@@ -115,6 +115,12 @@ app.use(storage.BASE_URL, express.static(storage.STORAGE_DIR, {
 // comptable+admin. Sans risque à répéter (verrou Postgres + idempotent,
 // voir db/lib/setup.js) — ne modifie jamais un admin existant
 // (resetAdmin: false) ni une config déjà en base (configForce: false).
+// Compte de démonstration NJ COMMERCIAL (DEMO_COMMERCIAL=true) : créé une seule fois,
+// APRÈS les migrations ; s'il existe déjà, rien ne se passe (tools/demo-commercial.js).
+const demoAuDemarrage = () => {
+  if (process.env.DEMO_COMMERCIAL !== 'true') return;
+  require('./tools/demo-commercial').creerDemoAuDemarrage();
+};
 if (process.env.AUTO_SETUP === 'true') {
   const { runSetup } = require('./db/lib/setup');
   runSetup({ withConfig: process.env.AUTO_SETUP_CONFIG === 'true' })
@@ -122,8 +128,11 @@ if (process.env.AUTO_SETUP === 'true') {
       const statut = rapport.ok ? 'OK' : 'ÉCHEC';
       console.log(`[Setup] Initialisation automatique au démarrage : ${statut} (${rapport.duree_ms} ms)`);
       if (!rapport.ok) console.error('[Setup] Détail :', JSON.stringify(rapport.steps));
+      if (rapport.ok) demoAuDemarrage();
     })
     .catch((err) => console.error('[Setup] Initialisation automatique impossible :', err.message));
+} else {
+  demoAuDemarrage();
 }
 
 // ── Frontend React (Vite) — servi à la racine ─────────────────────────────
