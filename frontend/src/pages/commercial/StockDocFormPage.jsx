@@ -10,12 +10,16 @@ import { TYPES_STOCK, lireNombre } from '@/components/commercial/stock';
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 const virgule = (n) => (n === null || n === undefined ? '' : String(n).replace('.', ','));
 
-export default function StockDocFormPage() {
-  const { id } = useParams();
+// `integre` : saisie ouverte directement dans l'état du stock (sans changer de page) ;
+// `onFermer` revient à l'état, `onFini(document)` après enregistrement ou soumission.
+export default function StockDocFormPage({ integre = false, typeInitial, onFermer, onFini }) {
+  const { id: idRoute } = useParams();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const [type, setType] = useState(TYPES_STOCK[params.get('type')] ? params.get('type') : 'entree');
+  const [id, setId] = useState(integre ? undefined : idRoute);
+  const demande = typeInitial || params.get('type');
+  const [type, setType] = useState(TYPES_STOCK[demande] ? demande : 'entree');
   const [refs, setRefs] = useState(null);
   const [f, setF] = useState(null);
   const [lignes, setLignes] = useState([]);
@@ -97,24 +101,32 @@ export default function StockDocFormPage() {
     if (soumettre) {
       const s = await api.post(`/commercial/stock/documents/${r.id}/soumission`, {});
       setEnCours(false);
-      if (s?.error) { setErreur(s.error); if (!id) navigate(`/commercial/stock/documents/${r.id}/modifier`, { replace: true }); return; }
+      if (s?.error) {
+        setErreur(s.error);
+        if (!id) { if (integre) { setId(r.id); setNumero(r.numero); } else navigate(`/commercial/stock/documents/${r.id}/modifier`, { replace: true }); }
+        return;
+      }
       toast(`${s.numero} soumis : il attend la validation d'une personne autorisée.`, 'success');
     } else {
       setEnCours(false);
       toast(`Brouillon ${r.numero} enregistré.`, 'success');
     }
+    if (integre) { onFini?.(r); return; }
     navigate(`/commercial/stock/documents/${r.id}`);
   };
 
-  if (!refs || !f) return <div className="cm-page">{erreur ? <div className="cm-erreur">{erreur}</div> : <div className="loading-msg">Chargement…</div>}</div>;
+  if (!refs || !f) return <div className={integre ? '' : 'cm-page'}>{erreur ? <div className="cm-erreur">{erreur}</div> : <div className="loading-msg">Chargement…</div>}</div>;
   const disponibles = articles.filter((a) => !lignes.some((l) => l.article_id === a.id));
   const valeur = type === 'entree' ? lignes.reduce((s, l) => s + (lireNombre(l.quantite) || 0) * (lireNombre(l.cout_unitaire) || 0), 0) : 0;
   return (
-    <div className="cm-page">
-      <Link to={id ? `/commercial/stock/documents/${id}` : `/commercial/stock/${t.route}`} className="cm-retour">‹ {id ? numero : t.pluriel}</Link>
+    <div className={integre ? 'cm-saisie-integree' : 'cm-page'}>
+      {integre
+        ? <button type="button" className="cm-retour cm-lien" onClick={onFermer}>‹ État du stock</button>
+        : <Link to={id ? `/commercial/stock/documents/${id}` : `/commercial/stock/${t.route}`} className="cm-retour">‹ {id ? numero : t.pluriel}</Link>}
       <div className="cm-fiche-tete">
-        <h2>{id ? `Modifier ${numero}` : `Nouveau : ${t.libelle.toLowerCase()}`}</h2>
+        <h2>{id ? `${integre ? 'Brouillon' : 'Modifier'} ${numero}` : `Nouveau : ${t.libelle.toLowerCase()}`}</h2>
         <div className="cm-actions">
+          {integre && <button type="button" className="cm-btn cm-secondaire" onClick={onFermer} disabled={enCours}>Fermer</button>}
           <button type="button" className="cm-btn cm-secondaire" onClick={() => enregistrer(false)} disabled={enCours}>Enregistrer le brouillon</button>
           <button type="button" className="cm-btn cm-primaire" onClick={() => enregistrer(true)} disabled={enCours || !lignes.length}>{enCours ? 'Envoi…' : 'Soumettre pour validation'}</button>
         </div>

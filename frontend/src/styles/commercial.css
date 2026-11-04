@@ -370,3 +370,8 @@ a.cm-tuile:hover { border-color: #93c5fd; box-shadow: 0 6px 18px rgba(37, 99, 23
 .cm-identite-val { font-weight: 600; word-break: break-word; }
 .cm-identite-vide { color: var(--text-light, #94a3b8); }
 @media (max-width: 520px) { .cm-identite { grid-template-columns: 1fr; gap: 2px 0; } .cm-identite dd { margin-bottom: 6px; } }
+/* Saisie de stock ouverte sur place, dans l'état du stock */
+button.cm-retour { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 13px; text-decoration: none; }
+.cm-saisie-integree { animation: cm-apparition .18s ease-out; }
+@keyframes cm-apparition { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .cm-saisie-integree { animation: none; } }
