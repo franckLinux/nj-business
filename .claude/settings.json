@@ -3,7 +3,13 @@
     "allow": [
       "PowerShell(npm run dev)",
       "PowerShell(taskkill /IM node.exe /F)",
-      "Bash(taskkill /IM node.exe /F)"
+      "Bash(taskkill /IM node.exe /F)",
+      "Bash(git push:*)",
+      "PowerShell(git push:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "PowerShell(git add:*)",
+      "PowerShell(git commit:*)"
     ]
   }
 }
