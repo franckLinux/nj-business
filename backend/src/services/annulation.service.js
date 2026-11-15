@@ -155,4 +155,4 @@ const lister = ({ tenantId, statut = 'en_attente' }) => q(
     WHERE d.tenant_id = :t AND (:s = 'toutes' OR d.statut = :s)
     ORDER BY d.demande_le DESC LIMIT 200`, { t: tenantId, s: statut });
 
-module.exports = { demanderOuAnnuler, decider, lister };
+module.exports = { demanderOuAnnuler, decider, lister, passerAnnulation };

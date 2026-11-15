@@ -6,6 +6,7 @@
 const { Op, fn, col } = require('sequelize');
 const { resoudreActivite } = require('./activites.controller');
 const hebdoSvc = require('../services/budget_hebdo.service');
+const ecartsSvc = require('../services/ecarts_caisse.service');
 
 // ── Activité / projet obligatoire (039) ───────────────────────────────────
 // Réglage PERSONNEL (users.activite_obligatoire), posé par le directeur.
@@ -142,6 +143,16 @@ const createMouvement = async (req, res) => {
 
   if (!date || !mois || !annee || !rubrique_code) {
     return res.status(400).json({ error: 'Champs obligatoires manquants (date, mois, annee, rubrique_code).' });
+  }
+  // 061 : les rubriques d'écart de caisse ne se saisissent pas à la main —
+  // un écart se constate dans Contrôle comptable → Écarts de caisse.
+  try {
+    if (await ecartsSvc.estRubriqueEcart(req.tenantId, rubrique_code)) {
+      return res.status(409).json({ error: 'Rubrique réservée aux écarts de caisse : constatez l\'écart dans Contrôle comptable → Écarts de caisse.', code: 'RUBRIQUE_ECART_RESERVEE' });
+    }
+  } catch (e) {
+    console.error('[Journal] contrôle rubrique d\'écart :', e.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
   }
   // Activité / projet obligatoire pour cette personne (039).
   try {

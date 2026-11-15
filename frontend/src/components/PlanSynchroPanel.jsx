@@ -153,12 +153,17 @@ export default function PlanSynchroPanel({ onChange }) {
           <tbody>
             {clients.map((c) => (
               <tr key={c.id} style={{ opacity: c.actif ? 1 : 0.6 }}>
-                <td><input type="checkbox" checked={selection.has(c.id)} onChange={() => basculer(c.id)} /></td>
+                <td><input type="checkbox" checked={selection.has(c.id)} disabled={c.hors_synchro} onChange={() => basculer(c.id)} /></td>
                 <td>{c.nom}{!c.actif && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> (inactif)</span>}</td>
                 <td>
-                  {c.plan_initialise_le ? <code>{c.version_code}</code> : <span style={{ color: '#b45309' }}>non initialisé</span>}
-                  {c.a_jour ? <span style={{ marginLeft: 6, color: '#15803d', fontSize: 11, fontWeight: 700 }}>à jour</span>
-                    : <span style={{ marginLeft: 6, color: '#c2410c', fontSize: 11, fontWeight: 700 }}>en retard</span>}
+                  {/* 060 : un client SYCEBNL (association / ONG) ne suit pas le modèle SYSCOHADA. */}
+                  {c.hors_synchro
+                    ? <span style={{ fontSize: 11, fontWeight: 700, background: '#ecfdf5', color: '#047857', padding: '2px 8px', borderRadius: 10 }} title="Association / ONG : plan SYCEBNL, hors synchronisation SYSCOHADA">SYCEBNL</span>
+                    : <>
+                      {c.plan_initialise_le ? <code>{c.version_code}</code> : <span style={{ color: '#b45309' }}>non initialisé</span>}
+                      {c.a_jour ? <span style={{ marginLeft: 6, color: '#15803d', fontSize: 11, fontWeight: 700 }}>à jour</span>
+                        : <span style={{ marginLeft: 6, color: '#c2410c', fontSize: 11, fontWeight: 700 }}>en retard</span>}
+                    </>}
                 </td>
                 <td>{c.nb_comptes_client}</td>
                 <td>{c.nb_personnalises}</td>

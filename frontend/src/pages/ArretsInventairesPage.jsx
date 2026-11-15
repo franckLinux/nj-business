@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
@@ -94,6 +95,7 @@ function BlocPv({ pv, peut, onFichier, enCours, lienPv }) {
 // ══ Arrêtés de caisse ════════════════════════════════════════════════════════
 function ModaleArret({ l, mois, annee, devise, peutSaisir, peutValider, peutArreter, onFermer, onMaj }) {
   const toast = useToast();
+  const navigate = useNavigate();
   const verrou = l.etat === 'validee';
   const [constate, setConstate] = useState(versSaisie(l.solde_constate));
   const [obs, setObs] = useState(l.observation || '');
@@ -215,6 +217,13 @@ function ModaleArret({ l, mois, annee, devise, peutSaisir, peutValider, peutArre
             </>
           )}
 
+          {/* 061 : un écart enregistré se constate au registre des écarts de caisse. */}
+          {l.controle_id && l.ecart !== null && Math.abs(l.ecart) >= 0.005 && !modifie && (
+            <div className="ctl-alerte" style={{ margin: 0, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', background: l.ecart < 0 ? '#fef2f2' : '#ecfdf5', color: l.ecart < 0 ? '#991b1b' : '#065f46', border: `1px solid ${l.ecart < 0 ? '#fecaca' : '#a7f3d0'}` }}>
+              <span style={{ flex: '1 1 260px' }}>⚖️ {l.ecart < 0 ? 'Manquant' : 'Excédent'} de <b>{fmt(Math.abs(l.ecart), devise)}</b> : le comptable le constate au registre des écarts et en décide la destination.</span>
+              {peutSaisir && <button type="button" className="ctl-btn mini" onClick={() => navigate(`/controle/ecarts?constater=arret&origine_id=${l.controle_id}`)}>Constater au registre →</button>}
+            </div>
+          )}
           {verrou && (
             <div className="ctl-alerte verte">
               <b>✓ Arrêté validé</b> par {l.validation.par || '?'} le {dateHeure(l.validation.le)}. Il ne peut plus être rouvert ni ré-arrêté tant que la validation n'est pas annulée.

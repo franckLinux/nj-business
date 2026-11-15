@@ -1,5 +1,5 @@
 const { Op, fn, col } = require('sequelize');
-const { Journal, Ran, Banque, Mouvement, Tenant, Rubrique } = require('../models');
+const { Journal, Ran, Banque, Mouvement, Tenant, Rubrique, sequelize } = require('../models');
 const { soldesJournaux } = require('../services/journal.service');
 
 const MOIS = ['Janvier','Fevrier','Mars','Avril','Mai','Juin',
@@ -13,6 +13,60 @@ const moisPrecedent = (mois, annee) => {
 
 // Rubriques virements internes — exclus des ressources et emplois (évite double comptage)
 const RUBRIQUES_NEUTRES = ['VCOM','VOMC','SCOM','SOMC'];
+
+// ── Présentation des emplois PAR COMPTE COMPTABLE (09/11/2026) ────────────
+// Le compte d'une rubrique est rubriques.code_comptable (reçu de la passerelle
+// à la validation de l'équivalence). Son intitulé vient du plan DU CLIENT
+// (SYSCOHADA ou SYCEBNL), à défaut du plan global. Les rubriques sans compte
+// sont regroupées sous « Sans compte comptable » : rien ne disparaît, les
+// totaux sont identiques à la présentation par rubrique.
+const intitulesComptes = async (tenantId, comptes) => {
+  const liste = [...new Set(comptes.filter(Boolean).map((c) => c.toLowerCase()))];
+  if (!liste.length) return new Map();
+  // Intitulé exact, sinon celui du plus proche compte parent (6181 → 618),
+  // d'abord dans le plan du client, puis dans le plan global.
+  const rows = await sequelize.query(
+    `SELECT x.k,
+            COALESCE(c.intitule, g.intitule) AS intitule,
+            COALESCE(c.compte, g.compte)     AS trouve
+       FROM unnest(CAST(:liste AS text[])) AS x(k)
+       LEFT JOIN LATERAL (
+         SELECT compte, intitule FROM plan_comptable_client
+          WHERE tenant_id = :t AND statut <> 'archive' AND x.k LIKE lower(btrim(compte)) || '%'
+          ORDER BY length(compte) DESC LIMIT 1) c ON true
+       LEFT JOIN LATERAL (
+         SELECT compte, intitule FROM plan_comptable_syscohada
+          WHERE c.compte IS NULL AND x.k LIKE lower(btrim(compte)) || '%'
+          ORDER BY length(compte) DESC LIMIT 1) g ON true`,
+    { replacements: { t: tenantId, liste: `{${liste.map((c) => `"${c.replace(/["\\]/g, '')}"`).join(',')}}` }, type: sequelize.QueryTypes.SELECT }
+  ).catch((err) => { console.error('[Rapport] intitulés des comptes :', err.message); return []; });
+  return new Map(rows.filter((r) => r.intitule).map((r) => [r.k,
+    String(r.trouve).toLowerCase() === r.k ? r.intitule : `${r.intitule} (rattaché au ${r.trouve})`]));
+};
+
+const regrouperParCompte = (lignes) => {
+  const parCompte = new Map();
+  for (const e of lignes) {
+    const cle = e.code_comptable || '';
+    if (!parCompte.has(cle)) {
+      parCompte.set(cle, {
+        compte: cle,
+        intitule: cle ? (e.compte_intitule || `Compte ${cle}`) : 'Sans compte comptable',
+        classe: cle && /^\d/.test(cle) ? Number(cle[0]) : null,
+        esp: 0, om: 0, total: 0, rubriques: [],
+      });
+    }
+    const g = parCompte.get(cle);
+    g.esp += e.esp; g.om += e.om; g.total += e.total;
+    g.rubriques.push({ rubrique_code: e.rubrique_code, intitule: e.intitule, esp: e.esp, om: e.om, total: e.total });
+  }
+  // Comptes triés par numéro ; « Sans compte » en dernier.
+  return [...parCompte.values()].sort((a, b) => {
+    if (!a.compte) return 1;
+    if (!b.compte) return -1;
+    return a.compte.localeCompare(b.compte);
+  });
+};
 
 // ── GET /api/rapport/compte-emploi?mois=&annee= ──────────────────────────
 const getCompteEmploi = async (req, res) => {
@@ -60,9 +114,11 @@ const getCompteEmploi = async (req, res) => {
         raw: true,
       }),
       Tenant.findOne({ where: { id: tenantId }, attributes: ['nom', 'devise', 'directeur_nom', 'caissier_nom'] }),
-      Rubrique.findAll({ where: { tenant_id: tenantId }, attributes: ['code', 'intitule'], raw: true }),
+      Rubrique.findAll({ where: { tenant_id: tenantId }, attributes: ['code', 'intitule', 'code_comptable'], raw: true }),
     ]);
     const libRubrique = Object.fromEntries(rubriquesRows.map((r) => [r.code, r.intitule]));
+    const compteRubrique = Object.fromEntries(rubriquesRows.map((r) => [r.code, String(r.code_comptable || '').trim()]));
+    const libCompte = await intitulesComptes(tenantId, Object.values(compteRubrique));
 
     // RAN de chaque journal = solde final du mois précédent (ou solde
     // d'ouverture), calculé comme partout ailleurs — plus la ligne ran brute.
@@ -136,6 +192,8 @@ const getCompteEmploi = async (req, res) => {
       .map(([code, p]) => ({
         rubrique_code: code,
         intitule:      p.intitule,
+        code_comptable:  compteRubrique[code] || '',
+        compte_intitule: libCompte.get((compteRubrique[code] || '').toLowerCase()) || '',
         esp:           p.esp_s,
         om:            p.om_s,
         total:         p.esp_s + p.om_s,
@@ -181,6 +239,8 @@ const getCompteEmploi = async (req, res) => {
       },
       emplois: {
         lignes: emplois,
+        // Même montants, regroupés par compte comptable (avec le détail des rubriques).
+        par_compte: regrouperParCompte(emplois),
         total:  totalEmplois,
       },
       tresorerie_finale: {

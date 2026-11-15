@@ -2,7 +2,9 @@
 // M05 — Configuration Entité (étendue OHADA/CEMAC)
 // Champs : nom, sigle, forme_juridique, adresse, registre_commerce,
 //          boite_postale, nui, activite, dirigeant_nom, devise, exercice_fiscal
-const { Tenant } = require('../models');
+const { Tenant, sequelize } = require('../models');
+// 060 : la forme juridique décide du référentiel comptable (SYSCOHADA / SYCEBNL).
+const planRef = require('../services/plan_referentiel.service');
 
 // ── Formes juridiques OHADA reconnues (référentiel UI) ────────────────────
 // Exposé via GET /api/config/referentiel pour alimenter un <select>.
@@ -42,6 +44,9 @@ const toConfigPayload = (t) => ({
   exercice_debut: t.exercice_debut,
   exercice_fin: t.exercice_fin,
   actif: t.actif,
+  // 060 : référentiel en place et référentiel attendu par la forme juridique.
+  plan_referentiel: t.plan_referentiel || 'SYSCOHADA',
+  plan_referentiel_attendu: planRef.referentielDeForme(t.forme_juridique),
 });
 
 // ── GET /api/config ───────────────────────────────────────────────────────
@@ -61,7 +66,53 @@ const getConfig = async (req, res) => {
 // ── GET /api/config/referentiel ───────────────────────────────────────────
 // Renvoie les listes de référence pour alimenter les <select> côté UI.
 const getReferentiel = async (req, res) => {
-  res.json({ formes_juridiques: FORMES_JURIDIQUES });
+  res.json({
+    // Chaque forme indique le plan comptable qu'elle charge (060).
+    formes_juridiques: FORMES_JURIDIQUES.map((f) => ({ ...f, plan_referentiel: planRef.referentielDeForme(f.code) })),
+    referentiels: planRef.REFERENTIELS,
+  });
+};
+
+// ── Référentiel comptable (060) ───────────────────────────────────────────
+const repondreRef = (res, err, quoi) => {
+  if (err instanceof planRef.ErreurReferentiel) return res.status(err.status).json({ error: err.message });
+  console.error(`[Config] ${quoi} :`, err.message);
+  return res.status(500).json({ error: `Erreur serveur : ${err.message}` });
+};
+
+// GET /api/config/plan-referentiel?forme=ASSOC
+// État du client + aperçu de la bascule qu'impliquerait la forme demandée
+// (ou la forme actuelle si aucune n'est donnée). Aucune écriture.
+const getPlanReferentiel = async (req, res) => {
+  try {
+    const e = await planRef.etat(req.tenantId);
+    const forme = req.query.forme !== undefined ? String(req.query.forme) : e.forme_juridique;
+    const cible = planRef.referentielDeForme(forme);
+    const change = cible !== e.actuel;
+    res.json({
+      ...e,
+      cible, cible_info: planRef.REFERENTIELS[cible], change,
+      apercu: change ? await planRef.apercu(req.tenantId, cible) : null,
+    });
+  } catch (err) { repondreRef(res, err, 'référentiel du plan'); }
+};
+
+// POST /api/config/plan-referentiel/bascule { confirmer: true }
+// Aligne le plan sur la forme juridique déjà enregistrée (cas d'une entité
+// déclarée Association / ONG avant la migration 060).
+const postBasculePlan = async (req, res) => {
+  if (req.body?.confirmer !== true) {
+    return res.status(400).json({ error: 'Confirmation requise : consultez l\'aperçu puis confirmez la bascule.' });
+  }
+  try {
+    const e = await planRef.etat(req.tenantId);
+    if (!e.a_basculer) return res.json({ message: `Le plan comptable applique déjà le ${e.actuel_info.libelle}.`, resultat: null, etat: e });
+    const resultat = await planRef.basculer(req.tenantId, e.attendu, req.user.id);
+    res.json({
+      message: `Plan comptable basculé vers le ${e.attendu_info.libelle} : ${resultat.ajoutes} compte(s) ajouté(s), ${resultat.archives} archivé(s).`,
+      resultat, etat: await planRef.etat(req.tenantId),
+    });
+  } catch (err) { repondreRef(res, err, 'bascule du plan'); }
 };
 
 // ── Logo de l'entité ──────────────────────────────────────────────────────
@@ -129,8 +180,26 @@ const updateConfig = async (req, res) => {
   const logo = verifierLogo(logo_url);
   if (logo.erreur) return res.status(400).json({ error: logo.erreur });
 
+  // 060 : la forme juridique décide du plan comptable. Association / ONG →
+  // SYCEBNL, autre forme → SYSCOHADA. Le plan bascule automatiquement à
+  // l'enregistrement, dans la même transaction (non destructif, réversible) ;
+  // l'écran Entité affiche l'aperçu avant l'enregistrement.
+  let bascule = null;
   try {
-    const [count, rows] = await Tenant.update(
+    const e = await planRef.etat(req.tenantId);
+    const cible = planRef.referentielDeForme(forme_juridique);
+    if (cible !== e.actuel) bascule = cible;
+  } catch (err) {
+    if (err instanceof planRef.ErreurReferentiel) return res.status(err.status).json({ error: err.message });
+    console.error('[Config] contrôle du référentiel :', err.message);
+    return res.status(500).json({ error: `Erreur serveur : ${err.message}` });
+  }
+
+  try {
+    const transaction = await sequelize.transaction();
+    let count; let rows; let resultatBascule = null;
+    try {
+    [count, rows] = await Tenant.update(
       {
         nom: nom.trim(),
         sigle: (sigle || '').trim().toUpperCase(),
@@ -152,14 +221,26 @@ const updateConfig = async (req, res) => {
         ...(site_web !== undefined ? { site_web: String(site_web || '').trim() } : {}),
         ...(logo.garder ? {} : { logo_url: logo.valeur }),
       },
-      { where: { id: req.tenantId }, returning: true }
+      { where: { id: req.tenantId }, returning: true, transaction }
     );
+    if (count > 0 && bascule) {
+      resultatBascule = await planRef.basculer(req.tenantId, bascule, req.user.id, { transaction });
+      rows = [await Tenant.findByPk(req.tenantId, { transaction })];
+    }
+    await transaction.commit();
+    } catch (e) { await transaction.rollback().catch(() => {}); throw e; }
     if (count === 0) return res.status(404).json({ error: 'Entité introuvable.' });
-    res.json({ message: 'Configuration mise à jour avec succès.', config: toConfigPayload(rows[0]) });
+    res.json({
+      message: resultatBascule
+        ? `Configuration enregistrée. Plan comptable basculé vers le ${planRef.REFERENTIELS[bascule].libelle} (${resultatBascule.ajoutes} compte(s) ajouté(s), ${resultatBascule.archives} archivé(s)).`
+        : 'Configuration mise à jour avec succès.',
+      config: toConfigPayload(rows[0]),
+      bascule_plan: resultatBascule,
+    });
   } catch (err) {
     console.error('[Config] updateConfig :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
   }
 };
 
-module.exports = { getConfig, getEntete, updateConfig, getReferentiel, FORMES_JURIDIQUES };
+module.exports = { getConfig, getEntete, updateConfig, getReferentiel, getPlanReferentiel, postBasculePlan, FORMES_JURIDIQUES };

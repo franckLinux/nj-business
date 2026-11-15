@@ -173,7 +173,7 @@ const STATUTS = ['actif', 'inactif', 'archive'];
  */
 const listerComptes = async (tenantId) => Q(
   `SELECT c.id, c.compte, c.intitule, c.description, c.classe, c.nature, c.statut,
-          c.origine, c.personnalise, c.updated_at,
+          c.origine, c.personnalise, c.updated_at, c.referentiel,
           CASE WHEN c.origine = 'client' THEN 'custom' ELSE 'syscohada' END AS source,
           p.compte AS parent_compte,
           COALESCE(u.rubriques, '[]'::json) AS rubriques,

@@ -8,6 +8,8 @@ module.exports = (sequelize, DataTypes) => {
     intitule: { type: DataTypes.TEXT, allowNull: false },
     type: { type: DataTypes.TEXT, allowNull: false, validate: { isIn: [['entree', 'depense']] } },
     est_virement_interne: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    // 061 : rubriques système ECP / ECN du registre des écarts de caisse.
+    est_ecart_caisse: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     code_comptable: DataTypes.TEXT,
     actif: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     ordre: DataTypes.INTEGER,

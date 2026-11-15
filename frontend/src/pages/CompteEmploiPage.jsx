@@ -36,11 +36,102 @@ function ResRow({ ico, label, montant, sub, devise, couleur = '#059669' }) {
   );
 }
 
+// ── Présentation des emplois : par rubrique (défaut) ou par compte comptable ──
+// Le choix est mémorisé dans ce navigateur (confort personnel uniquement).
+const CLE_MODE = 'ce-emplois-mode';
+const lireMode = () => { try { return localStorage.getItem(CLE_MODE) === 'compte' ? 'compte' : 'rubrique'; } catch { return 'rubrique'; } };
+const ecrireMode = (m) => { try { localStorage.setItem(CLE_MODE, m); } catch { /* stockage indisponible */ } };
+
+function ChoixPresentation({ mode, onChange }) {
+  const opts = [['rubrique', 'Par rubrique', '🏷️'], ['compte', 'Par compte comptable', '📒']];
+  return (
+    <div className="ce-seg" role="radiogroup" aria-label="Présentation des emplois">
+      {opts.map(([v, lib, ico]) => (
+        <button key={v} type="button" role="radio" aria-checked={mode === v} className={mode === v ? 'on' : ''}
+          onClick={(e) => { e.stopPropagation(); onChange(v); }}>
+          <span aria-hidden>{ico}</span>{lib}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function EmploisParCompte({ groupes, total, fmtM, onDetail }) {
+  const [ouverts, setOuverts] = useState(() => new Set());
+  const basculer = (k) => setOuverts((o) => { const n = new Set(o); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const tous = groupes.length > 0 && groupes.every((g) => ouverts.has(g.compte));
+  const max = Math.max(...groupes.map((g) => g.total), 1);
+  return (
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <thead>
+        <tr style={{ background: '#fff8f8' }}>
+          <th style={{ padding: '8px 16px', textAlign: 'left', borderBottom: '1px solid #fecaca', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', width: 92 }}>
+            <button type="button" className="ce-lien" onClick={() => setOuverts(tous ? new Set() : new Set(groupes.map((g) => g.compte)))}>{tous ? '− Replier' : '+ Déplier'}</button>
+          </th>
+          <th style={{ padding: '8px 4px', textAlign: 'left', borderBottom: '1px solid #fecaca', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase' }}>Compte comptable</th>
+          <th style={{ padding: '8px 16px', textAlign: 'right', borderBottom: '1px solid #fecaca', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase' }}>Espèces</th>
+          <th style={{ padding: '8px 16px', textAlign: 'right', borderBottom: '1px solid #fecaca', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase' }}>MM</th>
+          <th style={{ padding: '8px 16px', textAlign: 'right', borderBottom: '1px solid #fecaca', fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase' }}>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {groupes.length === 0 && (
+          <tr><td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)', fontSize: 13 }}>Aucune dépense enregistrée ce mois.</td></tr>
+        )}
+        {groupes.map((g) => {
+          const ouvert = ouverts.has(g.compte);
+          const pct = total ? Math.round((g.total / total) * 100) : 0;
+          const sansCompte = !g.compte;
+          return [
+            <tr key={`c-${g.compte}`} className="ce-emp-row" style={{ cursor: 'pointer' }} onClick={() => basculer(g.compte)}
+              tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); basculer(g.compte); } }} aria-expanded={ouvert}>
+              <td style={{ padding: '10px 16px' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span aria-hidden style={{ display: 'inline-block', transition: 'transform .15s', transform: ouvert ? 'rotate(90deg)' : 'none', color: '#f87171', fontSize: 11 }}>▶</span>
+                  <span className="ce-compte" style={sansCompte ? { background: '#fffbeb', borderColor: '#fde68a', color: '#b45309' } : undefined}>{sansCompte ? '—' : g.compte}</span>
+                </span>
+              </td>
+              <td style={{ padding: '10px 4px' }}>
+                <div style={{ fontWeight: 600, color: sansCompte ? '#b45309' : 'var(--text)', fontSize: 13 }}>{g.intitule}</div>
+                <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, height: 4, background: '#f1f5f9', borderRadius: 2, maxWidth: 160 }}>
+                    <div style={{ width: `${Math.round((g.total / max) * 100)}%`, height: '100%', background: sansCompte ? '#fbbf24' : '#f87171', borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{pct}% · {g.rubriques.length} rubrique{g.rubriques.length > 1 ? 's' : ''}</span>
+                </div>
+              </td>
+              <td style={{ padding: '10px 16px', textAlign: 'right', color: '#9a3412', fontSize: 12 }}>{g.esp ? fmtM(g.esp) : '—'}</td>
+              <td style={{ padding: '10px 16px', textAlign: 'right', color: '#9a3412', fontSize: 12 }}>{g.om ? fmtM(g.om) : '—'}</td>
+              <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 800, color: '#dc2626', whiteSpace: 'nowrap' }}>{fmtM(g.total)}</td>
+            </tr>,
+            ...(ouvert ? g.rubriques.map((r) => (
+              <tr key={`c-${g.compte}-${r.rubrique_code}`} className="ce-sub-row" style={{ cursor: 'pointer' }} onClick={() => onDetail(r)}>
+                <td style={{ padding: '7px 16px 7px 40px' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 30, height: 20, padding: '0 4px', background: '#fff', border: '1px solid #fecdd3', borderRadius: 5, fontSize: 10, fontWeight: 700, color: '#dc2626' }}>{r.rubrique_code}</span>
+                </td>
+                <td style={{ padding: '7px 4px', fontSize: 12, color: '#475569' }}>{r.intitule}</td>
+                <td style={{ padding: '7px 16px', textAlign: 'right', color: '#9a3412', fontSize: 11 }}>{r.esp ? fmtM(r.esp) : '—'}</td>
+                <td style={{ padding: '7px 16px', textAlign: 'right', color: '#9a3412', fontSize: 11 }}>{r.om ? fmtM(r.om) : '—'}</td>
+                <td style={{ padding: '7px 16px', textAlign: 'right', fontWeight: 600, color: '#b91c1c', fontSize: 12, whiteSpace: 'nowrap' }}>
+                  {fmtM(r.total)}
+                  <svg style={{ marginLeft: 4, opacity: .4, verticalAlign: 'middle' }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
+                </td>
+              </tr>
+            )) : []),
+          ];
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 export default function CompteEmploiPage() {
   const { mois, annee, user, activeTenantId, can, entite } = useApp();
   const [data, setData] = useState(null);
   const [erreur, setErreur] = useState('');
   const [detail, setDetail] = useState(null);
+  const [mode, setModeEtat] = useState(lireMode);
+  const setMode = (m) => { setModeEtat(m); ecrireMode(m); };
 
   const isAdmin = ['super_admin', 'comptable_cabinet'].includes(user?.role);
   const gated = isAdmin && !(activeTenantId || user?.tenantId);
@@ -83,6 +174,20 @@ export default function CompteEmploiPage() {
   const fondsLignes = (ressources.journaux || []).filter((j) => j.fonds_recus > 0);
   const emploisTriees = [...(emplois.lignes || [])].sort((a, b) => b.total - a.total);
   const maxEmploi = emploisTriees[0]?.total || 1;
+  // Serveur plus ancien (sans par_compte) : regroupement refait ici, mêmes montants.
+  const parCompte = emplois.par_compte || Object.values((emplois.lignes || []).reduce((acc, e) => {
+    const k = e.code_comptable || '';
+    acc[k] = acc[k] || { compte: k, intitule: k ? (e.compte_intitule || `Compte ${k}`) : 'Sans compte comptable', esp: 0, om: 0, total: 0, rubriques: [] };
+    acc[k].esp += e.esp; acc[k].om += e.om; acc[k].total += e.total; acc[k].rubriques.push(e);
+    return acc;
+  }, {}));
+  const sansCompte = parCompte.find((g) => !g.compte);
+  const lignesEmploisExcel = mode === 'compte'
+    ? parCompte.flatMap((g) => [
+      ['III. Emplois', `${g.compte || '—'} — ${g.intitule}`, num(g.esp), num(g.om), num(g.total)],
+      ...g.rubriques.map((r) => ['', `    rubrique ${r.rubrique_code} — ${r.intitule}`, num(r.esp), num(r.om), num(r.total)]),
+    ])
+    : emploisTriees.map((e) => ['III. Emplois', `${e.rubrique_code} — ${e.intitule}${e.code_comptable ? ` (${e.code_comptable})` : ''}`, num(e.esp), num(e.om), num(e.total)]);
 
   const tresFinale = solde_net;
   const ecart = tresorerie_finale.ecart !== undefined ? tresorerie_finale.ecart : (tresFinale - tresorerie_finale.disponible);
@@ -99,6 +204,16 @@ export default function CompteEmploiPage() {
         .ce-section-head{display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--border)}
         .ce-num{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0}
         .ce-subtit{padding:7px 16px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid var(--border)}
+        .ce-seg{display:inline-flex;background:#fff;border:1px solid #fecaca;border-radius:10px;padding:3px;gap:2px}
+        .ce-seg button{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;padding:6px 12px;border-radius:7px;font-size:12px;font-weight:600;color:#9f1239;cursor:pointer;transition:background .15s,color .15s}
+        .ce-seg button:hover{background:#fff1f2}
+        .ce-seg button.on{background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff;box-shadow:0 1px 4px rgba(220,38,38,.35)}
+        .ce-seg button:focus-visible{outline:2px solid #2563eb;outline-offset:1px}
+        .ce-compte{display:inline-flex;align-items:center;justify-content:center;min-width:44px;height:24px;padding:0 6px;background:#fff1f2;border:1px solid #fecdd3;border-radius:6px;font-size:11.5px;font-weight:800;color:#b91c1c;font-family:'JetBrains Mono',ui-monospace,monospace}
+        .ce-sub-row td{background:#fffafa;border-bottom:1px dashed #fde2e2}
+        .ce-sub-row:hover td{background:#fff1f2}
+        .ce-lien{border:0;background:none;padding:0;font-size:11px;font-weight:700;color:#dc2626;cursor:pointer;text-transform:none}
+        @media (max-width:640px){.ce-section-head{flex-wrap:wrap}.ce-seg{width:100%}.ce-seg button{flex:1;justify-content:center}}
       `}</style>
 
       <div style={{ maxWidth: 860 }}>
@@ -133,17 +248,17 @@ export default function CompteEmploiPage() {
                 ...fondsLignes.map((j) => ['II. Ressources', j.journal_nom, '', '', num(j.fonds_recus)]),
                 ...(ressources.fonds_recus_banque > 0 ? [['II. Ressources', 'Banque', '', '', num(ressources.fonds_recus_banque)]] : []),
                 ['', 'TOTAL RESSOURCES', '', '', num(fondsRecus)],
-                ...emploisTriees.map((e) => ['III. Emplois', `${e.rubrique_code} — ${e.intitule}`, num(e.esp), num(e.om), num(e.total)]),
+                ...lignesEmploisExcel,
                 ['', 'TOTAL EMPLOIS', '', '', num(emplois.total)],
                 ['IV. Trésorerie finale & soldes', 'Soldes initiaux + Ressources − Emplois', '', '', num(tresFinale)],
                 ...(tresorerie_finale.journaux || []).map((j) => ['IV. Trésorerie finale & soldes', `dont ${j.journal_nom}`, '', '', num(j.solde_final)]),
                 ['IV. Trésorerie finale & soldes', 'dont Banque', '', '', num(tresorerie_finale.solde_banque || 0)],
                 ['', 'Écart (trésorerie − soldes)', '', '', num(ecart)],
               ],
-              [`Compte d'emploi — ${meta.mois} ${meta.annee}`, meta.tenant_nom || ''])}>📊 Excel</button>
+              [`Compte d'emploi — ${meta.mois} ${meta.annee}${mode === 'compte' ? ' — emplois par compte comptable' : ''}`, meta.tenant_nom || ''])}>📊 Excel</button>
           )}
           <button
-            onClick={() => printCompteEmploi(data, entite)}
+            onClick={() => printCompteEmploi(data, entite, { mode, parCompte })}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', border: 'none', borderRadius: 10, padding: '9px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'white', boxShadow: '0 2px 8px rgba(37,99,235,.35)' }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
@@ -243,10 +358,23 @@ export default function CompteEmploiPage() {
             <span className="ce-num" style={{ background: '#dc2626', color: 'white', fontSize: 10 }}>III</span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: .5 }}>Emplois</div>
-              <div style={{ fontSize: 11, color: '#f87171', marginTop: 1 }}>Journal de dépenses — cliquez pour voir le détail</div>
+              <div style={{ fontSize: 11, color: '#f87171', marginTop: 1 }}>
+                {mode === 'compte' ? 'Regroupés par compte comptable — cliquez un compte pour voir ses rubriques' : 'Journal de dépenses — cliquez pour voir le détail'}
+              </div>
             </div>
-            <div style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 800, color: '#b91c1c' }}>{fmtM(emplois.total)}</div>
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <ChoixPresentation mode={mode} onChange={setMode} />
+              <div style={{ fontSize: 16, fontWeight: 800, color: '#b91c1c' }}>{fmtM(emplois.total)}</div>
+            </div>
           </div>
+          {mode === 'compte' && sansCompte && (
+            <div style={{ padding: '8px 16px', background: '#fffbeb', borderBottom: '1px solid #fde68a', fontSize: 12, color: '#92400e' }}>
+              ⚠️ {sansCompte.rubriques.length} rubrique(s) sans compte comptable ({fmtM(sansCompte.total)}) : renseignez leur équivalence dans le contrôle de régularité formelle.
+            </div>
+          )}
+          {mode === 'compte' ? (
+            <EmploisParCompte groupes={parCompte} total={emplois.total} fmtM={fmtM} onDetail={setDetail} />
+          ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#fff8f8' }}>
@@ -270,7 +398,10 @@ export default function CompteEmploiPage() {
                       <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 24, background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 6, fontSize: 11, fontWeight: 700, color: '#dc2626' }}>{e.rubrique_code}</span>
                     </td>
                     <td style={{ padding: '10px 4px' }}>
-                      <div style={{ fontWeight: 500, color: 'var(--text)', fontSize: 13 }}>{e.intitule}</div>
+                      <div style={{ fontWeight: 500, color: 'var(--text)', fontSize: 13 }}>
+                        {e.intitule}
+                        {e.code_comptable && <span title={e.compte_intitule || ''} style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: '#64748b', background: '#f1f5f9', borderRadius: 5, padding: '1px 6px', fontFamily: "'JetBrains Mono',ui-monospace,monospace" }}>{e.code_comptable}</span>}
+                      </div>
                       <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ flex: 1, height: 4, background: '#f1f5f9', borderRadius: 2, maxWidth: 160 }}>
                           <div style={{ width: `${barW}%`, height: '100%', background: barColor, borderRadius: 2 }} />
@@ -295,6 +426,17 @@ export default function CompteEmploiPage() {
               </tr>
             </tfoot>
           </table>
+          )}
+          {mode === 'compte' && (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <tfoot>
+                <tr style={{ background: 'linear-gradient(135deg,#fff1f2,#fee2e2)' }}>
+                  <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: 13, color: '#b91c1c', borderTop: '2px solid #fca5a5', letterSpacing: .3 }}>TOTAL EMPLOIS · {parCompte.filter((g) => g.compte).length} compte(s)</td>
+                  <td style={{ padding: '12px 16px', textAlign: 'right', fontWeight: 800, fontSize: 16, color: '#b91c1c', borderTop: '2px solid #fca5a5' }}>{fmtM(emplois.total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
         </div>
 
         {/* ── IV. TRÉSORERIE FINALE & SOLDES ───────────────────────── */}

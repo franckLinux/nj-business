@@ -30,6 +30,7 @@ const TITLES = {
   '/controle/pieces': 'Contrôle comptable — Rapport',
   '/controle/regularite': 'Contrôle comptable — Contrôle de substance',
   '/controle/arretes': 'Contrôle comptable — Arrêtés de caisse & inventaires',
+  '/controle/ecarts': 'Contrôle comptable — Écarts de caisse',
   '/controle/registre': 'Contrôle comptable — Registre bénéficiaires Payés/Encaissés',
   '/controle/passerelle': 'Contrôle comptable — Contrôle de régularité formelle',
 };

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
+import BasculePlanModal, { PastilleReferentiel } from '@/components/config/BasculePlanModal';
 
 // Reprend loadTabPlan()/renderTabPlan()/openModalAddCompte()/saveNewCompte()/
 // deleteCompteCustom() de legacy/js/app.js (l. 3962-4332).
@@ -69,8 +70,8 @@ function AddCompteModal({ onClose, onSaved }) {
           <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 10, padding: '12px 14px', marginBottom: 20, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <span style={{ fontSize: 18, flexShrink: 0 }}>💡</span>
             <p style={{ fontSize: 12, color: '#5b21b6', margin: 0, lineHeight: 1.6 }}>
-              Un <strong>compte additif</strong> étend le référentiel SYSCOHADA avec vos comptes spécifiques.
-              Il peut être supprimé à tout moment. Les comptes SYSCOHADA sont protégés.
+              Un <strong>compte additif</strong> étend le référentiel de votre plan (SYSCOHADA ou SYCEBNL) avec vos comptes spécifiques.
+              Il peut être désactivé à tout moment. Les comptes du référentiel sont protégés.
             </p>
           </div>
 
@@ -274,6 +275,16 @@ export default function PlanComptableTab() {
   const [statutFiltre, setStatutFiltre] = useState('actif');
   const [modal, setModal] = useState(null); // 'add' | { edit: compte } | { histo: compte }
   const searchTimer = useRef(null);
+  // 060 : référentiel du plan (SYSCOHADA révisé / SYCEBNL) et alignement sur la forme juridique.
+  const [ref, setRef] = useState(null);
+  const [bascule, setBascule] = useState(null);
+  const [basculeEnCours, setBasculeEnCours] = useState(false);
+  useEffect(() => {
+    let annule = false;
+    api.get('/config/plan-referentiel').then((r) => { if (!annule && !r.error) setRef(r); });
+    return () => { annule = true; };
+  }, [cleClient]);
+  const estSycebnl = ref?.actuel === 'SYCEBNL';
 
   const canEdit = can('plan_comptable.edit');
   // Désactiver un compte ajouté : droit distinct de l'ajout.
@@ -339,7 +350,7 @@ export default function PlanComptableTab() {
       </div>
     );
   }
-  if (!data) return <div className="loading-msg">Chargement du plan comptable SYSCOHADA…</div>;
+  if (!data) return <div className="loading-msg">Chargement du plan comptable…</div>;
 
   const { all: tous, classes, stats, modeClient } = data;
   // Plan du client : filtre par statut (actifs par défaut) et compteurs
@@ -363,14 +374,35 @@ export default function PlanComptableTab() {
   const displayed = filtered.slice(0, MAX_DISPLAY);
   const truncated = filtered.length > MAX_DISPLAY;
   const customCount = all.filter((c) => c.source === 'custom').length;
+  // SYCEBNL : classes 8 (autres charges et produits) et 9 (contributions
+  // volontaires en nature) font partie des états ; on les rend filtrables.
+  const classesAffichees = estSycebnl
+    ? [...classes, ...[{ id: 8, label: 'Classe 8 — Autres charges et autres produits' }, { id: 9, label: 'Classe 9 — Contributions volontaires en nature' }]
+      .filter((x) => !classes.some((c) => c.id === x.id))]
+    : classes;
+  const confirmerBascule = async () => {
+    setBasculeEnCours(true);
+    const r = await api.post('/config/plan-referentiel/bascule', { confirmer: true });
+    setBasculeEnCours(false);
+    if (r.error) { toast(r.error, 'error', 8000); return; }
+    setBascule(null);
+    toast(r.message, 'success', 7000);
+    const e = await api.get('/config/plan-referentiel');
+    if (!e.error) setRef(e);
+    charger(true);
+  };
+  const ouvrirAlignement = () => setBascule({ de: ref.actuel, vers: ref.cible, versInfo: ref.cible_info, apercu: ref.apercu, contexte: 'alignement' });
 
   return (
     <div style={{ maxWidth: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px 0' }}>Plan comptable SYSCOHADA révisé</h3>
+          <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            Plan comptable {estSycebnl ? 'SYCEBNL' : 'SYSCOHADA révisé'}
+            {ref && <PastilleReferentiel code={ref.actuel} titre={ref.actuel_info?.description} />}
+          </h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{totalAffiche} comptes · Référentiel OHADA</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{totalAffiche} comptes · Référentiel OHADA{estSycebnl ? ' — entités à but non lucratif (associations, ONG)' : ''}</span>
             {customCount > 0 && <span style={{ fontSize: 11, background: '#ede9fe', color: '#6d28d9', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>{customCount} compte{customCount > 1 ? 's' : ''} additif{customCount > 1 ? 's' : ''}</span>}
           </div>
         </div>
@@ -403,6 +435,19 @@ export default function PlanComptableTab() {
         </div>
       </div>
 
+      {ref?.a_basculer && (
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', border: '1px solid #fde68a', borderRadius: 12, padding: '12px 16px', marginBottom: 16 }}>
+          <span style={{ fontSize: 22 }} aria-hidden>🧭</span>
+          <div style={{ flex: '1 1 300px', fontSize: 13, color: '#78350f' }}>
+            <b>Plan à aligner sur la forme juridique.</b> L'entité est déclarée « {ref.forme_juridique || 'sans forme'} », qui relève du <b>{ref.attendu_info?.libelle}</b> ; ce plan applique encore le {ref.actuel_info?.libelle}.
+          </div>
+          {can('config.edit')
+            ? <button type="button" onClick={ouvrirAlignement} style={{ padding: '9px 16px', borderRadius: 9, border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: 13, color: 'white', background: ref.attendu === 'SYCEBNL' ? 'linear-gradient(135deg,#047857,#0d9488)' : 'linear-gradient(135deg,#1d4ed8,#4f46e5)' }}>
+                Charger le plan {ref.attendu_info?.libelle}…</button>
+            : <span style={{ fontSize: 12, color: '#92400e' }}>Demandez au directeur (Configuration → Entité).</span>}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', overflowX: 'auto', paddingBottom: 4 }}>
         <button
           onClick={() => setCurrentClasse(null)}
@@ -413,10 +458,10 @@ export default function PlanComptableTab() {
           }}
         >
           <span>Toutes</span>
-          <span style={{ fontSize: 10, fontWeight: 500, opacity: .8 }}>Classes 1 à 7</span>
+          <span style={{ fontSize: 10, fontWeight: 500, opacity: .8 }}>Classes 1 à {estSycebnl ? 9 : 7}</span>
           <span style={{ fontSize: 10, fontWeight: 700, marginTop: 2 }}>{totalAffiche} comptes</span>
         </button>
-        {classes.map((c) => (
+        {classesAffichees.map((c) => (
           <button
             key={c.id} onClick={() => setCurrentClasse(c.id)}
             style={{
@@ -482,7 +527,9 @@ export default function PlanComptableTab() {
                     <td style={{ padding: '10px 16px', textAlign: 'center' }}>
                       {isCustom
                         ? <span style={{ background: '#ede9fe', color: '#6d28d9', padding: '2px 9px', borderRadius: 10, fontSize: 10, fontWeight: 700, letterSpacing: .3 }}>✦ ADDITIF</span>
-                        : <span style={{ background: '#f1f5f9', color: '#94a3b8', padding: '2px 9px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>SYSCOHADA</span>}
+                        : c.referentiel === 'SYCEBNL'
+                          ? <span style={{ background: '#ecfdf5', color: '#047857', padding: '2px 9px', borderRadius: 10, fontSize: 10, fontWeight: 700 }}>SYCEBNL</span>
+                          : <span style={{ background: '#f1f5f9', color: '#94a3b8', padding: '2px 9px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>SYSCOHADA</span>}
                     </td>
                     {avecActions && modeClient && (
                       <td style={{ padding: '8px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -527,6 +574,10 @@ export default function PlanComptableTab() {
           onClose={() => setModal(null)}
           onSaved={(compte, intitule) => { setModal(null); toast(`Compte ${compte} — ${intitule} ajouté au plan.`, 'success'); charger(true); }}
         />
+      )}
+      {bascule && (
+        <BasculePlanModal {...bascule} enCours={basculeEnCours}
+          onConfirmer={confirmerBascule} onAnnuler={() => { if (!basculeEnCours) setBascule(null); }} />
       )}
     </div>
   );

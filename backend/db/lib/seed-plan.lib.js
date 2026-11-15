@@ -17,6 +17,7 @@
 // ============================================================================
 const { pool } = require('../../src/config/database');
 const { PLAN_COMPTABLE } = require('../data/plan-comptable-syscohada');
+const { PLAN_COMPTABLE_SYCEBNL } = require('../data/plan-comptable-sycebnl');
 
 const TABLE = 'plan_comptable_syscohada';
 
@@ -134,6 +135,24 @@ const seedPlanComptable = async ({ client = null, prune = false } = {}) => {
       );
       if (fn.length > 0) await c.query('SELECT plan_modele_recalculer()');
 
+      // Référentiel SYCEBNL (migration 060) : AJOUTS uniquement, comme ci-dessus.
+      // Sans effet tant que la 060 n'est pas appliquée.
+      let sycebnlCrees = 0;
+      const { rows: tSyc } = await c.query("SELECT to_regclass('plan_referentiel_comptes') AS t");
+      if (tSyc[0].t) {
+        const { rowCount } = await c.query(
+          `INSERT INTO plan_referentiel_comptes (referentiel, compte, intitule, classe, nature, specifique)
+           SELECT 'SYCEBNL', s.compte, s.intitule, s.classe, s.nature, s.specifique
+             FROM UNNEST($1::text[], $2::text[], $3::int[], $4::text[], $5::bool[])
+                  AS s(compte, intitule, classe, nature, specifique)
+           ON CONFLICT (referentiel, compte) DO NOTHING`,
+          [PLAN_COMPTABLE_SYCEBNL.map((x) => x.compte), PLAN_COMPTABLE_SYCEBNL.map((x) => x.intitule),
+           PLAN_COMPTABLE_SYCEBNL.map((x) => x.classe), PLAN_COMPTABLE_SYCEBNL.map((x) => x.nature),
+           PLAN_COMPTABLE_SYCEBNL.map((x) => x.specifique)]
+        );
+        sycebnlCrees = rowCount;
+      }
+
       await c.query('COMMIT');
 
       return {
@@ -142,6 +161,7 @@ const seedPlanComptable = async ({ client = null, prune = false } = {}) => {
         mis_a_jour:  misAJour,
         intacts,
         desactives,
+        sycebnl: { referentiel: PLAN_COMPTABLE_SYCEBNL.length, crees: sycebnlCrees },
         repartition: await stats(c),
       };
     } catch (err) {

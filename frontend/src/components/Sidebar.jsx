@@ -218,6 +218,13 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             Arrêtés &amp; inventaires
           </NavLink>
           )}
+          {voit('/controle/ecarts') && (
+          <NavLink to="/controle/ecarts" className={subClass}>
+            {/* 061 : registre des écarts de caisse (constat, destination, régularisation). */}
+            <svg viewBox="0 0 24 24"><path d="M12 3v18" /><path d="M5 7h14" /><path d="M5 7l-3 7a3 3 0 0 0 6 0z" /><path d="M19 7l-3 7a3 3 0 0 0 6 0z" /><path d="M8 21h8" /></svg>
+            Écarts de caisse
+          </NavLink>
+          )}
           {voit('/controle/registre') && (
           <NavLink to="/controle/registre" className={subClass}>
             <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /><line x1="9" y1="7" x2="16" y2="7" /><line x1="9" y1="11" x2="14" y2="11" /></svg>

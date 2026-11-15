@@ -37,7 +37,7 @@ const versionCible = async (versionId, t) => {
 const lireClient = async (tenantId, t) => {
   const [c] = await sequelize.query(
     `SELECT t.id, t.nom, t.actif, t.plan_modele_version_id, t.plan_initialise_le, t.plan_derniere_synchro,
-            v.code AS version_code
+            t.plan_referentiel, v.code AS version_code
        FROM tenants t LEFT JOIN plan_modele_versions v ON v.id = t.plan_modele_version_id
       WHERE t.id = :tenantId`,
     { replacements: { tenantId }, type: SELECT, transaction: t }
@@ -50,7 +50,7 @@ const lireClient = async (tenantId, t) => {
 const listerClients = async () => {
   const v = await versionCible(null);
   const clients = await sequelize.query(
-    `SELECT t.id, t.nom, t.actif, t.plan_modele_version_id, v.code AS version_code,
+    `SELECT t.id, t.nom, t.actif, t.plan_modele_version_id, v.code AS version_code, t.plan_referentiel,
             t.plan_initialise_le, t.plan_derniere_synchro, t.plan_derniere_modif,
             (SELECT COUNT(*)::int FROM plan_comptable_client c WHERE c.tenant_id = t.id AND c.origine = 'client') AS nb_comptes_client,
             (SELECT COUNT(*)::int FROM plan_comptable_client c WHERE c.tenant_id = t.id AND c.personnalise) AS nb_personnalises
@@ -58,7 +58,10 @@ const listerClients = async () => {
       ORDER BY t.nom`,
     { type: SELECT }
   );
-  return { version_publiee: v, clients: clients.map((c) => ({ ...c, a_jour: c.plan_modele_version_id === v.id })) };
+  // 060 : un client SYCEBNL ne suit pas le modèle SYSCOHADA (hors synchronisation).
+  return { version_publiee: v, clients: clients.map((c) => ({ ...c,
+    hors_synchro: c.plan_referentiel === 'SYCEBNL',
+    a_jour: c.plan_referentiel === 'SYCEBNL' || c.plan_modele_version_id === v.id })) };
 };
 
 /**
@@ -68,6 +71,9 @@ const listerClients = async () => {
  */
 const calculer = async (tenantId, versionId, t) => {
   const client = await lireClient(tenantId, t);
+  if (client.plan_referentiel === 'SYCEBNL') {
+    throw new ErreurMetier(409, `${client.nom} applique le SYCEBNL (association / ONG) : la synchronisation avec le modèle SYSCOHADA ne s'applique pas à son plan.`);
+  }
   const v = await versionCible(versionId, t);
   if (!client.plan_initialise_le) {
     return { client, version: v, initialisation: true, changements: [] };

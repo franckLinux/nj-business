@@ -31,8 +31,11 @@ const RUBRIQUES_DEFAUT = [
 // GET /api/rubriques
 const getRubriques = async (req, res) => {
   try {
+    // 061 : les rubriques d'écart de caisse (ECP / ECN) ne servent qu'au
+    // registre des écarts : absentes des listes de saisie et de budget,
+    // sauf demande explicite (?ecarts=1).
     const rows = await Rubrique.findAll({
-      where: { tenant_id: req.tenantId, actif: true },
+      where: { tenant_id: req.tenantId, actif: true, ...(req.query.ecarts === '1' ? {} : { est_ecart_caisse: false }) },
       order: [['type', 'ASC'], ['ordre', 'ASC'], ['code', 'ASC']],
     });
     res.json({
@@ -115,6 +118,10 @@ const updateRubrique = async (req, res) => {
 // Désactivation logique (actif=false) : on ne supprime jamais une rubrique
 // déjà référencée par des mouvements existants.
 const deleteRubrique = async (req, res) => {
+  const r = await Rubrique.findOne({ where: { id: req.params.id, tenant_id: req.tenantId }, attributes: ['est_ecart_caisse'] });
+  if (r?.est_ecart_caisse) {
+    return res.status(409).json({ error: 'Rubrique système du registre des écarts de caisse : elle ne se désactive pas.' });
+  }
   await Rubrique.update({ actif: false }, { where: { id: req.params.id, tenant_id: req.tenantId } });
   res.json({ message: 'Rubrique désactivée.' });
 };

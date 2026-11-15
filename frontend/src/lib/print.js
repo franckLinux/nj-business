@@ -371,7 +371,10 @@ export function decomposerCompteEmploi({ ressources }) {
   return { soldesInitiaux, fondsRecus };
 }
 
-export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale, solde_net }, entite) {
+// opts.mode : 'rubrique' (défaut) ou 'compte' — emplois regroupés par compte
+// comptable, avec le détail des rubriques sous chaque compte (09/11/2026).
+export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale, solde_net }, entite, opts = {}) {
+  const parCompteMode = opts.mode === 'compte';
   const jTypeLabel = (t) => CE_TYPE_LABEL[t] || t;
   const jTypeIco = (t) => CE_TYPE_ICO[t] || '💼';
   const { soldesInitiaux, fondsRecus } = decomposerCompteEmploi({ ressources });
@@ -403,6 +406,25 @@ export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale
       <td style="padding:8px 14px;text-align:right;color:#9a3412;font-size:11px">${e.om > 0 ? fmtN(e.om) : '—'}</td>
       <td style="padding:8px 14px;text-align:right;font-weight:700;color:#dc2626;font-size:12px">${fmtN(e.total)}</td>
     </tr>`).join('');
+
+  const parCompte = opts.parCompte || emplois.par_compte || [];
+  const emploisParCompte = parCompte.map((g) => `
+    <tr class="ce-emp-row" style="background:#fff7f7">
+      <td style="padding:8px 14px;width:60px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;min-width:38px;height:20px;padding:0 4px;background:#fff1f2;border:1px solid #fecdd3;border-radius:5px;font-size:10px;font-weight:800;color:#b91c1c">${escE(g.compte || '—')}</span>
+      </td>
+      <td style="padding:8px 4px;font-size:12px;font-weight:700">${escE(g.intitule)}</td>
+      <td style="padding:8px 14px;text-align:right;color:#9a3412;font-size:11px">${g.esp ? fmtN(g.esp) : '—'}</td>
+      <td style="padding:8px 14px;text-align:right;color:#9a3412;font-size:11px">${g.om ? fmtN(g.om) : '—'}</td>
+      <td style="padding:8px 14px;text-align:right;font-weight:800;color:#dc2626;font-size:12px">${fmtN(g.total)}</td>
+    </tr>${g.rubriques.map((r) => `
+    <tr>
+      <td style="padding:4px 14px 4px 26px;font-size:10px;color:#9ca3af">${escE(r.rubrique_code)}</td>
+      <td style="padding:4px 4px;font-size:11px;color:#475569">${escE(r.intitule)}</td>
+      <td style="padding:4px 14px;text-align:right;color:#9a3412;font-size:10px">${r.esp ? fmtN(r.esp) : '—'}</td>
+      <td style="padding:4px 14px;text-align:right;color:#9a3412;font-size:10px">${r.om ? fmtN(r.om) : '—'}</td>
+      <td style="padding:4px 14px;text-align:right;color:#b91c1c;font-size:11px">${fmtN(r.total)}</td>
+    </tr>`).join('')}`).join('');
 
   const tresoLignes = (tresorerie_finale.journaux || []).map((j) => `
     <tr class="ce-res-row">
@@ -479,18 +501,18 @@ export function printCompteEmploi({ meta, ressources, emplois, tresorerie_finale
       <div class="ce-section">
         <div class="ce-section-head red">
           <span class="ce-num" style="background:#dc2626;color:white;font-size:8px">III</span>
-          <span class="sec-title" style="color:#b91c1c">Emplois</span>
+          <span class="sec-title" style="color:#b91c1c">Emplois${parCompteMode ? ' — par compte comptable' : ''}</span>
           <span class="sec-total" style="color:#b91c1c">${fmtN(emplois.total)}</span>
         </div>
         <table>
           <thead><tr>
-            <th style="padding:6px 14px;text-align:left;font-size:9px;color:#9ca3af;text-transform:uppercase">Code</th>
-            <th style="padding:6px 4px;text-align:left;font-size:9px;color:#9ca3af;text-transform:uppercase">Rubrique</th>
+            <th style="padding:6px 14px;text-align:left;font-size:9px;color:#9ca3af;text-transform:uppercase">${parCompteMode ? 'Compte' : 'Code'}</th>
+            <th style="padding:6px 4px;text-align:left;font-size:9px;color:#9ca3af;text-transform:uppercase">${parCompteMode ? 'Intitulé du compte / rubriques' : 'Rubrique'}</th>
             <th style="padding:6px 14px;text-align:right;font-size:9px;color:#9ca3af;text-transform:uppercase">Espèces</th>
             <th style="padding:6px 14px;text-align:right;font-size:9px;color:#9ca3af;text-transform:uppercase">MM</th>
             <th style="padding:6px 14px;text-align:right;font-size:9px;color:#9ca3af;text-transform:uppercase">Total</th>
           </tr></thead>
-          <tbody>${emploisLignes || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#9ca3af;font-style:italic">Aucune dépense enregistrée ce mois.</td></tr>'}</tbody>
+          <tbody>${(parCompteMode ? emploisParCompte : emploisLignes) || '<tr><td colspan="5" style="text-align:center;padding:20px;color:#9ca3af;font-style:italic">Aucune dépense enregistrée ce mois.</td></tr>'}</tbody>
           <tfoot><tr><td colspan="4">TOTAL EMPLOIS</td><td style="text-align:right;color:#b91c1c">${fmtN(emplois.total)}</td></tr></tfoot>
         </table>
       </div>

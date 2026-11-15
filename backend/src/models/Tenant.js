@@ -22,6 +22,8 @@ module.exports = (sequelize, DataTypes) => {
     telephone: DataTypes.TEXT,   // migration 031
     email: DataTypes.TEXT,       // migration 031
     site_web: DataTypes.TEXT,    // migration 031
+    // migration 060 : référentiel du plan comptable (forme juridique ASSOC / ONG → SYCEBNL).
+    plan_referentiel: { type: DataTypes.TEXT, allowNull: false, defaultValue: 'SYSCOHADA' },
     actif: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated_at: DataTypes.DATE,

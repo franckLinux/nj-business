@@ -21,6 +21,7 @@ export const PAGE_PERMS = {
   '/controle/regularite': 'controle.view',   // 045 : contrôle de régularité formelle
   '/controle/registre':   'controle.view',
   '/controle/arretes':    'controle.view',   // 046 : arrêtés de caisse & inventaires (PV)
+  '/controle/ecarts':     'controle.view',   // 061 : registre des écarts de caisse
   '/controle/passerelle': ['controle.view', 'passerelle.view'],
 };
 
