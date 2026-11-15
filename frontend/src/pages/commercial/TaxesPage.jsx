@@ -30,7 +30,7 @@ function FicheTaxe({ taxe, onFermer, onEnregistre, modifiable }) {
         {modifiable && <button type="button" className="cm-btn cm-primaire" onClick={valider} disabled={enCours}>{enCours ? 'Enregistrement…' : 'Enregistrer'}</button>}
       </>}>
       {erreur && <div className="cm-erreur" role="alert">{erreur}</div>}
-      <div className="cm-note">Configurez les taxes selon la réglementation applicable à l'entreprise : aucune taxe n'est imposée par défaut, et un article peut n'en avoir aucune.</div>
+      <div className="cm-note">Configurez les taxes selon la réglementation applicable à l'entreprise : aucune taxe n'est imposée par défaut. La taxe se choisit à la saisie de chaque opération, ligne par ligne.</div>
       <Section titre="Taxe">
         <div className="cm-grille">
           <Champ label="Code" requis id="tc"><input id="tc" value={f.code} onChange={set('code')} maxLength={20} disabled={!modifiable} style={{ textTransform: 'uppercase' }} /></Champ>
@@ -66,13 +66,13 @@ export default function TaxesPage() {
   const liste = donnees || [];
   return (
     <div className="cm-page">
-      <Entete titre="Taxes" description="Les taxes reprises sur les articles et les documents d'achat. Le taux appliqué est copié dans chaque document : modifier une taxe ne change pas les documents déjà émis.">
+      <Entete titre="Taxes" description="Les taxes proposées à la saisie des opérations (bons de commande, factures fournisseurs, devis). Elles ne se fixent plus sur les familles ni sur les articles. Le taux appliqué est copié dans chaque document : modifier une taxe ne change pas les documents déjà enregistrés.">
         {modifiable && <button type="button" className="cm-btn cm-primaire" onClick={() => setFiche('nouveau')}>+ Nouvelle taxe</button>}
       </Entete>
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table">
-          <thead><tr><th>Code</th><th>Intitulé</th><th>Type</th><th>Usage</th><th className="cm-num">Taux</th><th>Validité</th><th className="cm-num">Articles</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Code</th><th>Intitulé</th><th>Type</th><th>Usage</th><th className="cm-num">Taux</th><th>Validité</th><th className="cm-num">Lignes de documents</th><th>Statut</th></tr></thead>
           <tbody>
             {!donnees ? <tr><td colSpan={8} className="cm-vide">Chargement…</td></tr>
               : liste.length === 0 ? <tr><td colSpan={8} className="cm-vide"><strong>Aucune taxe</strong>{modifiable ? 'Ajoutez les taxes applicables à l\'entreprise.' : ''}</td></tr>
@@ -84,7 +84,7 @@ export default function TaxesPage() {
                     <td>{x.usage_libelle}</td>
                     <td className="cm-num"><strong>{x.taux.toLocaleString('fr-FR', { maximumFractionDigits: 4 })} %</strong></td>
                     <td>{x.debut || x.fin ? `${dateFr(x.debut) || '…'} → ${dateFr(x.fin) || '…'}` : 'Sans limite'}</td>
-                    <td className="cm-num">{x.nb_articles}</td>
+                    <td className="cm-num">{x.nb_utilisations}</td>
                     <td><Statut actif={x.actif} oui="Active" non="Inactive" /></td>
                   </tr>
                 ))}

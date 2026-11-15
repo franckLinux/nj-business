@@ -100,7 +100,7 @@ test('Module inactif : 403 MODULE_INACTIF ; activation : profils achats créés,
     assert.equal(a.status, 200, a.message);
   }
   const profils = await sql("SELECT code FROM roles WHERE tenant_id = $1 AND code LIKE 'achats_%' ORDER BY code", [A]);
-  assert.deepEqual(profils.map((p) => p.code), ['achats_demandeur', 'achats_gestionnaire', 'achats_responsable']);
+  assert.deepEqual(profils.map((p) => p.code), ['achats_comptable', 'achats_demandeur', 'achats_gestionnaire', 'achats_responsable']);
   const [{ n }] = await sql("SELECT COUNT(*)::int AS n FROM tenant_permissions WHERE tenant_id = $1 AND permission_code LIKE 'com.%'", [B]);
   const [{ total }] = await sql("SELECT COUNT(*)::int AS total FROM permissions WHERE module = 'commercial'");
   assert.equal(n, total, 'plafond de B complété');
@@ -108,7 +108,7 @@ test('Module inactif : 403 MODULE_INACTIF ; activation : profils achats créés,
   await appel('PUT', `/plateforme/clients/${A}/modules/commercial`, 'adm', { actif: false, motif: 'Test désactivation' });
   await appel('PUT', `/plateforme/clients/${A}/modules/commercial`, 'adm', { actif: true, motif: 'Test réactivation' });
   const [{ m }] = await sql("SELECT COUNT(*)::int AS m FROM roles WHERE tenant_id = $1 AND code LIKE 'achats_%'", [A]);
-  assert.equal(m, 3);
+  assert.equal(m, 4, 'demandeur, gestionnaire, responsable, comptable (063)');
 });
 
 test('Droits : caissier refusé, collaborateur en lecture seule', async () => {
@@ -199,16 +199,21 @@ test('Fournisseurs : registre partagé, fiche achats, banque réservée', async 
 });
 
 test('Familles : plusieurs fournisseurs, client refusé, fournisseur d\'un autre client refusé', async () => {
-  let r = await appel('POST', '/commercial/familles', 'dirA', { code: 'FOURN', nom: 'Fournitures de bureau', fournisseur_ids: ids.fou });
+  // 062 : unité de stock obligatoire.
+  const sans = await appel('POST', '/commercial/familles', 'dirA', { code: 'SANS', nom: 'Sans unité' });
+  assert.equal(sans.status, 400);
+  assert.match(sans.message, /unité de stock/);
+  ids.u = (await appel('POST', '/commercial/unites', 'dirA', { code: 'unité' })).data.id;
+  let r = await appel('POST', '/commercial/familles', 'dirA', { code: 'FOURN', nom: 'Fournitures de bureau', unite_stock_id: ids.u, fournisseur_ids: ids.fou });
   assert.equal(r.status, 201, r.message);
   assert.equal(r.data.fournisseurs.length, 3);
   ids.fam = r.data.id;
-  r = await appel('POST', '/commercial/familles', 'dirA', { code: 'INFO', nom: 'Matériel informatique', fournisseur_ids: [ids.fou[1]] });
+  r = await appel('POST', '/commercial/familles', 'dirA', { code: 'INFO', nom: 'Matériel informatique', unite_stock_id: ids.u, fournisseur_ids: [ids.fou[1]] });
   ids.fam2 = r.data.id;
-  assert.equal((await appel('POST', '/commercial/familles', 'dirA', { code: 'X1', nom: 'X', fournisseur_ids: [ids.client] })).status, 400);
+  assert.equal((await appel('POST', '/commercial/familles', 'dirA', { code: 'X1', nom: 'X', unite_stock_id: ids.u, fournisseur_ids: [ids.client] })).status, 400);
   const autre = await appel('POST', '/commercial/tiers', 'dirB', { type: 'fournisseur', nom: 'Fournisseur de B' });
   ids.fouB = autre.data.id;
-  assert.equal((await appel('POST', '/commercial/familles', 'dirA', { code: 'X2', nom: 'X', fournisseur_ids: [ids.fouB] })).status, 400);
+  assert.equal((await appel('POST', '/commercial/familles', 'dirA', { code: 'X2', nom: 'X', unite_stock_id: ids.u, fournisseur_ids: [ids.fouB] })).status, 400);
   // Un fournisseur peut servir plusieurs familles.
   const t = (await appel('GET', '/commercial/tiers?type=fournisseur', 'dirA')).data.find((x) => x.id === ids.fou[1]);
   assert.equal(t.familles.length, 2);

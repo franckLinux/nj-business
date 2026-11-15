@@ -17,6 +17,13 @@
 // Les exceptions individuelles (user_permissions.effet) S'AJOUTENT au rôle au
 // lieu de le remplacer : modifier un rôle ou ajouter une permission au
 // catalogue profite donc aussi aux personnes qui ont des exceptions.
+//
+// Types de gestion NJ COMMERCIAL (062) : achats, ventes, stock — zéro, un ou
+// plusieurs par personne (com_utilisateur_types_gestion). Chacun ajoute à la
+// base son lot de permissions com.* : celui du client s'il l'a personnalisé
+// (com_types_gestion_client), sinon le lot par défaut. Le type dit le DOMAINE
+// de travail ; le rôle / profil garde le NIVEAU (les validations). Exceptions
+// 'deny' et plafond du client s'appliquent ensuite, comme pour le reste.
 const { sequelize, Permission, TenantPermission } = require('../models');
 
 // Groupe d'une permission = module NJ BUSINESS auquel elle appartient. Toutes
@@ -42,8 +49,38 @@ const SQL_BASE = `
   SELECT permission_code FROM systeme WHERE groupe NOT IN (SELECT groupe FROM profil)
 `;
 
-const SQL_EFFECTIVES = `
-  WITH base AS (${SQL_BASE}),
+// Permissions apportées par les types de gestion de la personne (062).
+const SQL_TYPES = `
+  SELECT d.permission_code
+    FROM com_utilisateur_types_gestion ut
+    JOIN users uu ON uu.id = ut.user_id AND uu.tenant_id = ut.tenant_id
+    JOIN com_types_gestion tg ON tg.code = ut.type_code AND tg.actif
+    JOIN com_type_gestion_permissions_defaut d ON d.type_code = ut.type_code
+   WHERE ut.user_id = :userId
+     AND NOT EXISTS (SELECT 1 FROM com_types_gestion_client c WHERE c.tenant_id = ut.tenant_id AND c.type_code = ut.type_code)
+  UNION
+  SELECT pc.permission_code
+    FROM com_utilisateur_types_gestion ut
+    JOIN users uu ON uu.id = ut.user_id AND uu.tenant_id = ut.tenant_id
+    JOIN com_types_gestion tg ON tg.code = ut.type_code AND tg.actif
+    JOIN com_type_gestion_permissions_client pc ON pc.tenant_id = ut.tenant_id AND pc.type_code = ut.type_code
+   WHERE ut.user_id = :userId
+`;
+
+// Tant que la 062 n'est pas jouée, la résolution reste celle d'avant (jamais
+// d'erreur sur une table absente). Seule la présence est mémorisée.
+let typesPresents = false;
+const typesDisponibles = async () => {
+  if (typesPresents) return true;
+  const [r] = await sequelize.query("SELECT to_regclass('public.com_utilisateur_types_gestion') IS NOT NULL AS ok",
+    { type: sequelize.QueryTypes.SELECT });
+  typesPresents = Boolean(r?.ok);
+  return typesPresents;
+};
+const sqlBase = (avecTypes) => (avecTypes ? `${SQL_BASE} UNION ${SQL_TYPES}` : SQL_BASE);
+
+const sqlEffectives = (avecTypes) => `
+  WITH base AS (${sqlBase(avecTypes)}),
   ex AS (
     SELECT permission_code, effet FROM user_permissions WHERE user_id = :userId
   ),
@@ -63,9 +100,9 @@ const SQL_EFFECTIVES = `
    ORDER BY permission_code
 `;
 
-/** Permissions de BASE (rôle système ou profil métier), sans exceptions ni plafond. */
+/** Permissions de BASE (rôle système ou profil métier, + types de gestion), sans exceptions ni plafond. */
 const getBasePermissions = async (userId) => {
-  const rows = await sequelize.query(SQL_BASE, {
+  const rows = await sequelize.query(sqlBase(await typesDisponibles()), {
     replacements: { userId }, type: sequelize.QueryTypes.SELECT,
   });
   return rows.map((r) => r.permission_code);
@@ -79,7 +116,7 @@ const getBasePermissions = async (userId) => {
  */
 const getEffectivePermissions = async ({ tenantId, userId, role }) => {
   if (role === 'super_admin') return null;
-  const rows = await sequelize.query(SQL_EFFECTIVES, {
+  const rows = await sequelize.query(sqlEffectives(await typesDisponibles()), {
     replacements: { userId, tenantId: tenantId || null },
     type: sequelize.QueryTypes.SELECT,
   });
@@ -147,7 +184,14 @@ const usersAvecPermission = async (tenantId, code) => {
   return res;
 };
 
+/** Permissions apportées par les seuls types de gestion (affichage « d'où vient ce droit »). */
+const getPermissionsTypes = async (userId) => {
+  if (!(await typesDisponibles())) return [];
+  const rows = await sequelize.query(SQL_TYPES, { replacements: { userId }, type: sequelize.QueryTypes.SELECT });
+  return rows.map((r) => r.permission_code);
+};
+
 module.exports = {
-  getEffectivePermissions, getBasePermissions, getPermissionsAccordees, userHasPermission,
+  getEffectivePermissions, getBasePermissions, getPermissionsAccordees, getPermissionsTypes, userHasPermission,
   verifierCodesAccordables, usersAvecPermission,
 };

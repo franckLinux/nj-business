@@ -6,11 +6,13 @@ import { api } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { Section, fmtMontant, fmtQte } from '@/components/commercial/ui';
 import { StatutBon, dateFr, ouvrirFichier, lireFichier, tailleFichier } from '@/components/commercial/achats';
+import { SuiviBon } from '@/components/commercial/appro';
+import { CoutsBon } from '@/pages/commercial/FraisPages';
 
 const ACTIONS = {
   COM_BC_PREPARATION: 'Bon préparé', COM_BC_MODIFICATION: 'Brouillon modifié', COM_BC_REVALIDATION: 'Revalidation demandée',
   COM_BC_EMISSION: 'Bon émis', COM_BC_ANNULATION: 'Bon annulé', COM_BC_REVISION: 'Révision préparée', COM_BC_REMPLACE: 'Remplacé par une révision',
-  COM_BC_PROFORMA_AJOUT: 'Proforma jointe', COM_BC_PROFORMA_RETRAIT: 'Proforma retirée',
+  COM_BC_PROFORMA_AJOUT: 'Proforma jointe', COM_BC_PROFORMA_RETRAIT: 'Proforma retirée', COM_BC_ENVOI: 'Envoyé au fournisseur',
 };
 const CLASSES = { COM_BC_EMISSION: 'cm-f-ok', COM_BC_ANNULATION: 'cm-f-ko', COM_BC_REVALIDATION: 'cm-f-info', COM_BC_REMPLACE: 'cm-f-info' };
 
@@ -160,10 +162,26 @@ export default function BonPage() {
   const [b, setB] = useState(null);
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState('');
+  const [couts, setCouts] = useState(null);
   const charger = async () => {
     const r = await api.get(`/commercial/bons-commande/${id}`);
     if (r?.error) { setErreur(r.error); return; }
     setB(r); setErreur('');
+  };
+  // 063 : coût réel d'acquisition (prix net + frais validés), pour les bons émis.
+  useEffect(() => {
+    if (!b || b.statut !== 'emis') { setCouts(null); return; }
+    api.get(`/commercial/bons-commande/${b.id}/couts`).then((r) => setCouts(r?.error ? null : r));
+  }, [b?.id, b?.statut]); // eslint-disable-line react-hooks/exhaustive-deps
+  const envoyer = async (mode) => {
+    let destinataire = '';
+    if (mode === 'manuel') {
+      destinataire = window.prompt(`Comment le bon ${b.numero_complet} a-t-il été transmis à ${b.fournisseur_nom} ?\n(ex. « remis au livreur », « WhatsApp au 699… »)`) || '';
+      if (destinataire.trim().length < 2) return;
+    } else if (!window.confirm(`Envoyer le PDF du bon ${b.numero_complet} par e-mail à ${b.fournisseur_nom} (adresse de sa fiche) ?`)) return;
+    const r = await agir(`envoi-${mode}`, () => api.post(`/commercial/bons-commande/${id}/envoi`, { mode, destinataire: destinataire.trim() }),
+      mode === 'email' ? 'Bon envoyé par e-mail au fournisseur.' : 'Envoi au fournisseur constaté.');
+    if (r) setB(r);
   };
   useEffect(() => { setB(null); charger(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -219,11 +237,12 @@ export default function BonPage() {
         <div>
           <h2>
             {!brouillon && <span className="cm-code" style={{ fontSize: 15 }}>{b.numero_complet}</span>}
-            Bon de commande <StatutBon statut={b.statut} />
+            Bon de commande {b.statut === 'emis' ? <SuiviBon suivi={b.suivi} /> : <StatutBon statut={b.statut} />}
           </h2>
           <span className="cm-sous">
             {brouillon ? `Préparé par ${b.prepare_par_nom || '—'} le ${dateFr(b.cree_le, true)}` : `Émis le ${dateFr(b.emis_le, true)} par ${b.emis_par_nom}`}
             {b.remplace_numero ? ` · révision de ${b.remplace_numero}` : ''}
+            {b.envoye_le ? ` · envoyé le ${dateFr(b.envoye_le, true)} (${b.envoi_mode === 'email' ? 'e-mail' : 'constaté'} : ${b.envoi_destinataire})` : ''}
           </span>
         </div>
         <div className="cm-actions">
@@ -233,6 +252,11 @@ export default function BonPage() {
           {b.droits.receptionner && b.reception?.etat !== 'recu' && (
             <button type="button" className="cm-btn cm-primaire" onClick={() => navigate(`/commercial/receptions/nouvelle?bc=${b.id}`)}>Réceptionner</button>
           )}
+          {b.droits.frais && <button type="button" className="cm-btn cm-secondaire" onClick={() => navigate(`/commercial/frais/nouveau?bc=${b.id}`)}>+ Frais d'achat</button>}
+          {b.droits.envoyer && <>
+            <button type="button" className="cm-btn cm-secondaire" onClick={() => envoyer('manuel')} disabled={Boolean(enCours)}>Constater l'envoi</button>
+            <button type="button" className="cm-btn cm-secondaire" onClick={() => envoyer('email')} disabled={Boolean(enCours)}>{b.envoye_le ? 'Renvoyer par e-mail' : 'Envoyer au fournisseur'}</button>
+          </>}
           <button type="button" className="cm-btn cm-secondaire" onClick={pdf}>{brouillon ? 'Aperçu PDF' : 'Ouvrir le PDF'}</button>
           {brouillon && b.droits.modifier && <button type="button" className="cm-btn cm-secondaire" onClick={() => navigate(`/commercial/bons/${b.id}/modifier`)}>Modifier</button>}
           {brouillon && b.droits.emettre_permission && (
@@ -260,6 +284,7 @@ export default function BonPage() {
               <div><dt>Fournisseur</dt><dd>{b.fournisseur_nom}</dd></div>
               <div><dt>Livraison</dt><dd>{b.magasin_code} — {b.magasin_nom}</dd></div>
               <div><dt>Demande d'origine</dt><dd><Link to={`/commercial/demandes/${b.demande_id}`}>{b.demande_numero}</Link><span className="cm-sous">{b.demandeur_nom}{b.service ? ` · ${b.service}` : ''}</span></dd></div>
+              {b.consultation_id && <div><dt>Consultation</dt><dd><Link to={`/commercial/consultations/${b.consultation_id}`}>{b.consultation_numero}</Link></dd></div>}
               <div><dt>Conditions de paiement</dt><dd>{b.conditions_paiement || '—'}</dd></div>
               <div><dt>Délai de livraison</dt><dd>{b.delai_livraison || '—'}</dd></div>
               <div><dt>Devise</dt><dd>{b.devise}</dd></div>
@@ -289,6 +314,19 @@ export default function BonPage() {
               <div className="cm-ttc"><span>Total TTC</span><strong>{fmtMontant(b.total_ttc, b.devise)}</strong></div>
             </div>
           </Section>
+          {couts && (couts.frais.length > 0 || b.droits.frais) && (
+            <>
+              <CoutsBon couts={couts} />
+              {couts.frais.length > 0 && (
+                <Section titre={`Frais d'achat (${couts.frais.length})`}>
+                  <ul className="cm-pieces">
+                    {couts.frais.map((x) => <li key={x.id}><span className="cm-nom"><Link to={`/commercial/frais/${x.id}`}>{x.numero}</Link>
+                      <span className="cm-sous">{x.rubrique_libelle} · {x.fournisseur_nom} · {fmtMontant(x.montant_ht, x.devise)} HT · {x.statut_libelle}</span></span></li>)}
+                  </ul>
+                </Section>
+              )}
+            </>
+          )}
         </div>
         <div>
           {b.reception && <EtatReception b={b} />}

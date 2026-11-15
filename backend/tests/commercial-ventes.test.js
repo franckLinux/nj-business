@@ -86,8 +86,7 @@ before(async () => {
   R.tva = (await appel('POST', '/commercial/taxes', 'dir', { code: 'TVA', intitule: 'TVA', taux: '19,25' })).data.id;
   R.cli = (await appel('POST', '/commercial/tiers', 'dir', { type: 'client', nom: 'Hôtel du Lac' })).data.id;
   R.fou = (await appel('POST', '/commercial/tiers', 'dir', { type: 'fournisseur', nom: 'Sobraga' })).data.id;
-  R.fam = (await appel('POST', '/commercial/familles', 'dir', { code: 'BOI', nom: 'Boissons', unite_stock_id: R['pièce'], methode_valorisation: 'cmup',
-    taxe_vente_id: R.tva })).data.id;
+  R.fam = (await appel('POST', '/commercial/familles', 'dir', { code: 'BOI', nom: 'Boissons', unite_stock_id: R['pièce'], methode_valorisation: 'cmup' })).data.id;
   const eau = await appel('POST', '/commercial/articles', 'dir', { reference: 'EAU', designation: 'Eau minérale', famille_id: R.fam,
     unite_vente_id: R.carton, coef_vente: 12, prix_vente_indicatif: 6000, suivi_comptable: false });
   assert.equal(eau.status, 201, eau.message);
@@ -127,7 +126,8 @@ const devisValide = async (corps, valideur = 'resp') => {
 
 test('Devis : prix par défaut converti, remise, taxe de vente, totaux ; validation par le responsable', async () => {
   const c = await appel('POST', '/commercial/devis', 'com', { client_id: R.cli, objet: 'Approvisionnement bar',
-    lignes: [{ article_id: R.eau, quantite: 5, remise_pct: 5 }, { article_id: R.liv, quantite: 1, taxe_id: '' }, { article_id: R.eau, unite_id: R['pièce'], quantite: 6 }] });
+    // 062 : la taxe se choisit sur chaque ligne du devis (l'article n'en porte plus).
+    lignes: [{ article_id: R.eau, quantite: 5, remise_pct: 5, taxe_id: R.tva }, { article_id: R.liv, quantite: 1, taxe_id: '' }, { article_id: R.eau, unite_id: R['pièce'], quantite: 6, taxe_id: R.tva }] });
   assert.equal(c.status, 201, c.message);
   const d = c.data;
   assert.match(d.numero, /^DEV-\d{4}-\d{4}$/);

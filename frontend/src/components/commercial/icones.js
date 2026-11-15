@@ -34,4 +34,6 @@ export const ICONES = {
   livraison: 'M1 3h15v13H1zM16 8h4l3 3v5h-7M5.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM18.5 21a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   valideVente: 'M20 6L9 17l-5-5M16 3h5v5',
   valideAchat: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
+  consultation: 'M3 5h12v9H8l-5 4zM15 9h6v9l-4-3h-6v-1',
+  frais: 'M3 7h18v12H3zM3 11h18M7 15h3M16 3l-4 4-4-4',
 };

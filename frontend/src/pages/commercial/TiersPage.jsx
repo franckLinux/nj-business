@@ -18,6 +18,8 @@ function FicheTiers({ type, tiers, onFermer, onEnregistre, modifiable, peutBanqu
     telephone: tiers?.telephone || '', email: tiers?.email || '', contact_nom: tiers?.contact_nom || '',
     contact_telephone: tiers?.contact_telephone || '', contact_email: tiers?.contact_email || '',
     conditions_paiement: tiers?.conditions_paiement || '', actif: tiers ? tiers.actif : true,
+    delai_livraison_jours: tiers?.delai_livraison_jours === null || tiers?.delai_livraison_jours === undefined ? '' : String(tiers.delai_livraison_jours),
+    delai_type: tiers?.delai_type || 'calendaires',
     famille_ids: (tiers?.familles || []).map((x) => x.id),
   });
   const [banque, setBanque] = useState({ banque: tiers?.banque || '', titulaire: tiers?.titulaire || '', rib_iban: tiers?.rib_iban || '', swift: tiers?.swift || '' });
@@ -81,6 +83,15 @@ function FicheTiers({ type, tiers, onFermer, onEnregistre, modifiable, peutBanqu
           <div className="cm-grille">
             <Champ label="Conditions de paiement" id="tcp" pleine aide="Ex. 30 jours fin de mois, comptant à la livraison.">
               <input id="tcp" value={f.conditions_paiement} onChange={set('conditions_paiement')} maxLength={300} disabled={!modifiable} />
+            </Champ>
+            <Champ label="Délai de livraison habituel" id="tdl" aide="Sert à comparer les offres et à suivre les commandes. Vide si inconnu.">
+              <div className="cm-delai">
+                <input id="tdl" inputMode="numeric" value={f.delai_livraison_jours} onChange={(e) => setF((x) => ({ ...x, delai_livraison_jours: e.target.value.replace(/[^0-9]/g, '').slice(0, 3) }))} disabled={!modifiable} placeholder="Ex. 5" />
+                <select value={f.delai_type} onChange={set('delai_type')} disabled={!modifiable} aria-label="Type de jours">
+                  <option value="calendaires">jours calendaires</option>
+                  <option value="ouvres">jours ouvrés</option>
+                </select>
+              </div>
             </Champ>
             <div className="cm-champ cm-pleine">
               <span className="cm-etiquette">Familles d'articles fournies ({f.famille_ids.length})</span>

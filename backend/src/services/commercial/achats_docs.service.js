@@ -474,7 +474,10 @@ const validerReception = async (ctx, id) => {
         observation: d.bl_numero ? `BL ${d.bl_numero}` : '', cout: Number(l.prix_net) / Number(l.coefficient),
         documentType: 'reception', documentId: Number(d.id), ligneId: Number(l.id), userId: ctx.userId });
     }
-    for (const a of articles) await moteur.rejouer(tr, ctx.tenantId, a);
+    // 063 : frais accessoires déjà validés sur le bon → incorporés au coût d'entrée.
+    const autres = (await require('./frais.service').appliquerMouvements(tr, d.bc_id)).filter((x) => !articles.includes(x));
+    for (const a of autres) await moteur.verrouiller(tr, a);
+    for (const a of [...articles, ...autres]) await moteur.rejouer(tr, ctx.tenantId, a);
     await X("UPDATE com_receptions SET statut = 'valide', valide_par = :u, valide_le = NOW() WHERE id = :id", { u: ctx.userId, id: d.id }, tr);
     await auditer(tr, ctx, 'reception', 'COM_RECEPTION_VALIDATION', d.id, { numero: d.numero, nb_lignes: lignes.length });
   });
@@ -710,7 +713,7 @@ const ecrireLignesFacture = async (ctx, tr, f, lignes) => {
   if (!Array.isArray(lignes)) throw new ErreurAchat(400, 'Liste de lignes invalide.');
   await X('DELETE FROM com_facture_fourn_lignes WHERE facture_id = :f', { f: f.id }, tr);
   let tht = 0; let ttx = 0; let n = 0;
-  const taxes = new Map((await Q('SELECT id, code, taux, actif FROM com_taxes WHERE tenant_id = :t', { t: ctx.tenantId }, tr)).map((x) => [Number(x.id), x]));
+  const taxes = new Map((await Q('SELECT id, code, taux, actif, usage FROM com_taxes WHERE tenant_id = :t', { t: ctx.tenantId }, tr)).map((x) => [Number(x.id), x]));
   if (f.type === 'facture') {
     const dispo = new Map((await aFacturer(ctx, f.fournisseur_id, f.id, tr)).map((l) => [l.id, l]));
     const vus = new Set();
@@ -727,6 +730,12 @@ const ecrireLignesFacture = async (ctx, tr, f, lignes) => {
       const taxeId = x.taxe_id === undefined ? l.taxe_id : (x.taxe_id ? entier(x.taxe_id, 'Taxe') : null);
       const tx = taxeId ? taxes.get(taxeId) : null;
       if (taxeId && !tx) throw new ErreurAchat(400, 'Taxe inconnue.');
+      // 062 : la taxe se choisit à la saisie (celle du bon est proposée). Une taxe AUTRE que
+      // celle du bon doit être active et applicable aux achats ; le taux est copié.
+      if (tx && taxeId !== l.taxe_id) {
+        if (!tx.actif) throw new ErreurAchat(400, `La taxe ${tx.code} est désactivée.`);
+        if (tx.usage === 'vente') throw new ErreurAchat(400, `La taxe ${tx.code} est réservée aux ventes.`);
+      }
       const mt = montants(q, pu, remise, tx ? Number(tx.taux) : 0);
       await X(`INSERT INTO com_facture_fourn_lignes (facture_id, tenant_id, ordre, reception_ligne_id, article_id, designation, unite, quantite, prix_unitaire,
                  remise_pct, taxe_id, taxe_code, taxe_taux, montant_ht, montant_taxe)

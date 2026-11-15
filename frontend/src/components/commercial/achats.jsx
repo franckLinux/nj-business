@@ -1,17 +1,22 @@
 // NJ COMMERCIAL — éléments partagés des écrans Achats (livraison B).
 export const STATUTS = {
   brouillon: ['Brouillon', 'cm-off'],
-  examen_achats: ['À autoriser (achats)', 'cm-alerte'],
-  examen_direction: ['À autoriser (direction)', 'cm-alerte'],
-  approuvee: ['Approuvée', 'cm-ok'],
+  examen_achats: ['Soumise', 'cm-alerte'],
+  examen_direction: ['En attente de validation (direction)', 'cm-alerte'],
+  approuvee: ['Validée', 'cm-ok'],
   a_corriger: ['À corriger', 'cm-info'],
   rejetee: ['Rejetée', 'cm-rouge'],
   annulee: ['Annulée', 'cm-off'],
 };
 export const PRIORITES = { basse: 'Basse', normale: 'Normale', haute: 'Haute', urgente: 'Urgente' };
 
-export function StatutDemande({ statut }) {
-  const [l, c] = STATUTS[statut] || [statut, 'cm-off'];
+// État d'approvisionnement d'une demande validée (063).
+export const ETATS_APPRO = {
+  a_commander: ['Validée — à commander', 'cm-ok'], en_cours: ['En cours d\'approvisionnement', 'cm-info'],
+  partielle: ['Partiellement satisfaite', 'cm-alerte'], satisfaite: ['Satisfaite', 'cm-violet'],
+};
+export function StatutDemande({ statut, appro }) {
+  const [l, c] = (statut === 'approuvee' && ETATS_APPRO[appro]) || STATUTS[statut] || [statut, 'cm-off'];
   return <span className={`cm-pastille ${c}`}>{l}</span>;
 }
 

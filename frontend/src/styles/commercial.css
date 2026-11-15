@@ -375,3 +375,65 @@ button.cm-retour { background: none; border: 0; padding: 0; cursor: pointer; fon
 .cm-saisie-integree { animation: cm-apparition .18s ease-out; }
 @keyframes cm-apparition { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .cm-saisie-integree { animation: none; } }
+
+/* 062 — Création rapide d'une unité : bouton « + » à côté du champ, fenêtre modale
+   au-dessus du tiroir (z-index supérieur à .cm-voile). */
+.cm-avec-plus { display: flex; gap: 6px; align-items: stretch; }
+.cm-avec-plus > select { flex: 1; min-width: 0; }
+.cm-btn-plus {
+  flex: 0 0 38px; height: 38px; border-radius: 8px; border: 1.5px solid var(--accent); background: #fff; color: var(--accent);
+  font-size: 20px; font-weight: 800; line-height: 1; cursor: pointer; font-family: inherit;
+}
+.cm-btn-plus:hover:not(:disabled) { background: var(--accent); color: #fff; }
+.cm-btn-plus:disabled { opacity: .45; cursor: not-allowed; border-color: var(--border); color: var(--text-muted); }
+.cm-btn-plus:focus-visible { outline: 3px solid rgba(59, 130, 246, .45); outline-offset: 2px; }
+.cm-modale-voile { position: fixed; inset: 0; background: rgba(15, 23, 42, .5); z-index: 1100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.cm-modale { width: min(480px, 100%); max-height: calc(100vh - 32px); display: flex; flex-direction: column; background: var(--bg); border-radius: 14px; box-shadow: 0 20px 50px rgba(15, 23, 42, .3); overflow: hidden; }
+.cm-modale-tete { background: #fff; border-bottom: 1px solid var(--border); padding: 14px 18px; display: flex; align-items: center; gap: 12px; }
+.cm-modale-tete h3 { margin: 0; flex: 1; font-size: 16px; font-weight: 800; color: var(--brand); }
+.cm-modale-corps { padding: 14px 18px; overflow-y: auto; }
+.cm-modale-pied { background: #fff; border-top: 1px solid var(--border); padding: 12px 18px; display: flex; gap: 8px; justify-content: flex-end; }
+.cm-types { display: flex; flex-wrap: wrap; gap: 4px; }
+.cm-type { font-size: 11.5px; font-weight: 700; border-radius: 6px; padding: 2px 8px; white-space: nowrap; }
+.cm-type-achats { background: #e0f2fe; color: #075985; }
+.cm-type-ventes { background: #dcfce7; color: #166534; }
+.cm-type-stock  { background: #fef3c7; color: #92400e; }
+.cm-applique-tout { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; font-size: 12.5px; }
+.cm-applique-tout select { height: 34px; border: 1.5px solid var(--border); border-radius: 8px; padding: 0 8px; font-family: inherit; font-size: 13px; background: #fff; }
+
+/* ── 063 — Approvisionnement : demande, validation, consultations, frais ── */
+.cm-table-defile { width: 100%; overflow-x: auto; }
+.cm-besoin th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+.cm-besoin td.cm-num, .cm-besoin td { vertical-align: top; }
+.cm-besoin td .cm-qte-input { width: 92px; }
+.cm-besoin select.cm-unite-ligne { margin-left: 0; width: auto; }
+.cm-a-commander { color: #b45309; }
+.cm-lignes td.cm-l-case { width: 32px; }
+.cm-lignes td.cm-l-case input { width: 18px; height: 18px; accent-color: var(--accent); }
+.cm-lignes tr.cm-ligne-off td { color: var(--text-muted); }
+.cm-menu-bouton { position: relative; }
+.cm-menu-liste { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: min(340px, 86vw); background: #fff; border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: 0 14px 34px rgba(15, 23, 42, .18); padding: 6px; display: flex; flex-direction: column; }
+.cm-menu-liste button { text-align: left; background: none; border: 0; border-radius: 8px; padding: 9px 10px; cursor: pointer; font-family: inherit; display: flex; flex-direction: column; gap: 2px; color: var(--text); }
+.cm-menu-liste button:hover, .cm-menu-liste button:focus-visible { background: #eff6ff; outline: none; }
+.cm-menu-liste strong { font-size: 13.5px; }
+.cm-menu-liste span { font-size: 12px; color: var(--text-muted); }
+.cm-delai { display: flex; gap: 8px; }
+.cm-delai input { width: 90px !important; flex: 0 0 90px; }
+.cm-delai select { flex: 1; min-width: 0; }
+.cm-methodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+.cm-methodes label { display: flex; gap: 8px; align-items: flex-start; border: 1.5px solid var(--border); border-radius: 10px; padding: 9px 10px; cursor: pointer; background: #fff; font-size: 13px; }
+.cm-methodes label.cm-choisi { border-color: var(--accent); background: #eff6ff; }
+.cm-methodes input { margin-top: 2px; accent-color: var(--accent); }
+.cm-comparatif tr.cm-retenu td { background: #f0fdf4; }
+.cm-comparatif td input[type=radio] { width: 18px; height: 18px; accent-color: var(--accent); }
+.cm-badge { display: inline-block; margin-left: 6px; font-size: 10.5px; font-weight: 800; border-radius: 5px; padding: 1px 6px; white-space: nowrap; vertical-align: middle; }
+.cm-badge-prix { background: #dcfce7; color: #166534; }
+.cm-badge-delai { background: #e0f2fe; color: #075985; }
+.cm-consultes td { vertical-align: top; }
+@media (max-width: 760px) {
+  .cm-menu-liste { right: auto; left: 0; }
+  .cm-besoin td, .cm-comparatif td, .cm-consultes td { flex: 1 1 40%; text-align: left !important; }
+  .cm-besoin td.cm-l-article, .cm-comparatif td.cm-l-article, .cm-consultes td.cm-l-article { flex: 1 1 calc(100% - 40px); }
+  .cm-besoin td .cm-qte-input { width: 100%; }
+}

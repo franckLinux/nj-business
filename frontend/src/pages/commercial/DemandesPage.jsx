@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Entete, useListe, useDiffere, fmtMontant } from '@/components/commercial/ui';
-import { STATUTS, StatutDemande, Priorite, dateFr, EtatCommande } from '@/components/commercial/achats';
+import { STATUTS, StatutDemande, Priorite, dateFr } from '@/components/commercial/achats';
 
 export default function DemandesPage({ autorisations = false }) {
   const { can } = useApp();
@@ -66,7 +66,7 @@ export default function DemandesPage({ autorisations = false }) {
                   <td style={{ maxWidth: 260 }}>{d.motif ? `${d.motif.slice(0, 70)}${d.motif.length > 70 ? '…' : ''}` : <span className="cm-sous">—</span>}<span className="cm-sous">{d.nb_lignes} article{d.nb_lignes > 1 ? 's' : ''}</span></td>
                   <td className="cm-num">{d.statut === 'brouillon' && !d.nb_soumissions ? '—' : fmtMontant(d.montant_estime)}{d.montant_incomplet && <span className="cm-sous">prix incomplets</span>}</td>
                   <td><Priorite valeur={d.priorite} /></td>
-                  <td><StatutDemande statut={d.statut} />{d.etat_commande && <span style={{ display: 'block', marginTop: 4 }}><EtatCommande etat={d.etat_commande} /></span>}{d.direction_requise && ['examen_achats', 'examen_direction'].includes(d.statut) && <span className="cm-sous">2 étapes</span>}</td>
+                  <td><StatutDemande statut={d.statut} appro={d.etat_appro} />{d.direction_requise && ['examen_achats', 'examen_direction'].includes(d.statut) && <span className="cm-sous">2 étapes</span>}</td>
                 </tr>
               ))}
           </tbody>

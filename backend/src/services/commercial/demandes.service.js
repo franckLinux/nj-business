@@ -13,6 +13,14 @@
 //   • rejet et renvoi exigent un motif ; une demande rejetée est close ;
 //   • la demande ne modifie jamais le stock ; le stock constaté est figé à la soumission ;
 //   • chaque décision va dans com_decisions (ajout seul), chaque modification dans audit_log.
+//
+// Lot 8 (063) — expression de besoin :
+//   • le demandeur ne choisit ni ne voit de fournisseur ; le valideur en propose ;
+//   • par ligne : besoin exprimé, stock disponible, stock de sécurité (seuil d'alerte de
+//     l'article), quantité théorique = max(0, sécurité − (disponible − besoin)),
+//     quantité soumise, puis quantité APPROUVÉE (modifiable par le valideur, 0 = non retenue) ;
+//   • suivi : demandée, approuvée, commandée, réceptionnée, restante ; état
+//     d'approvisionnement : à commander, en cours, partiellement satisfaite, satisfaite.
 const { sequelize } = require('../../models');
 const { getEffectivePermissions, usersAvecPermission } = require('../permission.service');
 const { creerNotification } = require('../notification.service');
@@ -29,9 +37,11 @@ class ErreurDemande extends Error {
 }
 
 const STATUTS = {
-  brouillon: 'Brouillon', examen_achats: 'En attente d\'autorisation (achats)', examen_direction: 'En attente d\'autorisation (direction)',
-  approuvee: 'Approuvée', a_corriger: 'À corriger', rejetee: 'Rejetée', annulee: 'Annulée',
+  brouillon: 'Brouillon', examen_achats: 'Soumise (responsable des achats)', examen_direction: 'En attente de validation (direction)',
+  approuvee: 'Validée', a_corriger: 'À corriger', rejetee: 'Rejetée', annulee: 'Annulée',
 };
+// État d'approvisionnement d'une demande validée (063).
+const APPRO = { a_commander: 'Validée — à commander', en_cours: 'En cours d\'approvisionnement', partielle: 'Partiellement satisfaite', satisfaite: 'Satisfaite' };
 const PRIORITES = ['basse', 'normale', 'haute', 'urgente'];
 const MODIFIABLES = ['brouillon', 'a_corriger'];
 const EN_EXAMEN = ['examen_achats', 'examen_direction'];
@@ -95,11 +105,24 @@ const parametres = async (tenantId, tr) => {
 };
 
 // Stock d'une ligne pour le magasin de la demande (aucune réservation gérée).
+// 063 : stock de sécurité = seuil d'alerte de l'article (unité de stock) ;
+// théorique = max(0, sécurité − différence de stock), différence = disponible − demandé.
 const evaluerStock = async (tenantId, articleId, magasinId, qte) => {
+  const [a] = await Q('SELECT seuil_alerte, suivi_stock FROM com_articles WHERE id = :a', { a: articleId });
+  const securite = a?.seuil_alerte === null || a?.seuil_alerte === undefined ? 0 : Number(a.seuil_alerte);
   const s = (await stockArticle(tenantId, articleId, magasinId))[0];
-  if (!s || !s.suivi) return { suivi: false, disponible: null, demande: qte, a_approvisionner: null, couvert: false };
+  if (!s || !s.suivi) {
+    // Sans mouvement : stock inconnu (jamais 0 inventé) ; le besoin s'ajoute alors à la sécurité.
+    // L'article non suivi (prestation) se commande tel que demandé.
+    return { suivi: false, disponible: null, securite: a?.suivi_stock ? securite : null, demande: qte,
+      a_approvisionner: null, theorique: a?.suivi_stock ? Math.max(0, Math.round((securite + qte) * 1000) / 1000) : qte, couvert: false };
+  }
   const dispo = Number(s.quantite);
-  return { suivi: true, disponible: dispo, demande: qte, a_approvisionner: Math.max(0, Math.round((qte - dispo) * 1000) / 1000), couvert: dispo >= qte, au: s.dernier_mouvement };
+  const difference = Math.round((dispo - qte) * 1000) / 1000;
+  return { suivi: true, disponible: dispo, securite, demande: qte, difference,
+    a_approvisionner: Math.max(0, Math.round((qte - dispo) * 1000) / 1000),
+    // Couvert : le stock sert la demande ET reste au moins au niveau de sécurité (rien à commander).
+    theorique: Math.max(0, Math.round((securite - difference) * 1000) / 1000), couvert: difference >= securite, au: s.dernier_mouvement };
 };
 
 // ── Lecture ──────────────────────────────────────────────────────────────
@@ -114,7 +137,17 @@ const SQL_DEMANDE = `
                      SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id
                       WHERE bl.demande_ligne_id = l.id AND b.statut = 'emis'), 0)) THEN 'commandee'
               WHEN EXISTS (SELECT 1 FROM com_bons_commande b WHERE b.demande_id = d.id AND b.statut = 'emis') THEN 'partielle'
-              ELSE 'a_commander' END AS etat_commande
+              ELSE 'a_commander' END AS etat_commande,
+         -- 063 : état d'approvisionnement (réceptions validées, bons, consultation en cours).
+         CASE WHEN d.statut <> 'approuvee' THEN NULL
+              WHEN NOT EXISTS (SELECT 1 FROM com_demande_lignes l WHERE l.demande_id = d.id AND l.quantite > COALESCE((
+                     SELECT SUM(rl.quantite) FROM com_reception_lignes rl JOIN com_receptions r ON r.id = rl.reception_id
+                       JOIN com_bc_lignes bl ON bl.id = rl.bc_ligne_id WHERE bl.demande_ligne_id = l.id AND r.statut = 'valide'), 0)) THEN 'satisfaite'
+              WHEN EXISTS (SELECT 1 FROM com_reception_lignes rl JOIN com_receptions r ON r.id = rl.reception_id JOIN com_bc_lignes bl ON bl.id = rl.bc_ligne_id
+                            JOIN com_demande_lignes l ON l.id = bl.demande_ligne_id WHERE l.demande_id = d.id AND r.statut = 'valide') THEN 'partielle'
+              WHEN EXISTS (SELECT 1 FROM com_bons_commande b WHERE b.demande_id = d.id AND b.statut IN ('brouillon', 'emis'))
+                OR EXISTS (SELECT 1 FROM com_consultations c WHERE c.demande_id = d.id AND c.statut IN ('brouillon', 'lancee')) THEN 'en_cours'
+              ELSE 'a_commander' END AS etat_appro
     FROM com_demandes d
     JOIN users u ON u.id = d.demandeur_id
     JOIN com_magasins m ON m.id = d.magasin_id
@@ -124,7 +157,7 @@ const formater = (d) => ({
   ...d, id: Number(d.id), magasin_id: Number(d.magasin_id),
   fournisseur_propose_id: d.fournisseur_propose_id ? Number(d.fournisseur_propose_id) : null,
   montant_estime: Number(d.montant_estime), seuil_applique: d.seuil_applique === null ? null : Number(d.seuil_applique),
-  statut_libelle: STATUTS[d.statut], date_demande: String(d.date_demande instanceof Date ? d.date_demande.toISOString() : d.date_demande).slice(0, 10),
+  statut_libelle: d.statut === 'approuvee' && d.etat_appro ? APPRO[d.etat_appro] : STATUTS[d.statut], date_demande: String(d.date_demande instanceof Date ? d.date_demande.toISOString() : d.date_demande).slice(0, 10),
 });
 
 // Qui voit quoi : ses demandes ; tout avec voir_tout ; sinon celles de sa file d'examen.
@@ -233,22 +266,44 @@ const lire = async (ctx, id) => {
        JOIN com_familles fa ON fa.id = a.famille_id
        LEFT JOIN registre_tiers r ON r.id = l.fournisseur_id
       WHERE l.demande_id = :id ORDER BY l.ordre, l.id`, { id: d.id });
+  // 063 : le demandeur ne se voit proposer aucun fournisseur ; seuls ceux qui valident ou achètent les voient.
+  const voitFournisseurs = ['com.da.approuver', 'com.da.approuver_direction', 'com.bc.preparer', 'com.consultations.gerer'].some((c) => ctx.peut(c));
+  const suivis = new Map((await Q(
+    `SELECT l.id,
+            COALESCE((SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id WHERE bl.demande_ligne_id = l.id AND b.statut = 'emis'), 0) AS commandee,
+            COALESCE((SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id WHERE bl.demande_ligne_id = l.id AND b.statut = 'brouillon'), 0) AS en_preparation,
+            COALESCE((SELECT SUM(rl.quantite) FROM com_reception_lignes rl JOIN com_receptions r ON r.id = rl.reception_id JOIN com_bc_lignes bl ON bl.id = rl.bc_ligne_id
+                       WHERE bl.demande_ligne_id = l.id AND r.statut = 'valide'), 0) AS recue
+       FROM com_demande_lignes l WHERE l.demande_id = :d`, { d: d.id })).map((r) => [Number(r.id), r]));
+  const r3 = (n) => Math.round(n * 1000) / 1000;
   const out = [];
   for (const l of lignes) {
     const qte = Number(l.quantite);
     const k = Number(l.coefficient || 1);
-    const qteStock = Math.round(qte * k * 1000) / 1000;
+    const soumise = Number(l.quantite_demandee);
+    // Quantité théorique calculée sur le BESOIN exprimé (demandée), pas sur la quantité soumise :
+    // le responsable compare ainsi ce qu'il faudrait commander et ce qui lui est soumis.
+    const s = await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, r3(Number(l.quantite_besoin) * k));
+    const enLigne = (v) => (v === null || v === undefined ? null : r3(v / k));
+    const sv = suivis.get(Number(l.id)) || {};
     out.push({
-      ...l, id: Number(l.id), article_id: Number(l.article_id), quantite: qte, coefficient: k, quantite_stock: qteStock,
+      ...l, id: Number(l.id), article_id: Number(l.article_id), quantite: qte, coefficient: k, quantite_stock: r3(qte * k),
+      quantite_besoin: Number(l.quantite_besoin), quantite_demandee: soumise, quantite_approuvee: qte,
       unite_id: l.unite_id ? Number(l.unite_id) : null,
-      fournisseur_id: l.fournisseur_id ? Number(l.fournisseur_id) : null,
+      fournisseur_id: voitFournisseurs && l.fournisseur_id ? Number(l.fournisseur_id) : null,
+      fournisseur_nom: voitFournisseurs ? l.fournisseur_nom : null,
       prix_estime: l.prix_estime === null ? null : Number(l.prix_estime),
-      fournisseurs_proposes: l.fournisseurs_proposes.map((f) => ({ ...f, id: Number(f.id) })),
-      stock_actuel: await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, qteStock),
+      fournisseurs_proposes: voitFournisseurs ? l.fournisseurs_proposes.map((f) => ({ ...f, id: Number(f.id) })) : [],
+      stock_actuel: s,
+      // Mêmes chiffres dans l'unité de la ligne (celle de la demande).
+      stock_ligne: { suivi: s.suivi, disponible: enLigne(s.disponible), securite: enLigne(s.securite),
+        theorique: s.theorique === null ? null : Math.ceil(r3(s.theorique / k) * 1000 - 1e-6) / 1000 },
+      suivi: { demandee: soumise, approuvee: qte, commandee: Number(sv.commandee || 0), en_preparation: Number(sv.en_preparation || 0),
+        recue: Number(sv.recue || 0), restante: Math.max(0, r3(qte - Number(sv.commandee || 0))) },
     });
   }
   const decisions = await Q(
-    `SELECT id, etape, decision, par_nom, le, commentaire, statut_avant, statut_apres, montant FROM com_decisions WHERE demande_id = :id ORDER BY le, id`,
+    `SELECT id, etape, decision, par_nom, le, commentaire, statut_avant, statut_apres, montant, details FROM com_decisions WHERE demande_id = :id ORDER BY le, id`,
     { id: d.id });
   const historique = await Q(
     `SELECT a.created_at AS le, a.action, u.username AS par_nom, a.nouvelle_valeur
@@ -261,14 +316,19 @@ const lire = async (ctx, id) => {
       WHERE x.tenant_id = :t AND x.objet_type = 'demande' AND x.objet_id = :id ORDER BY x.ajoute_le`,
     { t: ctx.tenantId, id: d.id });
   const bons = await require('./bons.service').bonsDeDemande(ctx.tenantId, d.id);
+  const consultations = (await Q(`SELECT id, numero, statut, date_limite, cree_le FROM com_consultations WHERE demande_id = :d ORDER BY id DESC`, { d: d.id }))
+    .map((c) => ({ ...c, id: Number(c.id) }));
+  const consultationEnCours = consultations.find((c) => ['brouillon', 'lancee'].includes(c.statut));
   const resteACommander = d.statut === 'approuvee' && out.some((l) => l.quantite > 0)
     && (await require('./bons.service').restes(ctx.tenantId, d.id)).some((l) => l.reste > 0);
   return {
-    ...d, lignes: out, bons,
+    ...d, lignes: out, bons, consultations,
     decisions: decisions.map((x) => ({ ...x, id: Number(x.id), montant: x.montant === null ? null : Number(x.montant) })),
     historique,
     documents: documents.map((x) => ({ ...x, id: Number(x.id), taille: Number(x.taille) })),
-    droits: { ...droits(ctx, d), preparer_bc: resteACommander && ctx.peut('com.bc.preparer') },
+    droits: { ...droits(ctx, d), preparer_bc: resteACommander && ctx.peut('com.bc.preparer'),
+      consulter: resteACommander && !consultationEnCours && ctx.peut('com.consultations.gerer'),
+      consultation_en_cours: consultationEnCours ? consultationEnCours.id : null },
   };
 };
 
@@ -281,11 +341,8 @@ const valeursEntete = async (ctx, b, tr) => {
   if (!dansPerimetre(ctx, magasinId)) throw new ErreurDemande(403, 'Ce magasin n\'appartient pas à vos agences.');
   const priorite = txt(b.priorite) || 'normale';
   if (!PRIORITES.includes(priorite)) throw new ErreurDemande(400, 'Priorité inconnue.');
-  let fournisseur = null;
-  if (b.fournisseur_propose_id) {
-    fournisseur = entier(b.fournisseur_propose_id, 'Fournisseur');
-    await verifierFournisseur(ctx, fournisseur, tr);
-  }
+  // 063 : à l'expression du besoin, aucun fournisseur (choisi plus tard, à la validation).
+  const fournisseur = null;
   const champ = (v, max, nom) => { const s = txt(v); if (s.length > max) throw new ErreurDemande(400, `${nom} : ${max} caractères au plus.`); return s; };
   return {
     magasin_id: magasinId, priorite, fournisseur_propose_id: fournisseur,
@@ -318,20 +375,22 @@ const ecrireLignes = async (ctx, tr, demandeId, lignes) => {
     const [u] = await Q(`SELECT u.id, u.code, u.decimales, au.coefficient FROM com_article_unites au JOIN com_unites u ON u.id = au.unite_id
                           WHERE au.article_id = :a AND au.unite_id = :u`, { a: aid, u: uid }, tr);
     if (!u) throw new ErreurDemande(400, `« ${a.designation} » ne se compte pas dans cette unité.`);
-    const qte = quantite(l.quantite);
+    const qte = quantite(l.quantite);   // quantité soumise (« à la soumission »)
+    const besoin = l.quantite_besoin === undefined || l.quantite_besoin === null || txt(l.quantite_besoin) === '' ? qte
+      : (() => { const n = Number(String(l.quantite_besoin).replace(/\s/g, '').replace(',', '.')); if (!Number.isFinite(n) || n < 0 || n > 1e12) throw new ErreurDemande(400, 'Quantité demandée invalide.'); return Math.round(n * 1000) / 1000; })();
     if (Math.round(qte * 10 ** Number(u.decimales)) !== qte * 10 ** Number(u.decimales)) {
       throw new ErreurDemande(400, `« ${a.designation} » : ${u.code} se compte avec ${Number(u.decimales) ? `${u.decimales} décimale(s) au plus` : 'des nombres entiers'}.`);
     }
     const [ua] = await Q('SELECT coefficient FROM com_article_unites WHERE article_id = :a AND unite_id = :u', { a: aid, u: a.unite_achat_id }, tr);
     const prix = a.prix_achat_indicatif === null ? null
       : Math.round(Number(a.prix_achat_indicatif) / Number(ua?.coefficient || 1) * Number(u.coefficient) * 100) / 100;
-    let fid = null;
-    if (l.fournisseur_id) { fid = entier(l.fournisseur_id, 'Fournisseur'); await verifierFournisseur(ctx, fid, tr); }
+    const fid = null;   // 063 : jamais de fournisseur à l'expression du besoin
     const commentaire = txt(l.commentaire);
     if (commentaire.length > 500) throw new ErreurDemande(400, 'Commentaire de ligne : 500 caractères au plus.');
-    await X(`INSERT INTO com_demande_lignes (demande_id, tenant_id, ordre, article_id, quantite, unite, unite_id, coefficient, fournisseur_id, prix_estime, commentaire)
-             VALUES (:d, :t, :o, :a, :q, :u, :uid, :k, :f, :p, :c)`,
-    { d: demandeId, t: ctx.tenantId, o: i, a: aid, q: qte, u: u.code, uid: u.id, k: Number(u.coefficient), f: fid, p: prix, c: commentaire }, tr);
+    await X(`INSERT INTO com_demande_lignes (demande_id, tenant_id, ordre, article_id, quantite, quantite_besoin, quantite_demandee, unite, unite_id, coefficient,
+               fournisseur_id, prix_estime, commentaire)
+             VALUES (:d, :t, :o, :a, :q, :b, :q, :u, :uid, :k, :f, :p, :c)`,
+    { d: demandeId, t: ctx.tenantId, o: i, a: aid, q: qte, b: besoin, u: u.code, uid: u.id, k: Number(u.coefficient), f: fid, p: prix, c: commentaire }, tr);
   }
   return lignes.length;
 };
@@ -381,10 +440,11 @@ const supprimer = async (ctx, id) => sequelize.transaction(async (tr) => {
 });
 
 // ── Circuit ──────────────────────────────────────────────────────────────
-const decision = (tr, ctx, d, etape, dec, apres, commentaire = '', montant = null) => X(
-  `INSERT INTO com_decisions (tenant_id, demande_id, etape, decision, par, par_nom, commentaire, statut_avant, statut_apres, montant)
-   VALUES (:t, :d, :e, :dec, :u, :n, :c, :av, :ap, :m)`,
-  { t: ctx.tenantId, d: d.id, e: etape, dec, u: ctx.userId, n: ctx.username, c: commentaire, av: d.statut, ap: apres, m: montant }, tr);
+const decision = (tr, ctx, d, etape, dec, apres, commentaire = '', montant = null, details = null) => X(
+  `INSERT INTO com_decisions (tenant_id, demande_id, etape, decision, par, par_nom, commentaire, statut_avant, statut_apres, montant, details)
+   VALUES (:t, :d, :e, :dec, :u, :n, :c, :av, :ap, :m, CAST(:det AS jsonb))`,
+  { t: ctx.tenantId, d: d.id, e: etape, dec, u: ctx.userId, n: ctx.username, c: commentaire, av: d.statut, ap: apres, m: montant,
+    det: details ? JSON.stringify(details) : null }, tr);
 
 const soumettre = async (ctx, id, body = {}) => {
   const res = await sequelize.transaction(async (tr) => {
@@ -401,7 +461,7 @@ const soumettre = async (ctx, id, body = {}) => {
     if (txt(d.motif).length < 3) manque.push('le motif de la demande');
     if (!d.magasin_actif) manque.push('un magasin actif');
     const lignes = await Q(
-      `SELECT l.id, l.article_id, l.quantite, l.coefficient, l.prix_estime, a.actif, a.designation FROM com_demande_lignes l
+      `SELECT l.id, l.article_id, l.quantite_demandee AS quantite, l.quantite_besoin, l.coefficient, l.prix_estime, a.actif, a.designation FROM com_demande_lignes l
          JOIN com_articles a ON a.id = l.article_id WHERE l.demande_id = :id ORDER BY l.ordre`, { id: d.id }, tr);
     if (!lignes.length) manque.push('au moins un article');
     if (manque.length) throw new ErreurDemande(400, `Pour soumettre, indiquez ${manque.join(', ')}.`);
@@ -412,8 +472,9 @@ const soumettre = async (ctx, id, body = {}) => {
     let montant = 0; let incomplet = false; const couverts = [];
     for (const l of lignes) {
       const qte = Number(l.quantite);
-      const s = await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, Math.round(qte * Number(l.coefficient || 1) * 1000) / 1000);
-      await X('UPDATE com_demande_lignes SET stock_constate = CAST(:s AS jsonb) WHERE id = :id',
+      const s = await evaluerStock(ctx.tenantId, l.article_id, d.magasin_id, Math.round(Number(l.quantite_besoin) * Number(l.coefficient || 1) * 1000) / 1000);
+      // Quantité approuvée remise à la quantité soumise (une nouvelle soumission repart de zéro).
+      await X('UPDATE com_demande_lignes SET stock_constate = CAST(:s AS jsonb), quantite = quantite_demandee WHERE id = :id',
         { s: JSON.stringify({ ...s, au: new Date().toISOString() }), id: l.id }, tr);
       if (s.couvert) couverts.push(l.designation);
       if (l.prix_estime === null) incomplet = true; else montant += qte * Number(l.prix_estime);
@@ -451,6 +512,27 @@ const decider = async (ctx, id, body = {}) => {
     if (d.demandeur_id === ctx.userId) throw new ErreurDemande(403, 'Vous ne pouvez pas décider sur votre propre demande.');
     if (!ctx.peut(etape[1])) throw new ErreurDemande(403, d.statut === 'examen_achats'
       ? 'Permission requise : approuver les demandes (étape achats).' : 'Permission requise : approuver les demandes (étape direction).');
+    // 063 : le valideur fixe les quantités approuvées (0 = non retenue) et propose les fournisseurs.
+    let details = null;
+    if (choix === 'approuver' && Array.isArray(body.lignes) && body.lignes.length) {
+      const actuelles = await Q('SELECT l.id, l.quantite, l.quantite_demandee, l.fournisseur_id, l.unite, a.designation, u.decimales FROM com_demande_lignes l JOIN com_articles a ON a.id = l.article_id LEFT JOIN com_unites u ON u.id = l.unite_id WHERE l.demande_id = :d', { d: d.id }, tr);
+      details = [];
+      for (const x of body.lignes) {
+        const l = actuelles.find((y) => Number(y.id) === Number(x.id));
+        if (!l) throw new ErreurDemande(400, 'Ligne inconnue dans cette demande.');
+        const q = Number(String(x.quantite ?? l.quantite).replace(/\s/g, '').replace(',', '.'));
+        if (!Number.isFinite(q) || q < 0 || q > 1e12) throw new ErreurDemande(400, `« ${l.designation} » : quantité approuvée invalide.`);
+        const dec = Number(l.decimales ?? 3);
+        if (Math.round(q * 10 ** dec) !== q * 10 ** dec) throw new ErreurDemande(400, `« ${l.designation} » : ${l.unite} se compte avec ${dec ? `${dec} décimale(s) au plus` : 'des nombres entiers'}.`);
+        let fid = x.fournisseur_id === undefined ? (l.fournisseur_id ? Number(l.fournisseur_id) : null) : null;
+        if (x.fournisseur_id) { fid = entier(x.fournisseur_id, 'Fournisseur'); await verifierFournisseur(ctx, fid, tr); }
+        await X('UPDATE com_demande_lignes SET quantite = :q, fournisseur_id = :f WHERE id = :id', { q: Math.round(q * 1000) / 1000, f: fid, id: l.id }, tr);
+        details.push({ ligne: Number(l.id), article: l.designation, soumise: Number(l.quantite_demandee), approuvee: Math.round(q * 1000) / 1000, fournisseur_id: fid });
+      }
+      const [reste] = await Q('SELECT COUNT(*)::int AS n FROM com_demande_lignes WHERE demande_id = :d AND quantite > 0', { d: d.id }, tr);
+      if (!reste.n) throw new ErreurDemande(400, 'Aucune quantité approuvée : rejetez la demande avec un motif plutôt que de l\'approuver à zéro.');
+      await auditer(tr, ctx, 'COM_DA_QUANTITES_APPROUVEES', d.id, null, { lignes: details });
+    }
     let apres; let nomEtape = etape[0];
     if (choix === 'rejeter') apres = 'rejetee';
     else if (choix === 'renvoyer') apres = 'a_corriger';
@@ -460,7 +542,7 @@ const decider = async (ctx, id, body = {}) => {
     } else apres = 'approuvee';
     await X(`UPDATE com_demandes SET statut = :s, decidee_le = CASE WHEN :s IN ('approuvee', 'rejetee') THEN NOW() ELSE decidee_le END,
                modifie_le = NOW() WHERE id = :id`, { s: apres, id: d.id }, tr);
-    await decision(tr, ctx, d, nomEtape, { approuver: 'approuvee', renvoyer: 'renvoyee', rejeter: 'rejetee' }[choix], apres, commentaire, d.montant_estime);
+    await decision(tr, ctx, d, nomEtape, { approuver: 'approuvee', renvoyer: 'renvoyee', rejeter: 'rejetee' }[choix], apres, commentaire, d.montant_estime, details);
     return { id: d.id, apres };
   });
   const lu = await lire(ctx, res.id);
@@ -586,6 +668,6 @@ const notifierAuteur = async (ctx, d, message) => {
 
 module.exports = {
   perimetreMagasins, dansPerimetre, sqlPerimetre,
-  ErreurDemande, STATUTS, contexte, lister, compteurs, lire, creer, modifier, supprimer, soumettre, decider, annuler,
+  ErreurDemande, STATUTS, APPRO, contexte, numeroter, auditer, verifierFournisseur, lister, compteurs, lire, creer, modifier, supprimer, soumettre, decider, annuler,
   joindre, retirerPiece, lirePiece, evaluerStock,
 };

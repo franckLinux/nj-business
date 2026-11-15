@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { Entete, useListe, useDiffere, fmtMontant } from '@/components/commercial/ui';
 import { STATUTS_BC, StatutBon, Priorite, dateFr } from '@/components/commercial/achats';
+import { SuiviBon } from '@/components/commercial/appro';
 
 function ACommander() {
   const navigate = useNavigate();
@@ -80,7 +81,7 @@ function Liste() {
                     <td>{b.demande_numero}<span className="cm-sous">{b.demandeur_nom}</span></td>
                     <td>{b.magasin_code}</td>
                     <td className="cm-num">{fmtMontant(b.total_ttc, b.devise)}</td>
-                    <td><StatutBon statut={b.statut} />{b.remplace_par_numero && <span className="cm-sous">→ {b.remplace_par_numero}</span>}</td>
+                    <td>{b.statut === 'emis' && b.suivi ? <SuiviBon suivi={b.suivi} /> : <StatutBon statut={b.statut} />}{b.remplace_par_numero && <span className="cm-sous">→ {b.remplace_par_numero}</span>}</td>
                   </tr>
                 ))}
           </tbody>

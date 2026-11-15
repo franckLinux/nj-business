@@ -1,18 +1,20 @@
-// NJ COMMERCIAL — saisie d'une demande d'achat (nouvelle, brouillon ou à corriger).
+// NJ COMMERCIAL — saisie d'une demande d'achat (expression de besoin : nouvelle, brouillon ou à corriger).
 // Le stock du magasin s'affiche en direct sur chaque ligne ; il n'est jamais inventé.
-import { useEffect, useMemo, useState } from 'react';
+// 063 : aucun fournisseur n'est proposé au demandeur (le choix se fait à la validation).
+// Quantité à commander = max(0, demandée + stock de sécurité − stock disponible) ; le stock
+// de sécurité est le seuil d'alerte de l'article. La quantité soumise la reprend, modifiable.
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
 import { Section, Champ } from '@/components/commercial/ui';
-import { EncartStock, PRIORITES } from '@/components/commercial/achats';
+import { PRIORITES } from '@/components/commercial/achats';
 
-const evaluer = (s, qte) => {
-  if (!s) return null;
-  if (!s.suivi) return { suivi: false };
-  const q = Number(String(qte).replace(',', '.')) || 0;
-  return { suivi: true, disponible: s.quantite, couvert: s.quantite >= q && q > 0, a_approvisionner: Math.max(0, Math.round((q - s.quantite) * 1000) / 1000) };
-};
+const num = (v) => Number(String(v ?? '').replace(/\s/g, '').replace(',', '.')) || 0;
+const r3 = (n) => Math.round(n * 1000) / 1000;
+const plafond = (n, dec) => Math.ceil(n * 10 ** dec - 1e-6) / 10 ** dec;
+const fq = (n) => (n === null || n === undefined ? '—' : Number(n).toLocaleString('fr-FR', { maximumFractionDigits: 3 }));
+const virgule = (n) => String(n).replace('.', ',');
 
 export default function DemandeFormPage() {
   const { id } = useParams();
@@ -22,34 +24,33 @@ export default function DemandeFormPage() {
   const [f, setF] = useState(null);
   const [lignes, setLignes] = useState([]);
   const [stocks, setStocks] = useState({});   // `${article}-${magasin}` → stock du magasin
-  const [details, setDetails] = useState({}); // article → { fournisseurs proposés }
+  const [details, setDetails] = useState({}); // article → { unité, prix indicatif }
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   const [numero, setNumero] = useState('');
 
   useEffect(() => {
     (async () => {
-      const [ar, ma, fo] = await Promise.all([
-        api.get('/commercial/articles?actifs=1'), api.get('/commercial/magasins?actifs=1&perimetre=1'), api.get('/commercial/tiers?type=fournisseur&actifs=1'),
+      const [ar, ma, un] = await Promise.all([
+        api.get('/commercial/articles?actifs=1'), api.get('/commercial/magasins?actifs=1&perimetre=1'), api.get('/commercial/unites'),
       ]);
-      const r = { articles: ar?.error ? [] : ar, magasins: ma?.error ? [] : ma, fournisseurs: fo?.error ? [] : fo };
+      const r = { articles: ar?.error ? [] : ar, magasins: ma?.error ? [] : ma, unites: un?.error ? [] : un };
       setRefs(r);
       if (id) {
         const d = await api.get(`/commercial/demandes/${id}`);
         if (d?.error) { setErreur(d.error); return; }
         if (!d.droits.modifier) { navigate(`/commercial/demandes/${id}`, { replace: true }); return; }
         setNumero(d.numero);
-        setF({ magasin_id: String(d.magasin_id), service: d.service, priorite: d.priorite, motif: d.motif,
-          fournisseur_propose_id: d.fournisseur_propose_id ? String(d.fournisseur_propose_id) : '', commentaire: d.commentaire, justification_stock: d.justification_stock });
-        setLignes(d.lignes.map((l) => ({ article_id: l.article_id, quantite: String(l.quantite).replace('.', ','), unite_id: l.unite_id ? String(l.unite_id) : '',
-          fournisseur_id: l.fournisseur_id ? String(l.fournisseur_id) : '', commentaire: l.commentaire })));
+        setF({ magasin_id: String(d.magasin_id), service: d.service, priorite: d.priorite, motif: d.motif, commentaire: d.commentaire, justification_stock: d.justification_stock });
+        setLignes(d.lignes.map((l) => ({ article_id: l.article_id, besoin: virgule(l.quantite_besoin), quantite: virgule(l.quantite_demandee),
+          manuel: true, unite_id: l.unite_id ? String(l.unite_id) : '', commentaire: l.commentaire })));
       } else {
-        setF({ magasin_id: r.magasins.length === 1 ? String(r.magasins[0].id) : '', service: '', priorite: 'normale', motif: '', fournisseur_propose_id: '', commentaire: '', justification_stock: '' });
+        setF({ magasin_id: r.magasins.length === 1 ? String(r.magasins[0].id) : '', service: '', priorite: 'normale', motif: '', commentaire: '', justification_stock: '' });
       }
     })();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Stock et fournisseurs proposés de chaque article (relus si le magasin change).
+  // Stock de chaque article dans le magasin choisi (relu si le magasin change).
   useEffect(() => {
     if (!f?.magasin_id) return;
     lignes.forEach((l) => {
@@ -64,22 +65,21 @@ export default function DemandeFormPage() {
         setDetails((d) => ({ ...d, [l.article_id]: { chargement: true } }));
         api.get(`/commercial/articles/${l.article_id}`).then((r) => {
           if (r?.error) return;
-          const prop = [...r.fournisseurs_directs, ...r.fournisseurs_famille].filter((x, i, t) => t.findIndex((y) => y.id === x.id) === i);
-          setDetails((d) => ({ ...d, [l.article_id]: { proposes: prop, unite: r.unite, prix: r.prix_achat_indicatif } }));
+          setDetails((d) => ({ ...d, [l.article_id]: { unite: r.unite, prix: r.prix_achat_indicatif } }));
         });
       }
     });
   }, [lignes, f?.magasin_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
-  const setLigne = (i, k, v) => setLignes((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v } : l)));
+  const setLigne = (i, k, v) => setLignes((ls) => ls.map((l, j) => (j === i ? { ...l, [k]: v, ...(k === 'quantite' ? { manuel: true } : {}) } : l)));
   const ajouter = (e) => {
     const aid = Number(e.target.value);
     e.target.value = '';
     if (!aid) return;
     if (lignes.some((l) => l.article_id === aid)) { toast('Cet article est déjà dans la demande : modifiez sa quantité.', 'error'); return; }
     const a = (refs?.articles || []).find((x) => x.id === aid);
-    setLignes((ls) => [...ls, { article_id: aid, quantite: '1', unite_id: a ? String(a.unite_achat_id) : '', fournisseur_id: '', commentaire: '' }]);
+    setLignes((ls) => [...ls, { article_id: aid, besoin: '1', quantite: '', manuel: false, unite_id: a ? String(a.unite_achat_id) : '', commentaire: '' }]);
   };
 
   const articles = refs?.articles || [];
@@ -89,9 +89,32 @@ export default function DemandeFormPage() {
     const a = article(l.article_id);
     return a?.unites?.find((u) => String(u.id) === String(l.unite_id || a.unite_achat_id)) || { code: a?.unite, coefficient: 1 };
   };
-  const qteStock = (l) => Math.round((Number(String(l.quantite).replace(',', '.')) || 0) * uniteLigne(l).coefficient * 1000) / 1000;
-  const couverts = useMemo(() => lignes.filter((l) => evaluer(stocks[`${l.article_id}-${f?.magasin_id}`], qteStock(l))?.couvert)
-    .map((l) => article(l.article_id)?.designation), [lignes, stocks, f?.magasin_id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const decimalesLigne = (l) => {
+    const u = (refs?.unites || []).find((x) => String(x.id) === String(l.unite_id || article(l.article_id)?.unite_achat_id));
+    return u ? u.decimales : 3;
+  };
+  // Chiffres d'une ligne, dans l'unité de la ligne : stock, sécurité, quantité à commander.
+  const calcul = (l) => {
+    const a = article(l.article_id);
+    const k = uniteLigne(l).coefficient || 1;
+    const s = f?.magasin_id ? stocks[`${l.article_id}-${f.magasin_id}`] : null;
+    const besoin = num(l.besoin);
+    if (a && !a.suivi_stock) return { suivi_article: false, disponible: null, securite: null, theorique: besoin, charge: true };
+    const securite = a?.seuil_alerte === null || a?.seuil_alerte === undefined ? 0 : r3(Number(a.seuil_alerte) / k);
+    const disponible = s && s.suivi ? r3(s.quantite / k) : null;
+    const theorique = Math.max(0, plafond(besoin + securite - (disponible ?? 0), 3));
+    return { suivi_article: true, suivi: Boolean(s?.suivi), disponible, securite, theorique, charge: s !== null && s !== undefined };
+  };
+  // Quantité soumise : reprend la quantité à commander (arrondie à l'unité) tant qu'on ne l'a pas changée.
+  const soumise = (l) => {
+    if (l.manuel) return l.quantite;
+    const c = calcul(l);
+    const t = plafond(c.theorique, decimalesLigne(l));
+    return virgule(t > 0 ? t : num(l.besoin));
+  };
+  // Stock suffisant : la demande est servie ET le stock reste au niveau de sécurité (rien à commander).
+  const couverts = lignes.filter((l) => { const c = calcul(l); return c.suivi_article && c.suivi && num(l.besoin) > 0 && c.theorique === 0; })
+    .map((l) => article(l.article_id)?.designation);
   // Prix indicatif : saisi par unité d'achat, ramené à l'unité de la ligne.
   const prixLigne = (l) => {
     const a = article(l.article_id);
@@ -101,12 +124,12 @@ export default function DemandeFormPage() {
   };
   const estimation = lignes.reduce((s, l) => {
     const p = prixLigne(l);
-    const q = Number(String(l.quantite).replace(',', '.')) || 0;
+    const q = num(soumise(l));
     return p === null ? s : s + p * q;
   }, 0);
 
-  const corps = () => ({ ...f, fournisseur_propose_id: f.fournisseur_propose_id || null,
-    lignes: lignes.map((l) => ({ article_id: l.article_id, quantite: l.quantite, unite_id: l.unite_id || null, fournisseur_id: l.fournisseur_id || null, commentaire: l.commentaire })) });
+  const corps = () => ({ ...f,
+    lignes: lignes.map((l) => ({ article_id: l.article_id, quantite_besoin: l.besoin, quantite: soumise(l), unite_id: l.unite_id || null, commentaire: l.commentaire })) });
   const enregistrer = async (aussiSoumettre) => {
     setEnCours(true); setErreur('');
     const r = id ? await api.put(`/commercial/demandes/${id}`, corps()) : await api.post('/commercial/demandes', corps());
@@ -148,12 +171,6 @@ export default function DemandeFormPage() {
           <Champ label="Priorité" id="dp">
             <select id="dp" value={f.priorite} onChange={set('priorite')}>{Object.entries(PRIORITES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           </Champ>
-          <Champ label="Fournisseur proposé" id="df" aide="Facultatif : sinon, les fournisseurs habituels de chaque article sont proposés.">
-            <select id="df" value={f.fournisseur_propose_id} onChange={set('fournisseur_propose_id')}>
-              <option value="">— Aucun en particulier —</option>
-              {refs.fournisseurs.map((x) => <option key={x.id} value={x.id}>{x.nom}</option>)}
-            </select>
-          </Champ>
           <Champ label="Motif de la demande" requis id="dmo" pleine>
             <textarea id="dmo" value={f.motif} onChange={set('motif')} maxLength={2000} placeholder="Pourquoi cet achat est-il nécessaire ?" />
           </Champ>
@@ -162,33 +179,44 @@ export default function DemandeFormPage() {
       <Section titre={`Articles demandés (${lignes.length})`}>
         {!f.magasin_id && <div className="cm-note">Choisissez d'abord le magasin : le stock affiché est celui de ce magasin.</div>}
         {lignes.length > 0 && (
-          <table className="cm-lignes">
-            <thead><tr><th>Article</th><th style={{ textAlign: 'right' }}>Quantité</th><th>Stock du magasin</th><th>Fournisseur</th><th aria-label="Retirer" /></tr></thead>
+          <div className="cm-table-defile">
+          <table className="cm-lignes cm-besoin">
+            <thead><tr>
+              <th>Article</th><th style={{ textAlign: 'right' }}>Quantité en stock</th><th style={{ textAlign: 'right' }}>Stock de sécurité</th>
+              <th style={{ textAlign: 'right' }}>Quantité demandée</th><th style={{ textAlign: 'right' }}>Stock à commander</th>
+              <th style={{ textAlign: 'right' }}>Quantité à la soumission</th><th aria-label="Retirer" />
+            </tr></thead>
             <tbody>
               {lignes.map((l, i) => {
                 const a = article(l.article_id);
-                const det = details[l.article_id] || {};
-                const proposes = det.proposes || [];
-                const autres = refs.fournisseurs.filter((x) => !proposes.some((p) => p.id === x.id));
+                const u = uniteLigne(l);
+                const c = calcul(l);
+                const q = soumise(l);
                 return (
                   <tr key={l.article_id}>
-                    <td className="cm-l-article"><strong>{a?.designation || `Article ${l.article_id}`}</strong><span className="cm-sous">{a?.reference}{prixLigne(l) !== null ? ` · ${Math.round(prixLigne(l)).toLocaleString('fr-FR')} FCFA / ${uniteLigne(l).code}` : ' · sans prix indicatif'}</span></td>
-                    <td style={{ textAlign: 'right' }}>
-                      <input className="cm-qte-input" inputMode="decimal" value={l.quantite} onChange={(e) => setLigne(i, 'quantite', e.target.value)} aria-label={`Quantité de ${a?.designation}`} />
+                    <td className="cm-l-article"><strong>{a?.designation || `Article ${l.article_id}`}</strong>
+                      <span className="cm-sous">{a?.reference}{prixLigne(l) !== null ? ` · ${Math.round(prixLigne(l)).toLocaleString('fr-FR')} FCFA / ${u.code}` : ' · sans prix indicatif'}</span>
                       {a?.unites?.length > 1 ? (
                         <select className="cm-unite-ligne" value={l.unite_id || String(a.unite_achat_id)} onChange={(e) => setLigne(i, 'unite_id', e.target.value)} aria-label={`Unité pour ${a?.designation}`}>
-                          {a.unites.map((u) => <option key={u.id} value={u.id}>{u.code}</option>)}
+                          {a.unites.map((x) => <option key={x.id} value={x.id}>Compté en {x.code}</option>)}
                         </select>
-                      ) : <span className="cm-sous">{uniteLigne(l).code}</span>}
-                      {uniteLigne(l).coefficient !== 1 && <span className="cm-conv">= {qteStock(l).toLocaleString('fr-FR')} {a?.unite}</span>}
+                      ) : null}
                     </td>
-                    <td className="cm-l-stock">{f.magasin_id ? <EncartStock stock={evaluer(stocks[`${l.article_id}-${f.magasin_id}`], qteStock(l))} unite={a?.unite} /> : '—'}</td>
-                    <td className="cm-l-fournisseur">
-                      <select value={l.fournisseur_id} onChange={(e) => setLigne(i, 'fournisseur_id', e.target.value)} aria-label={`Fournisseur pour ${a?.designation}`}>
-                        <option value="">{proposes.length ? 'Laisser choisir les achats' : '— Aucun fournisseur associé —'}</option>
-                        {proposes.length > 0 && <optgroup label="Fournisseurs habituels">{proposes.map((x) => <option key={x.id} value={x.id}>{x.nom}</option>)}</optgroup>}
-                        {autres.length > 0 && <optgroup label="Autres fournisseurs actifs">{autres.map((x) => <option key={x.id} value={x.id}>{x.nom}</option>)}</optgroup>}
-                      </select>
+                    <td className="cm-num"><span className="cm-l-lib">En stock</span>
+                      {!f.magasin_id ? '—' : !c.suivi_article ? <span className="cm-sous" style={{ marginTop: 0 }}>Non stocké</span>
+                        : !c.charge ? '…' : c.suivi ? <>{fq(c.disponible)} <span className="cm-sous" style={{ display: 'inline' }}>{u.code}</span></>
+                          : <span className="cm-sous" style={{ marginTop: 0 }} title="Aucun stock enregistré pour ce magasin">Non suivi</span>}
+                    </td>
+                    <td className="cm-num"><span className="cm-l-lib">Sécurité</span>{c.suivi_article ? fq(c.securite) : '—'}</td>
+                    <td style={{ textAlign: 'right' }}><span className="cm-l-lib">Demandée</span>
+                      <input className="cm-qte-input" inputMode="decimal" value={l.besoin} onChange={(e) => setLigne(i, 'besoin', e.target.value)} aria-label={`Quantité demandée de ${a?.designation}`} />
+                      <span className="cm-sous" style={{ textAlign: 'right' }}>{u.code}</span>
+                    </td>
+                    <td className="cm-num"><span className="cm-l-lib">À commander</span><strong className={c.theorique > 0 ? 'cm-a-commander' : ''}>{fq(c.theorique)}</strong></td>
+                    <td style={{ textAlign: 'right' }}><span className="cm-l-lib">À la soumission</span>
+                      <input className="cm-qte-input" inputMode="decimal" value={q} onChange={(e) => setLigne(i, 'quantite', e.target.value)} aria-label={`Quantité soumise de ${a?.designation}`} />
+                      {l.manuel && <button type="button" className="cm-lien" style={{ fontSize: 11.5, display: 'block', marginLeft: 'auto' }} onClick={() => setLignes((ls) => ls.map((x, j) => (j === i ? { ...x, manuel: false } : x)))}>Reprendre le calcul</button>}
+                      {u.coefficient !== 1 && <span className="cm-conv">= {fq(r3(num(q) * u.coefficient))} {a?.unite}</span>}
                     </td>
                     <td><button type="button" className="cm-x" onClick={() => setLignes((ls) => ls.filter((_, j) => j !== i))} aria-label={`Retirer ${a?.designation}`}>✕</button></td>
                   </tr>
@@ -196,6 +224,7 @@ export default function DemandeFormPage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
         <div className="cm-ajout">
           <select onChange={ajouter} defaultValue="" aria-label="Ajouter un article">
@@ -205,6 +234,8 @@ export default function DemandeFormPage() {
         </div>
         {lignes.length > 0 && (
           <p className="cm-aide" style={{ marginTop: 10 }}>
+            Stock à commander = quantité demandée + stock de sécurité − quantité en stock (jamais négatif) ; le stock de sécurité est le seuil d'alerte de l'article.
+            La quantité à la soumission reprend ce calcul et reste modifiable. Le fournisseur sera choisi par le responsable des achats.<br />
             Montant estimé : <strong>{estimation.toLocaleString('fr-FR')} FCFA</strong> (prix indicatifs ; recalculé par le serveur à la soumission).
           </p>
         )}
@@ -212,7 +243,7 @@ export default function DemandeFormPage() {
       {couverts.length > 0 && (
         <Section titre="Stock suffisant">
           <div className="cm-note" style={{ background: '#fffbeb', color: '#92400e' }}>
-            Le stock du magasin couvre déjà le besoin pour : <strong>{couverts.join(', ')}</strong>. Justifiez le réapprovisionnement (réserve, consommation prévue…).
+            Le stock du magasin couvre déjà le besoin, stock de sécurité compris, pour : <strong>{couverts.join(', ')}</strong>. Justifiez le réapprovisionnement (réserve, consommation prévue…).
           </div>
           <Champ label="Justification" id="dj">
             <textarea id="dj" value={f.justification_stock} onChange={set('justification_stock')} maxLength={1000} />

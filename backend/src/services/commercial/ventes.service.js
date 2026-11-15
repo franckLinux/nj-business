@@ -184,7 +184,7 @@ const listerDevis = async (ctx, { statut = '', q = '', du = '', au = '', client_
 // Calcul d'une ligne : unité de l'article, prix par défaut converti, remise, taxe de vente.
 const preparerLigneDevis = async (ctx, tr, x, p) => {
   const articleId = entier(x.article_id, 'Article');
-  const [a] = await Q(`SELECT a.id, a.reference, a.designation, a.actif, a.unite_vente_id, a.taxe_vente_id, a.prix_vente_indicatif
+  const [a] = await Q(`SELECT a.id, a.reference, a.designation, a.actif, a.unite_vente_id, a.prix_vente_indicatif
                          FROM com_articles a WHERE a.id = :a AND a.tenant_id = :t`, { a: articleId, t: ctx.tenantId }, tr);
   if (!a) throw new ErreurVente(400, 'Article introuvable.');
   if (!a.actif) throw new ErreurVente(400, `L'article « ${a.designation} » est désactivé.`);
@@ -204,7 +204,8 @@ const preparerLigneDevis = async (ctx, tr, x, p) => {
   }
   if (arrondi(pu, p.dec) !== pu) throw new ErreurVente(400, `Prix de « ${a.designation} » : ${p.dec ? `${p.dec} décimales au plus` : 'sans décimales'} en ${p.devise}.`);
   const remise = nombre(x.remise_pct, `Remise de « ${a.designation} »`, { vide: 0, max: 100 });
-  let taxeId = x.taxe_id === undefined ? (a.taxe_vente_id ? Number(a.taxe_vente_id) : null) : (txt(x.taxe_id) ? entier(x.taxe_id, 'Taxe') : null);
+  // 062 : la taxe est celle choisie sur la ligne du devis (aucune si rien n'est choisi), jamais reprise de l'article.
+  let taxeId = txt(x.taxe_id) ? entier(x.taxe_id, 'Taxe') : null;
   let taxe = { code: '', taux: 0 };
   if (taxeId) {
     const [t] = await Q("SELECT id, code, taux, actif, usage FROM com_taxes WHERE id = :x AND tenant_id = :t", { x: taxeId, t: ctx.tenantId }, tr);

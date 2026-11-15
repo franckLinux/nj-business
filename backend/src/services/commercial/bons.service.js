@@ -47,7 +47,9 @@ const nombre = (v, nom, { min = 0, max = 1e13, vide = null } = {}) => {
 };
 const arrondi = (n, dec) => { const f = 10 ** dec; return Math.round(n * f) / f; };
 
-const VOIR = ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'];
+// 063 : le comptable (factures, frais) et qui consulte les fournisseurs voient aussi les bons.
+const VOIR = ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir',
+  'com.factures_fourn.voir', 'com.frais.saisir', 'com.consultations.gerer'];
 const exigerVue = (ctx) => { if (!VOIR.some((c) => ctx.peut(c))) throw new ErreurBon(403, 'Permission requise : consulter les bons de commande.'); };
 const exiger = (ctx, code, libelle) => { if (!ctx.peut(code)) throw new ErreurBon(403, `Permission requise : ${libelle}.`); };
 
@@ -77,7 +79,7 @@ const urlVerification = (jeton) => { const b = baseVerification(); return b ? `$
 // `sauf` : bons à ignorer (le bon en cours, et l'original qu'une révision remplace).
 const restes = async (tenantId, demandeId, sauf = [], tr) => {
   const rows = await Q(
-    `SELECT l.id, l.article_id, l.quantite, l.unite, l.unite_id, l.coefficient, l.prix_estime, l.fournisseur_id, a.reference, a.designation, a.taxe_id,
+    `SELECT l.id, l.article_id, l.quantite, l.unite, l.unite_id, l.coefficient, l.prix_estime, l.fournisseur_id, a.reference, a.designation,
             (SELECT u.decimales FROM com_unites u WHERE u.id = l.unite_id) AS decimales, a.unite AS unite_stock,
             COALESCE((SELECT SUM(bl.quantite) FROM com_bc_lignes bl JOIN com_bons_commande b ON b.id = bl.bc_id
                        WHERE bl.demande_ligne_id = l.id AND b.statut IN ('brouillon', 'emis')
@@ -94,7 +96,8 @@ const restes = async (tenantId, demandeId, sauf = [], tr) => {
     approuve: Number(r.quantite), commande: Number(r.commande), emis: Number(r.emis),
     reste: Math.max(0, Math.round((Number(r.quantite) - Number(r.commande)) * 1000) / 1000),
     prix_approuve: r.prix_estime === null ? null : Number(r.prix_estime),
-    fournisseur_id: r.fournisseur_id ? Number(r.fournisseur_id) : null, taxe_id: r.taxe_id ? Number(r.taxe_id) : null,
+    // 062 : aucune taxe proposée par l'article ; elle se choisit sur la ligne du bon.
+    fournisseur_id: r.fournisseur_id ? Number(r.fournisseur_id) : null, taxe_id: null,
   }));
 };
 
@@ -114,7 +117,14 @@ const SQL_BC = `
          m.code AS magasin_code, m.nom AS magasin_nom,
          pp.username AS prepare_par_nom, ap.username AS annule_par_nom,
          r.numero_complet AS remplace_numero, rb.numero_complet AS remplace_par_numero, rb.id AS remplace_par_id,
-         (SELECT COUNT(*)::int FROM com_documents x WHERE x.objet_type = 'bon_commande' AND x.objet_id = b.id AND x.categorie = 'proforma' AND NOT x.retire) AS nb_proformas
+         (SELECT COUNT(*)::int FROM com_documents x WHERE x.objet_type = 'bon_commande' AND x.objet_id = b.id AND x.categorie = 'proforma' AND NOT x.retire) AS nb_proformas,
+         -- 063 : suivi de livraison d'un bon émis (réceptions validées).
+         CASE WHEN b.statut <> 'emis' THEN NULL
+              WHEN NOT EXISTS (SELECT 1 FROM com_bc_lignes l WHERE l.bc_id = b.id AND l.quantite > COALESCE((SELECT SUM(rl.quantite) FROM com_reception_lignes rl
+                     JOIN com_receptions r ON r.id = rl.reception_id WHERE rl.bc_ligne_id = l.id AND r.statut = 'valide'), 0)) THEN 'livre'
+              WHEN EXISTS (SELECT 1 FROM com_receptions r WHERE r.bc_id = b.id AND r.statut = 'valide') THEN 'partiellement_livre'
+              ELSE NULL END AS etat_livraison,
+         (SELECT c.numero FROM com_consultations c WHERE c.id = b.consultation_id) AS consultation_numero
     FROM com_bons_commande b
     JOIN com_demandes d ON d.id = b.demande_id
     JOIN users u ON u.id = d.demandeur_id
@@ -125,8 +135,12 @@ const SQL_BC = `
     LEFT JOIN com_bons_commande r ON r.id = b.remplace_id
     LEFT JOIN LATERAL (SELECT id, numero_complet FROM com_bons_commande x WHERE x.remplace_id = b.id ORDER BY x.id DESC LIMIT 1) rb ON true`;
 
+// Statut de suivi (063) : brouillon, validé (émis), envoyé au fournisseur, partiellement livré, livré, annulé.
+const SUIVI = { brouillon: 'Brouillon', valide: 'Validé', envoye: 'Envoyé au fournisseur', partiellement_livre: 'Partiellement livré', livre: 'Livré',
+  annule: 'Annulé', remplace: 'Remplacé' };
+const suivi = (b) => (b.statut !== 'emis' ? b.statut : b.etat_livraison || (b.envoye_le ? 'envoye' : 'valide'));
 const formater = (b) => ({
-  ...b, id: Number(b.id), demande_id: Number(b.demande_id), fournisseur_id: Number(b.fournisseur_id), magasin_id: Number(b.magasin_id),
+  ...b, id: Number(b.id), suivi: suivi(b), suivi_libelle: SUIVI[suivi(b)], consultation_id: b.consultation_id ? Number(b.consultation_id) : null, demande_id: Number(b.demande_id), fournisseur_id: Number(b.fournisseur_id), magasin_id: Number(b.magasin_id),
   remplace_id: b.remplace_id ? Number(b.remplace_id) : null, remplace_par_id: b.remplace_par_id ? Number(b.remplace_par_id) : null,
   total_ht: Number(b.total_ht), total_taxes: Number(b.total_taxes), total_ttc: Number(b.total_ttc), statut_libelle: STATUTS[b.statut],
   // Le jeton et le chemin du PDF ne sortent jamais par les listes.
@@ -211,7 +225,8 @@ const ecrireLignes = async (ctx, tr, bc, lignes, sauf) => {
     const pu = nombre(l.prix_unitaire, 'Prix unitaire', { vide: null });
     const remise = nombre(l.remise_pct, 'Remise', { max: 100, vide: 0 });
     let taxe = null;
-    const taxeId = l.taxe_id === undefined ? src.taxe_id : (l.taxe_id ? entier(l.taxe_id, 'Taxe') : null);
+    // 062 : la taxe est celle choisie sur la ligne (aucune si rien n'est choisi).
+    const taxeId = l.taxe_id === undefined || l.taxe_id === null || l.taxe_id === '' ? null : entier(l.taxe_id, 'Taxe');
     if (taxeId) {
       [taxe] = await Q('SELECT id, code, taux, actif, usage FROM com_taxes WHERE id = :x AND tenant_id = :t', { x: taxeId, t: ctx.tenantId }, tr);
       if (!taxe) throw new ErreurBon(400, 'Taxe inconnue.');
@@ -249,9 +264,9 @@ const valeursEntete = async (ctx, b, tr) => {
   };
 };
 
-const creer = async (ctx, body = {}) => {
-  exiger(ctx, 'com.bc.preparer', 'préparer les bons de commande');
-  const id = await sequelize.transaction(async (tr) => {
+// Création dans une transaction fournie (063 : plusieurs bons d'un coup depuis une consultation).
+const creerDans = async (ctx, body, tr) => {
+  {
     const [d] = await Q('SELECT * FROM com_demandes WHERE id = :d AND tenant_id = :t FOR UPDATE', { d: entier(body.demande_id, 'Demande'), t: ctx.tenantId }, tr);
     if (!d || !perim().dansPerimetre(ctx, d.magasin_id)) throw new ErreurBon(404, 'Demande introuvable.');
     if (d.statut !== 'approuvee') throw new ErreurBon(409, d.statut === 'rejetee'
@@ -268,13 +283,51 @@ const creer = async (ctx, body = {}) => {
     const provisoire = `BROUILLON-${crypto.randomBytes(5).toString('hex')}`;
     const [r] = await Q(
       `INSERT INTO com_bons_commande (tenant_id, numero, numero_complet, demande_id, fournisseur_id, magasin_id, devise, conditions_paiement,
-         delai_livraison, observations, prepare_par)
-       VALUES (:t, '', :nc, :d, :fournisseur_id, :magasin_id, :devise, :conditions_paiement, :delai_livraison, :observations, :u) RETURNING id`,
-      { ...v, t: ctx.tenantId, nc: provisoire, d: d.id, devise: p.devise, u: ctx.userId }, tr);
+         delai_livraison, observations, prepare_par, consultation_id)
+       VALUES (:t, '', :nc, :d, :fournisseur_id, :magasin_id, :devise, :conditions_paiement, :delai_livraison, :observations, :u, :cons) RETURNING id`,
+      { ...v, t: ctx.tenantId, nc: provisoire, d: d.id, devise: p.devise, u: ctx.userId, cons: body.consultation_id || null }, tr);
     const bc = { id: Number(r.id), demande_id: Number(d.id) };
     await ecrireLignes(ctx, tr, bc, body.lignes, [bc.id]);
-    await auditer(tr, ctx, 'COM_BC_PREPARATION', bc.id, { demande: d.numero, ...v, nb_lignes: body.lignes.length });
+    await auditer(tr, ctx, 'COM_BC_PREPARATION', bc.id, { demande: d.numero, ...v, nb_lignes: body.lignes.length,
+      ...(body.consultation_id ? { consultation_id: body.consultation_id } : {}) });
     return bc.id;
+  }
+};
+const creer = async (ctx, body = {}) => {
+  exiger(ctx, 'com.bc.preparer', 'préparer les bons de commande');
+  if (!Array.isArray(body.lignes)) throw new ErreurBon(400, 'Liste de lignes invalide.');
+  const id = await sequelize.transaction((tr) => creerDans(ctx, body, tr));
+  return lire(ctx, id);
+};
+
+// ── Envoi au fournisseur (063) : par e-mail avec le PDF archivé, ou envoi constaté (remis, WhatsApp…) ──
+const envoyer = async (ctx, id, body = {}) => {
+  exiger(ctx, 'com.bc.emettre', 'envoyer les bons de commande');
+  const b = await charger(ctx, id);
+  if (b.statut !== 'emis') throw new ErreurBon(409, 'Seul un bon émis s\'envoie au fournisseur.');
+  const mode = txt(body.mode) || 'email';
+  if (!['email', 'manuel'].includes(mode)) throw new ErreurBon(400, 'Mode d\'envoi inconnu (email ou manuel).');
+  let destinataire = txt(body.destinataire);
+  if (mode === 'email') {
+    if (!destinataire) {
+      const [f] = await Q(`SELECT COALESCE(NULLIF(c.contact_email, ''), r.email, '') AS email FROM registre_tiers r LEFT JOIN com_tiers c ON c.tiers_id = r.id WHERE r.id = :f`, { f: b.fournisseur_id });
+      destinataire = f?.email || '';
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(destinataire)) throw new ErreurBon(400, 'Adresse e-mail du fournisseur absente ou invalide : renseignez-la ou choisissez « envoi constaté ».');
+    const [full] = await Q('SELECT pdf_chemin FROM com_bons_commande WHERE id = :id', { id: b.id });
+    const contenu = await fs.readFile(docs.resoudre(full.pdf_chemin));
+    const { envoyer: mail } = require('../email.service');
+    const p = await donneesPdf(ctx, b, [], null);
+    const r = await mail({ to: destinataire, subject: `Bon de commande ${b.numero_complet} — ${p.societe.nom_affiche}`,
+      html: `<p>Bonjour,</p><p>Veuillez trouver ci-joint notre bon de commande <strong>${b.numero_complet}</strong>${b.delai_livraison ? ` (délai : ${b.delai_livraison})` : ''}.</p>
+             <p>Merci d'en accuser réception et de rappeler sa référence sur votre bon de livraison et votre facture.</p><p>${p.societe.nom_affiche}</p>`,
+      attachments: [{ filename: `${b.numero_complet}.pdf`, content: contenu, contentType: 'application/pdf' }] });
+    if (r.statut !== 'envoye') throw new ErreurBon(502, `E-mail non envoyé : ${r.erreur || r.statut}. Vous pouvez constater un envoi fait par un autre moyen.`);
+  } else if (destinataire.length < 2) throw new ErreurBon(400, 'Précisez comment et à qui le bon a été remis (ex. « remis au livreur », « WhatsApp au 699… »).');
+  await sequelize.transaction(async (tr) => {
+    await X(`UPDATE com_bons_commande SET envoye_le = NOW(), envoye_par = :u, envoi_mode = :m, envoi_destinataire = :d, modifie_le = NOW() WHERE id = :id`,
+      { u: ctx.userId, m: mode, d: destinataire.slice(0, 200), id: b.id }, tr);
+    await auditer(tr, ctx, 'COM_BC_ENVOI', b.id, { numero: b.numero_complet, mode, destinataire: destinataire.slice(0, 200), renvoi: Boolean(b.envoye_le) });
   });
   return lire(ctx, id);
 };
@@ -401,6 +454,8 @@ const lire = async (ctx, id) => {
       annuler: b.statut === 'emis' && ctx.peut('com.bc.annuler'),
       reviser: b.statut === 'emis' && ctx.peut('com.bc.annuler') && ctx.peut('com.bc.preparer') && !b.remplace_par_id,
       proforma: b.statut === 'brouillon' && ctx.peut('com.bc.preparer'),
+      envoyer: b.statut === 'emis' && ctx.peut('com.bc.emettre'),
+      frais: b.statut === 'emis' && ctx.peut('com.frais.saisir'),
     },
   };
 };
@@ -668,7 +723,7 @@ const bonsDeDemande = async (tenantId, demandeId) => (await Q(
   .map((b) => ({ ...b, id: Number(b.id), total_ttc: Number(b.total_ttc), statut_libelle: STATUTS[b.statut] }));
 
 module.exports = {
-  ErreurBon, STATUTS, lister, aCommander, proposition, creer, modifier, supprimer, lire, revalider, emettre, annuler, reviser,
+  ErreurBon, STATUTS, SUIVI, lister, aCommander, proposition, creer, creerDans, envoyer, donneesPdf, modifier, supprimer, lire, revalider, emettre, annuler, reviser,
   lirePdf, joindreProforma, retirerProforma, lirePiece, verifier, notifierEmission, notifierRevalidation,
   restes, etatCommande, bonsDeDemande, baseVerification, etatReception,
 };

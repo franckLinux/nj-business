@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { Entete, Section, Champ, useListe, fmtMontant, fmtQte } from '@/components/commercial/ui';
+import { Entete, Section, Champ, TaxeOperation, useListe, fmtMontant, fmtQte } from '@/components/commercial/ui';
 import { dateFr } from '@/components/commercial/achats';
 import { StatutStock, lireNombre } from '@/components/commercial/stock';
 import { useFiche, ActionsCircuit, EtatCircuit, PiecesDoc, HistoriqueDoc, STATUTS_DOC } from '@/components/commercial/fiche';
@@ -86,9 +86,14 @@ export function FactureFournFormPage() {
   const [numero, setNumero] = useState('');
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
+  // 062 : la taxe se choisit à la saisie de la facture (celle du bon de commande est proposée).
+  const [taxes, setTaxes] = useState([]);
+  const [taxeOp, setTaxeOp] = useState('');
 
   useEffect(() => {
     (async () => {
+      const tx = await api.get('/commercial/taxes?actifs=1');
+      setTaxes(Array.isArray(tx) ? tx.filter((t) => t.usage !== 'vente') : []);
       let existant = null; let fournisseur = params.get('fournisseur'); let origineId = params.get('avoir');
       if (id) {
         existant = await api.get(`/commercial/factures-fournisseurs/${id}`);
@@ -117,7 +122,8 @@ export function FactureFournFormPage() {
         setLignes(toutes.map((l) => {
           const e = deja.get(l.id);
           return { cle: l.id, designation: l.designation, reference: l.reference, unite: l.unite, reste: l.reste, prix_cmd: l.prix_net, remise_pct: virgule(e?.remise_pct ?? l.remise_pct),
-            taxe_code: l.taxe_code, taxe_taux: l.taxe_taux, reception_numero: l.reception_numero, bc_numero: l.bc_numero, bl_numero: l.bl_numero,
+            taxe_code: e ? e.taxe_code : l.taxe_code, taxe_taux: e ? e.taxe_taux : l.taxe_taux, taxe_origine: String((e ? e.taxe_id : l.taxe_id) || ''),
+            taxe_id: String((e ? e.taxe_id : l.taxe_id) || ''), reception_numero: l.reception_numero, bc_numero: l.bc_numero, bl_numero: l.bl_numero,
             saisie: existant ? virgule(e?.quantite ?? '') : virgule(l.reste), prix: virgule(e?.prix_unitaire ?? l.prix_unitaire) };
         }));
       }
@@ -130,17 +136,25 @@ export function FactureFournFormPage() {
 
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const setLigne = (i, k, v) => setLignes((ls) => ls.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  // Taux d'une ligne : la taxe choisie, ou le taux copié à l'origine si elle n'a pas changé.
+  const tauxLigne = (l) => {
+    if (type === 'avoir') return l.taxe_taux;
+    if (!l.taxe_id) return 0;
+    const t = taxes.find((x) => String(x.id) === l.taxe_id);
+    if (t) return t.taux;
+    return l.taxe_id === l.taxe_origine ? l.taxe_taux : 0;
+  };
   const calc = lignes.map((l) => {
     const q = lireNombre(l.saisie) || 0; const pu = lireNombre(l.prix) || 0; const rem = lireNombre(l.remise_pct) || 0;
     const ht = Math.round(q * pu * (1 - rem / 100) * 100) / 100;
-    return { ht, tx: Math.round(ht * l.taxe_taux) / 100 };
+    return { ht, tx: Math.round(ht * tauxLigne(l)) / 100 };
   });
   const tht = calc.reduce((s, x) => s + x.ht, 0); const ttx = calc.reduce((s, x) => s + x.tx, 0);
   const corps = () => (type === 'avoir'
     ? { type, facture_origine_id: ctxDoc.origine.id, retour_id: ctxDoc.retour_id || null, ...f,
       lignes: lignes.map((l) => ({ facture_ligne_origine_id: l.cle, quantite: l.saisie, prix_unitaire: l.prix })) }
     : { type, fournisseur_id: ctxDoc.fournisseur_id, ...f,
-      lignes: lignes.map((l) => ({ reception_ligne_id: l.cle, quantite: l.saisie, prix_unitaire: l.prix, remise_pct: l.remise_pct })) });
+      lignes: lignes.map((l) => ({ reception_ligne_id: l.cle, quantite: l.saisie, prix_unitaire: l.prix, remise_pct: l.remise_pct, taxe_id: l.taxe_id || null })) });
   const enregistrer = async (soumettre) => {
     setEnCours(true); setErreur('');
     const r = id ? await api.put(`/commercial/factures-fournisseurs/${id}`, corps()) : await api.post('/commercial/factures-fournisseurs', corps());
@@ -189,6 +203,8 @@ export function FactureFournFormPage() {
         </div>
       </Section>
       <Section titre="Lignes">
+        {!avoir && <TaxeOperation taxes={taxes} valeur={taxeOp} onChange={setTaxeOp} nature="achat"
+          onAppliquer={(v) => setLignes((ls) => ls.map((x) => ({ ...x, taxe_id: v })))} />}
         <table className="cm-lignes">
           <thead>
             <tr>
@@ -219,7 +235,12 @@ export function FactureFournFormPage() {
                     {!avoir && Math.abs(ecart) > 0.004 && <span className="cm-sous" style={{ color: '#b45309' }}>{pct(ecart)} / commande</span>}
                   </td>
                   {!avoir && <td style={{ textAlign: 'right' }}><input className="cm-qte-input" style={{ width: 60 }} inputMode="decimal" value={l.remise_pct} onChange={(e) => setLigne(i, 'remise_pct', e.target.value)} aria-label={`Remise sur ${l.designation}`} /></td>}
-                  <td>{l.taxe_code ? `${l.taxe_code} ${String(l.taxe_taux).replace('.', ',')} %` : '—'}</td>
+                  <td>{avoir ? (l.taxe_code ? `${l.taxe_code} ${String(l.taxe_taux).replace('.', ',')} %` : '—') : (
+                    <select value={l.taxe_id} onChange={(e) => setLigne(i, 'taxe_id', e.target.value)} aria-label={`Taxe de ${l.designation}`}>
+                      <option value="">Aucune</option>
+                      {l.taxe_origine && !taxes.some((t) => String(t.id) === l.taxe_origine) && <option value={l.taxe_origine}>{l.taxe_code} {String(l.taxe_taux).replace('.', ',')} % (du bon)</option>}
+                      {taxes.map((t) => <option key={t.id} value={t.id}>{t.code} {String(t.taux).replace('.', ',')} %</option>)}
+                    </select>)}</td>
                   <td className="cm-num"><span className="cm-l-lib">HT</span>{fmtMontant(calc[i].ht, '')}</td>
                 </tr>
               );

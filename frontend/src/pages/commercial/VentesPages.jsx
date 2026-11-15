@@ -7,7 +7,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { Entete, Section, Champ, Tiroir, useListe, useDiffere, fmtMontant, fmtQte } from '@/components/commercial/ui';
+import { Entete, Section, Champ, Tiroir, TaxeOperation, useListe, useDiffere, fmtMontant, fmtQte } from '@/components/commercial/ui';
 import { dateFr, ouvrirFichier, lireFichier } from '@/components/commercial/achats';
 import { lireNombre } from '@/components/commercial/stock';
 import { useFiche, PiecesDoc, MouvementsDoc, HistoriqueDoc } from '@/components/commercial/fiche';
@@ -144,12 +144,16 @@ export function DevisFormPage() {
     const u = a.unites.find((x) => String(x.id) === String(uid)) || { coefficient: 1 };
     return virgule(arrondi(a.prix_vente_indicatif / (a.coef_vente || 1) * u.coefficient));
   };
+  // 062 : la taxe se choisit à la saisie du devis (plus aucune taxe venant de l'article) ;
+  // la taxe de l'opération est proposée à chaque ligne ajoutée, puis modifiable.
+  const [taxeOp, setTaxeOp] = useState('');
+  const appliquerTaxe = (val) => setLignes((ls) => ls.map((l) => ({ ...l, taxe_id: val })));
   const ajouter = (e) => {
     const a = articles.get(Number(e.target.value));
     e.target.value = '';
     if (!a) return;
     setLignes((ls) => [...ls, { article_id: a.id, unite_id: String(a.unite_vente_id), quantite: '1', prix_unitaire: prixDefaut(a, a.unite_vente_id), remise_pct: '',
-      taxe_id: a.taxe_vente_id ? String(a.taxe_vente_id) : '' }]);
+      taxe_id: taxeOp }]);
   };
   const maj = (i, k, v) => setLignes((ls) => ls.map((l, j) => {
     if (j !== i) return l;
@@ -215,6 +219,7 @@ export function DevisFormPage() {
         {client && !client.actif && <p className="cm-erreur">Ce client est désactivé.</p>}
       </Section>
       <Section titre={`Articles (${lignes.length})`}>
+        <TaxeOperation taxes={ref.taxes} valeur={taxeOp} onChange={setTaxeOp} onAppliquer={appliquerTaxe} nature="vente" />
         {lignes.length > 0 && (
           <table className="cm-lignes">
             <thead><tr><th>Article</th><th>Unité</th><th style={{ textAlign: 'right' }}>Quantité</th><th style={{ textAlign: 'right' }}>Prix unitaire HT</th><th style={{ textAlign: 'right' }}>Remise %</th><th>Taxe</th><th style={{ textAlign: 'right' }}>Montant HT</th><th /></tr></thead>

@@ -352,11 +352,11 @@ const gabarit = (titre, corps) => `<!DOCTYPE html><html lang="fr"><head><meta ch
   </div>
 </div></body></html>`;
 
-const envoyer = async ({ to, subject, html }) => {
+const envoyer = async ({ to, subject, html, attachments }) => {
   const transporter = createTransporter();
   if (!transporter) return { statut: 'non_envoye', erreur: 'SMTP non configuré (SMTP_HOST vide)' };
   try {
-    await transporter.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, html });
+    await transporter.sendMail({ from: process.env.SMTP_FROM || process.env.SMTP_USER, to, subject, html, ...(attachments ? { attachments } : {}) });
     return { statut: 'envoye', erreur: '' };
   } catch (err) {
     const invalide = err.code === 'EENVELOPE' || /recipient|address|550|553|501/i.test(err.message || '');
@@ -459,7 +459,7 @@ const sendReinitialisationMotDePasse = ({ to, nom, lien }) => {
 };
 
 module.exports = {
-  verifierSmtp, sendDemandeAchat,
+  verifierSmtp, sendDemandeAchat, envoyer,
   sendReinitialisationMotDePasse,
   sendBienvenueClient,
   sendInvitationDemo, sendRappelDemo, sendNotificationAdmin, contenuInvitation, sendDepassementAlert, sendMouvementAttenteAlert };

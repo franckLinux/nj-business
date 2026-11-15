@@ -78,6 +78,9 @@ before(async () => {
   await creerUtilisateur('mag', 'collaborateur', A, 'stock_magasinier');
   await creerUtilisateur('ges', 'collaborateur', A, 'stock_gestionnaire');
   await creerUtilisateur('dirB', 'directeur', B);
+  // 063 : la facture fournisseur relève du comptable (profil « Comptable (achats) » ; rôle « Comptable »).
+  await creerUtilisateur('cpt', 'collaborateur', A, 'achats_comptable');
+  await creerUtilisateur('cpt2', 'auditeur', A);
   for (const [code, decimales] of [['pièce', 0], ['carton', 0]]) {
     R[code] = (await appel('POST', '/commercial/unites', 'dir', { code, libelle: code, decimales })).data.id;
   }
@@ -207,11 +210,15 @@ test('Retour fournisseur : au coût de la réception, pas au CMUP ; jamais plus 
 });
 
 test('Facture rapprochée : écart de prix au-delà de la tolérance motivé ; doublon refusé', async () => {
-  const fs = (await appel('GET', '/commercial/factures-fournisseurs/a-facturer', 'gas')).data;
+  const fs = (await appel('GET', '/commercial/factures-fournisseurs/a-facturer', 'cpt')).data;
   assert.ok(fs.some((f) => f.id === R.fou));
-  const lignes = (await appel('GET', `/commercial/factures-fournisseurs/a-facturer/${R.fou}`, 'gas')).data;
+  const lignes = (await appel('GET', `/commercial/factures-fournisseurs/a-facturer/${R.fou}`, 'cpt')).data;
   assert.deepEqual(lignes.map((l) => l.reste).sort(), [4, 5], 'reçu net : 6 − 2 retournés, puis 5');
-  const c = await appel('POST', '/commercial/factures-fournisseurs', 'gas', { fournisseur_id: R.fou, reference_fournisseur: 'FA-2026-118', date_facture: '2026-11-02',
+  // Ni le gestionnaire ni le responsable des achats ne saisissent la facture.
+  for (const qui of ['gas', 'resp']) {
+    assert.equal((await appel('POST', '/commercial/factures-fournisseurs', qui, { fournisseur_id: R.fou, reference_fournisseur: 'X', date_facture: '2026-11-02', lignes: [] })).status, 403, qui);
+  }
+  const c = await appel('POST', '/commercial/factures-fournisseurs', 'cpt', { fournisseur_id: R.fou, reference_fournisseur: 'FA-2026-118', date_facture: '2026-11-02',
     lignes: [{ reception_ligne_id: R.rl1, quantite: 4, prix_unitaire: 3600 }, { reception_ligne_id: R.rl2, quantite: 5, prix_unitaire: 4000 }] });
   assert.equal(c.status, 201, c.message);
   assert.equal(c.data.total_ht, 34400);
@@ -221,41 +228,42 @@ test('Facture rapprochée : écart de prix au-delà de la tolérance motivé ; d
   assert.equal(r2.ecart_prix_pct, 11.11);
   assert.equal(r2.alerte_prix, true);
   assert.equal(c.data.rapprochement.find((x) => x.reception_ligne_id === R.rl1).alerte_prix, false);
-  const s = await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/soumission`, 'gas', {});
+  const s = await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/soumission`, 'cpt', {});
   assert.equal(s.status, 400);
   assert.match(s.message, /motif/);
-  assert.equal((await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/soumission`, 'gas', { motif_ecart: 'Hausse tarifaire annoncée' })).status, 200);
-  assert.equal((await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/validation`, 'gas', {})).status, 403);
-  const v = await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/validation`, 'resp', {});
+  assert.equal((await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/soumission`, 'cpt', { motif_ecart: 'Hausse tarifaire annoncée' })).status, 200);
+  assert.equal((await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/validation`, 'cpt', {})).status, 403, 'jamais par son auteur');
+  assert.equal((await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/validation`, 'resp', {})).status, 403, 'pas par le responsable des achats');
+  const v = await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/validation`, 'cpt2', {});
   assert.equal(v.status, 200, v.message);
   assert.equal(v.data.statut, 'valide');
   assert.match(v.data.reglement, /NJ CAISSE PRO/);
   R.ff = c.data.id; R.ffl1 = c.data.lignes.find((l) => l.reception_ligne_id === R.rl1).id;
   // Même pièce du fournisseur : refusée.
-  const dbl = await appel('POST', '/commercial/factures-fournisseurs', 'gas', { fournisseur_id: R.fou, reference_fournisseur: 'fa-2026-118', date_facture: '2026-11-02', lignes: [] });
+  const dbl = await appel('POST', '/commercial/factures-fournisseurs', 'cpt', { fournisseur_id: R.fou, reference_fournisseur: 'fa-2026-118', date_facture: '2026-11-02', lignes: [] });
   assert.equal(dbl.status, 409);
   // Facturer encore ce qui l'est déjà : écart de quantité signalé.
-  const sur = await appel('POST', '/commercial/factures-fournisseurs', 'gas', { fournisseur_id: R.fou, reference_fournisseur: 'FA-2026-119', date_facture: '2026-11-02',
+  const sur = await appel('POST', '/commercial/factures-fournisseurs', 'cpt', { fournisseur_id: R.fou, reference_fournisseur: 'FA-2026-119', date_facture: '2026-11-02',
     lignes: [{ reception_ligne_id: R.rl1, quantite: 1, prix_unitaire: 3600 }] });
   assert.equal(sur.data.rapprochement[0].alerte_quantite, true);
   assert.equal(sur.data.rapprochement[0].ecart_quantite, 1);
-  assert.equal((await appel('DELETE', `/commercial/factures-fournisseurs/${sur.data.id}`, 'gas')).status, 200);
+  assert.equal((await appel('DELETE', `/commercial/factures-fournisseurs/${sur.data.id}`, 'cpt')).status, 200);
   // Une réception facturée ne s'annule pas.
   assert.equal((await appel('POST', `/commercial/receptions/${R.rec2}/annulation`, 'resp', { motif: 'Erreur' })).status, 409);
 });
 
 test('Avoir : limité à la facture d\'origine ; net à payer', async () => {
   const base = { type: 'avoir', facture_origine_id: R.ff, retour_id: R.ret, reference_fournisseur: 'AV-55', date_facture: '2026-11-02' };
-  assert.equal((await appel('POST', '/commercial/factures-fournisseurs', 'gas', { ...base, lignes: [{ facture_ligne_origine_id: R.ffl1, quantite: 5 }] })).status, 400, 'plus que facturé');
-  assert.equal((await appel('POST', '/commercial/factures-fournisseurs', 'gas', { ...base, lignes: [{ facture_ligne_origine_id: R.ffl1, quantite: 1, prix_unitaire: 5000 }] })).status, 400, 'prix supérieur');
-  const av = await circuit('/commercial/factures-fournisseurs', 'gas', 'resp', { ...base, lignes: [{ facture_ligne_origine_id: R.ffl1, quantite: 2 }] });
+  assert.equal((await appel('POST', '/commercial/factures-fournisseurs', 'cpt', { ...base, lignes: [{ facture_ligne_origine_id: R.ffl1, quantite: 5 }] })).status, 400, 'plus que facturé');
+  assert.equal((await appel('POST', '/commercial/factures-fournisseurs', 'cpt', { ...base, lignes: [{ facture_ligne_origine_id: R.ffl1, quantite: 1, prix_unitaire: 5000 }] })).status, 400, 'prix supérieur');
+  const av = await circuit('/commercial/factures-fournisseurs', 'cpt', 'cpt2', { ...base, lignes: [{ facture_ligne_origine_id: R.ffl1, quantite: 2 }] });
   assert.match(av.numero, /^AVF-/);
   assert.equal(av.total_ttc, 8586, '2 × 3 600 + 19,25 %');
   const f = (await appel('GET', `/commercial/factures-fournisseurs/${R.ff}`, 'resp')).data;
   assert.equal(f.net_a_payer, 32436);
   assert.equal(f.avoirs.length, 1);
   // Facture avec avoir : ne s'annule pas ; l'avoir d'abord.
-  assert.equal((await appel('POST', `/commercial/factures-fournisseurs/${R.ff}/annulation`, 'resp', { motif: 'Erreur' })).status, 409);
+  assert.equal((await appel('POST', `/commercial/factures-fournisseurs/${R.ff}/annulation`, 'cpt2', { motif: 'Erreur' })).status, 409);
   // Retour couvert par un avoir : ne s'annule pas.
   assert.equal((await appel('POST', `/commercial/retours-fournisseurs/${R.ret}/annulation`, 'resp', { motif: 'Erreur' })).status, 409);
 });

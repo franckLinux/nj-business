@@ -10,9 +10,9 @@ const ETAPES = [
   ['agences', '/commercial/configuration/agences', 'Agences', 'Les sites de l\'entreprise ; chacun regroupe ses magasins.', ['com.parametrage.voir']],
   ['magasins', '/commercial/configuration/magasins', 'Magasins', 'Les lieux de stockage, rattachés à une agence, avec leur responsable.', ['com.parametrage.voir', 'com.articles.voir']],
   ['fournisseurs', '/commercial/configuration/fournisseurs', 'Fournisseurs', 'Le registre des tiers, complété des informations d\'achat.', ['com.tiers.voir']],
-  ['familles', '/commercial/configuration/familles', 'Familles d\'articles', 'Classer les articles ; taxes d\'achat et de vente, suivi en stock et valorisation proposés aux articles.', ['com.parametrage.voir', 'com.articles.voir']],
+  ['familles', '/commercial/configuration/familles', 'Familles d\'articles', 'Classer les articles ; unité de stock (achat et vente identiques par défaut), suivi en stock et valorisation proposés aux articles.', ['com.parametrage.voir', 'com.articles.voir']],
   ['unites', '/commercial/configuration/unites', 'Unités de mesure', 'Pièce, carton, kg… et leurs décimales ; la conversion se règle sur chaque article.', ['com.parametrage.voir', 'com.articles.voir']],
-  ['taxes', '/commercial/configuration/taxes', 'Taxes', 'Les taxes applicables, avec leur taux.', ['com.parametrage.voir']],
+  ['taxes', '/commercial/configuration/taxes', 'Taxes', 'Les taxes applicables, avec leur taux, choisies à la saisie des opérations.', ['com.parametrage.voir']],
   ['articles', '/commercial/configuration/articles', 'Articles', 'Le catalogue, le suivi comptable et le stock d\'ouverture.', ['com.articles.voir', 'com.da.creer']],
   ['utilisateurs', '/commercial/configuration/utilisateurs', 'Utilisateurs et rôles', 'Qui demande, qui prépare, qui approuve.', ['com.parametrage.modifier']],
 ];

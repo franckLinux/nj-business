@@ -17,6 +17,7 @@ import PasserelleTab from '@/components/config/PasserelleTab';
 import ControlePage from '@/pages/ControlePage';
 import RegistreTiersPage from '@/pages/RegistreTiersPage';
 import ArretsInventairesPage from '@/pages/ArretsInventairesPage';
+import EcartsCaissePage from '@/pages/EcartsCaissePage';
 import TenantsPage from '@/pages/TenantsPage';
 import PermissionsPage from '@/pages/PermissionsPage';
 import PlanModelePage from '@/pages/PlanModelePage';
@@ -31,7 +32,7 @@ import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
 import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
 import AccueilPage from '@/pages/AccueilPage';
-import CommercialLayout, { peutUn, DROITS_DEMANDES, DROITS_AUTORISATIONS, DROITS_BONS, DROITS_HISTORIQUE } from '@/components/commercial/CommercialLayout';
+import CommercialLayout, { peutUn, DROITS_DEMANDES, DROITS_AUTORISATIONS, DROITS_BONS, DROITS_HISTORIQUE, DROITS_CONSULTATIONS, DROITS_FRAIS } from '@/components/commercial/CommercialLayout';
 import DemandesPage from '@/pages/commercial/DemandesPage';
 import DemandeFormPage from '@/pages/commercial/DemandeFormPage';
 import DemandePage from '@/pages/commercial/DemandePage';
@@ -58,6 +59,9 @@ const DROITS_RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'c
   'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
 const DROITS_FACTURES = ['com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler'];
 import VerificationBcPage from '@/pages/VerificationBcPage';
+import OffreFournisseurPage from '@/pages/OffreFournisseurPage';
+import { ConsultationsPage, ConsultationFormPage, ConsultationPage, ComparatifPage } from '@/pages/commercial/ConsultationsPages';
+import { FraisListePage, FraisFormPage, FraisPage } from '@/pages/commercial/FraisPages';
 import { consommerEntree, moduleActif, routeApresConnexion, systemeInstalle, utiliseAccueil } from '@/lib/modules';
 
 // Toutes les pages listées dans MIGRATION.md sont désormais portées.
@@ -74,6 +78,9 @@ export default function App() {
   // QR code d'un bon de commande : vérification publique, sans session.
   const verif = window.location.pathname.match(/^\/verifier\/([A-Za-z0-9_-]+)\/?$/);
   if (verif) return <VerificationBcPage jeton={verif[1]} />;
+  // 063 : lien personnel d'un fournisseur consulté (demande de proforma) : réponse sans compte.
+  const offre = window.location.pathname.match(/^\/offre\/([A-Za-z0-9_-]+)\/?$/);
+  if (offre) return <OffreFournisseurPage jeton={offre[1]} />;
 
   return (
     <>
@@ -216,6 +223,15 @@ function AuthenticatedApp() {
         <Route path="factures-fournisseurs/nouvelle" element={<AutoriseCm codes={['com.factures_fourn.saisir']}><FactureFournFormPage key="n" /></AutoriseCm>} />
         <Route path="factures-fournisseurs/:id"    element={<AutoriseCm codes={DROITS_FACTURES}><FactureFournPage /></AutoriseCm>} />
         <Route path="factures-fournisseurs/:id/modifier" element={<AutoriseCm codes={['com.factures_fourn.saisir']}><FactureFournFormPage key="m" /></AutoriseCm>} />
+        <Route path="consultations"                element={<AutoriseCm codes={DROITS_CONSULTATIONS}><ConsultationsPage /></AutoriseCm>} />
+        <Route path="consultations/nouvelle"       element={<AutoriseCm codes={['com.consultations.gerer']}><ConsultationFormPage key="n" /></AutoriseCm>} />
+        <Route path="consultations/:id"            element={<AutoriseCm codes={DROITS_CONSULTATIONS}><ConsultationPage /></AutoriseCm>} />
+        <Route path="consultations/:id/modifier"   element={<AutoriseCm codes={['com.consultations.gerer']}><ConsultationFormPage key="m" /></AutoriseCm>} />
+        <Route path="consultations/:id/comparatif" element={<AutoriseCm codes={DROITS_CONSULTATIONS}><ComparatifPage /></AutoriseCm>} />
+        <Route path="frais"                        element={<AutoriseCm codes={DROITS_FRAIS}><FraisListePage /></AutoriseCm>} />
+        <Route path="frais/nouveau"                element={<AutoriseCm codes={['com.frais.saisir']}><FraisFormPage key="n" /></AutoriseCm>} />
+        <Route path="frais/:id"                    element={<AutoriseCm codes={DROITS_FRAIS}><FraisPage /></AutoriseCm>} />
+        <Route path="frais/:id/modifier"           element={<AutoriseCm codes={['com.frais.saisir']}><FraisFormPage key="m" /></AutoriseCm>} />
         <Route path="validation-achats"            element={<AutoriseCm codes={['com.receptions.valider', 'com.retours_fourn.valider', 'com.factures_fourn.valider']}><ValidationAchatsPage /></AutoriseCm>} />
         <Route path="devis"                        element={<AutoriseCm codes={DROITS_VENTES}><DevisListePage /></AutoriseCm>} />
         <Route path="devis/nouveau"                element={<AutoriseCm codes={['com.ventes.devis']}><DevisFormPage key="n" /></AutoriseCm>} />
@@ -248,6 +264,7 @@ function AuthenticatedApp() {
         <Route path="controle/pieces"     element={<Autorise code={PAGE_PERMS['/controle/pieces']}><ControlePage /></Autorise>} />
         <Route path="controle/regularite" element={<Autorise code={PAGE_PERMS['/controle/regularite']}><ControlePage /></Autorise>} />
         <Route path="controle/arretes"    element={<Autorise code={PAGE_PERMS['/controle/arretes']}><ArretsInventairesPage /></Autorise>} />
+        <Route path="controle/ecarts"     element={<Autorise code={PAGE_PERMS['/controle/ecarts']}><EcartsCaissePage /></Autorise>} />
         <Route path="controle/registre"   element={<Autorise code={PAGE_PERMS['/controle/registre']}><RegistreTiersPage /></Autorise>} />
         <Route path="controle/passerelle" element={<Autorise code={PAGE_PERMS['/controle/passerelle']}><PasserelleTab /></Autorise>} />
         <Route path="config"         element={<Autorise ok={voitConfiguration(user, can)}><ConfigPage /></Autorise>} />

@@ -7,7 +7,7 @@
 //      DEMO_MOT_DE_PASSE='…' node tools/demo-commercial.js → avec ce mot de passe
 //
 //  • Crée UN nouveau client « DÉMO — Ets Nkolo Distribution (fictif) », identifiant
-//    demo-nj-commercial, avec NJ COMMERCIAL activé, et huit comptes « demo.* ».
+//    demo-nj-commercial, avec NJ COMMERCIAL activé, et neuf comptes « demo.* ».
 //  • Ne touche à AUCUN autre client ni à aucune donnée existante. S'arrête sans
 //    rien faire si ce client ou l'un de ces comptes existe déjà.
 //  • Toutes les données passent par les services de l'application (mêmes
@@ -36,6 +36,8 @@ const bc = require('../src/services/commercial/bons.service');
 const sd = require('../src/services/commercial/stock_docs.service');
 const ad = require('../src/services/commercial/achats_docs.service');
 const vt = require('../src/services/commercial/ventes.service');
+const cons = require('../src/services/commercial/consultations.service');
+const frais = require('../src/services/commercial/frais.service');
 
 const SLUG = 'demo-nj-commercial';
 const T = sequelize.QueryTypes.SELECT;
@@ -45,7 +47,8 @@ const etape = (t) => console.log(`  • ${t}`);
 const COMPTES = [
   ['directeur', 'directeur', null, 'Directeur : tous les droits, validations de direction'],
   ['demandeur', 'collaborateur', 'achats_demandeur', 'Exprime les besoins d\'achat'],
-  ['achats', 'collaborateur', 'achats_gestionnaire', 'Gestionnaire des achats : bons, factures fournisseurs'],
+  ['achats', 'collaborateur', 'achats_gestionnaire', 'Gestionnaire des achats : bons de commande, frais d\'achat'],
+  ['comptable', 'collaborateur', 'achats_comptable', 'Comptable : factures fournisseurs, validation des frais d\'achat'],
   ['respachats', 'collaborateur', 'achats_responsable', 'Responsable des achats : approuve, émet les bons, valide'],
   ['magasinier', 'collaborateur', 'stock_magasinier', 'Magasinier : saisies de stock, réceptions, préparations'],
   ['stock', 'collaborateur', 'stock_gestionnaire', 'Gestionnaire de stock : valide stock et livraisons'],
@@ -90,6 +93,19 @@ async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = fa
     U[cle] = { id: u.id, role, username };
   }
   etape(`${COMPTES.length} comptes créés`);
+  // 062 : types de gestion (domaine de travail), en plus du profil (niveau).
+  const [tg] = await Q("SELECT to_regclass('public.com_utilisateur_types_gestion') IS NOT NULL AS ok");
+  if (tg.ok) {
+    const TYPES = { demandeur: ['achats'], achats: ['achats'], respachats: ['achats'], magasinier: ['stock'], stock: ['stock', 'achats'],
+      commercial: ['ventes'], respcommercial: ['ventes', 'stock'] };
+    for (const [cle, types] of Object.entries(TYPES)) {
+      for (const tc of types) {
+        await Q('INSERT INTO com_utilisateur_types_gestion (user_id, type_code, tenant_id) VALUES (:u, :c, :t) ON CONFLICT DO NOTHING RETURNING 1',
+          { u: U[cle].id, c: tc, t: tenantId });
+      }
+    }
+    etape('Types de gestion attribués (achats, ventes, stock — dont deux personnes sur deux domaines)');
+  }
   const C = {};
   for (const [k, u] of Object.entries(U)) C[k] = await da.contexte({ tenantId, user: u });
   const base = (k) => ({ tenantId, userId: U[k].id });
@@ -117,7 +133,7 @@ async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = fa
     ecole: await tiers('client', 'Collège Saint-Exemple (fictif)', { adresse: 'Mvog-Mbi, Yaoundé', ville: 'Yaoundé' }),
     super: await tiers('client', 'Supermarché Bon Prix (fictif)', { adresse: 'Bonamoussadi, Douala', ville: 'Douala', conditions_paiement: '15 jours' }),
   };
-  const famille = async (code, nom, x) => (await ref.enregistrerFamille({ ...base('directeur'), body: { code, nom, taxe_achat_id: tva, taxe_vente_id: tva, ...x } })).id;
+  const famille = async (code, nom, x) => (await ref.enregistrerFamille({ ...base('directeur'), body: { code, nom, ...x } })).id;
   const fam = {
     boi: await famille('BOI', 'Boissons', { unite_stock_id: u.piece, methode_valorisation: 'cmup', fournisseur_ids: [fou.sobraga] }),
     ali: await famille('ALI', 'Alimentation', { unite_stock_id: u.sac, methode_valorisation: 'fifo', fournisseur_ids: [fou.agro] }),
@@ -169,10 +185,11 @@ async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = fa
     lignes: e1.lignes.map((l) => ({ bc_ligne_id: l.id, quantite: l.article_id === A.eau ? 12 : 10 })) });
   await ad.soumettre(C.magasinier, 'reception', r1.id);
   const r1v = await ad.validerReception(C.respachats, r1.id);
-  const f1 = await ad.creerFacture(C.achats, { fournisseur_id: fou.sobraga, reference_fournisseur: 'FA-DEMO-2211', date_facture: new Date().toISOString().slice(0, 10),
+  // 063 : la facture fournisseur est saisie par le comptable, validée par une autre personne.
+  const f1 = await ad.creerFacture(C.comptable, { fournisseur_id: fou.sobraga, reference_fournisseur: 'FA-DEMO-2211', date_facture: new Date().toISOString().slice(0, 10),
     lignes: r1v.lignes.map((l) => ({ reception_ligne_id: l.id, quantite: l.quantite, prix_unitaire: l.article_id === A.eau ? 3600 : 4800 })) });
-  await ad.soumettre(C.achats, 'facture', f1.id);
-  await ad.validerFacture(C.respachats, f1.id);
+  await ad.soumettre(C.comptable, 'facture', f1.id);
+  await ad.validerFacture(C.directeur, f1.id);
   // b) Bon émis, rien reçu encore ; c) réception saisie qui attend sa validation.
   const d2 = await demande('demandeur', cen, 'Fournitures du trimestre', [{ article_id: A.papier, quantite: 10 }, { article_id: A.cart, quantite: 6 }]);
   await soumettreDa('demandeur', d2);
@@ -193,6 +210,30 @@ async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = fa
   await demande('demandeur', cen, 'Stylos pour l\'accueil', [{ article_id: A.stylo, quantite: 2 }]);
   etape('Achats : 5 demandes (approuvées, direction, à examiner, brouillon), 2 bons émis, réceptions, facture validée');
 
+  // ── 4 bis. Lot 8 (063) : frais d'achat et consultation des fournisseurs ──
+  // g) Transport du bon 1 : saisi par les achats, validé par le comptable → coût réel du stock.
+  const fr = await frais.creer(C.achats, { bc_id: b1.id, rubrique: 'transport', fournisseur_nom: 'Trans Express (fictif)', reference_piece: 'TE-DEMO-118',
+    libelle: 'Transport Douala – Yaoundé', montant_ht: 18000, montant_taxe: 3465, methode: 'valeur' });
+  await frais.valider(C.comptable, fr.id);
+  // h) Demande validée puis consultation de trois fournisseurs : deux offres reçues, une attendue.
+  const d5 = await demande('demandeur', cen, 'Réassort jus et riz', [{ article_id: A.jus, quantite: 8 }, { article_id: A.riz, quantite: 12 }]);
+  await soumettreDa('demandeur', d5);
+  await da.decider(C.respachats, d5.id, { decision: 'approuver', commentaire: 'Consulter avant de commander' });
+  const limite = new Date(); limite.setDate(limite.getDate() + 10);
+  const cs = await cons.creer(C.respachats, { demande_id: d5.id, date_limite: limite.toISOString().slice(0, 10), delai_souhaite: 'Sous 7 jours',
+    fournisseur_ids: [fou.sobraga, fou.agro, fou.bureau], validite_offre_jours: 30, conditions_reponse: 'Prix hors taxes, livraison au magasin central.' });
+  const cl = await cons.lancer(C.respachats, cs.id, { envoyer_emails: false });
+  const jetonDe = (fid) => cl.fournisseurs.find((x) => x.fournisseur_id === fid).lien.split('/offre/')[1];
+  for (const f of cl.fournisseurs) await cons.envoyer(C.respachats, cs.id, f.id, { mode: 'manuel', destinataire: 'Lien envoyé par WhatsApp (démo)' });
+  const offre = async (fid, prix, delai, cond) => {
+    const v = await cons.publicLire(jetonDe(fid));
+    await cons.publicSoumettre(jetonDe(fid), { signataire: 'Service commercial (démo)', delai_livraison_jours: delai, conditions_paiement: cond, validite_jours: 30,
+      lignes: v.lignes.map((l) => ({ consultation_ligne_id: l.id, disponibilite: 'disponible', prix_unitaire: prix[l.reference], taux_taxe: 19.25 })) }, '127.0.0.1');
+  };
+  await offre(fou.sobraga, { JUS1: 4700, RIZ25: 14900 }, 5, '30 jours fin de mois');
+  await offre(fou.agro, { JUS1: 4950, RIZ25: 14200 }, 3, 'Comptant à la livraison');
+  etape('Approvisionnement : frais de transport validé (coût réel), consultation lancée avec 2 offres sur 3');
+
   // ── 5. Stock : documents validés et en attente ─────────────────────────
   const docStock = async (qui, valideur, corps) => {
     const d = await sd.creer(C[qui], corps);
@@ -212,7 +253,8 @@ async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = fa
   etape('Stock : transfert, entrée, sortie, inventaire validés ; une sortie à valider');
 
   // ── 6. Ventes ──────────────────────────────────────────────────────────
-  const devis = (client, objet, lignes, extra = {}) => vt.creerDevis(C.commercial, { client_id: client, objet, lignes, ...extra });
+  // 062 : la taxe se choisit sur chaque ligne de l'opération.
+  const devis = (client, objet, lignes, extra = {}) => vt.creerDevis(C.commercial, { client_id: client, objet, lignes: lignes.map((l) => ({ taxe_id: tva, ...l })), ...extra });
   const valider = async (dv, qui = 'respcommercial') => { await vt.soumettreDevis(C.commercial, dv.id); return vt.validerDevis(C[qui], dv.id); };
   // a) Commande livrée en partie + une préparation en attente de validation.
   const v1 = await devis(cli.hotel, 'Approvisionnement du bar', [{ article_id: A.eau, quantite: 10 }, { article_id: A.jus, quantite: 4, remise_pct: 5 },

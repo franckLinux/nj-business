@@ -24,8 +24,12 @@ const TITRES = {
   '/commercial/clients': 'Configuration — Clients',
   '/commercial/taxes': 'Configuration — Taxes',
   '/commercial/utilisateurs': 'Configuration — Utilisateurs et rôles',
-  '/commercial/demandes': 'Achats — Expressions de besoin',
-  '/commercial/demandes/nouvelle': 'Achats — Nouvelle expression de besoin',
+  '/commercial/demandes': 'Achats — Demandes d\'achat',
+  '/commercial/demandes/nouvelle': 'Achats — Nouvelle demande d\'achat',
+  '/commercial/consultations': 'Achats — Consultations des fournisseurs',
+  '/commercial/consultations/nouvelle': 'Achats — Nouvelle demande de proforma',
+  '/commercial/frais': 'Achats — Frais d\'achat',
+  '/commercial/frais/nouveau': 'Achats — Nouveau frais d\'achat',
   '/commercial/autorisations': 'Validations — Autorisations d\'achat',
   '/commercial/bons': 'Achats — Bons de commande',
   '/commercial/bons/nouveau': 'Achats — Préparer un bon de commande',
@@ -66,6 +70,9 @@ const titre = (chemin) => TITRES[chemin]
         : /^\/commercial\/bons\/\d+$/.test(chemin) ? 'Achats — Bon de commande'
         : /^\/commercial\/stock\/documents\//.test(chemin) ? 'Stock — Document de stock'
         : /^\/commercial\/receptions\/\d+/.test(chemin) ? 'Achats — Réception'
+        : /^\/commercial\/consultations\/\d+\/comparatif$/.test(chemin) ? 'Achats — Comparaison des offres'
+        : /^\/commercial\/consultations\/\d+/.test(chemin) ? 'Achats — Consultation des fournisseurs'
+        : /^\/commercial\/frais\/\d+/.test(chemin) ? 'Achats — Frais d\'achat'
           : /^\/commercial\/retours-fournisseurs\/\d+/.test(chemin) ? 'Achats — Retour fournisseur'
             : /^\/commercial\/factures-fournisseurs\/\d+/.test(chemin) ? 'Achats — Facture fournisseur'
               : /^\/commercial\/devis\/\d+/.test(chemin) ? 'Ventes — Devis'
@@ -79,6 +86,9 @@ const I = ICONES;
 const STOCK = ['com.stock.voir', 'com.stock.entree', 'com.stock.sortie', 'com.stock.transfert', 'com.stock.inventaire', 'com.stock.valider', 'com.stock.annuler', 'com.stock.journal', 'com.stock.valorisation'];
 const RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'com.receptions.annuler', 'com.retours_fourn.saisir', 'com.retours_fourn.valider',
   'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
+// 063 : consultations des fournisseurs (demandes de proforma) et frais accessoires d'achat.
+export const DROITS_CONSULTATIONS = ['com.consultations.gerer', 'com.da.voir_tout', 'com.bc.preparer', 'com.bc.emettre'];
+export const DROITS_FRAIS = ['com.frais.saisir', 'com.frais.valider', 'com.factures_fourn.voir', 'com.bc.emettre', 'com.consultations.gerer'];
 const FACTURES = ['com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler'];
 const VENTES = ['com.ventes.voir', 'com.ventes.devis', 'com.ventes.valider', 'com.ventes.valider_direction', 'com.ventes.commandes',
   'com.ventes.preparer', 'com.ventes.livrer', 'com.ventes.annuler'];
@@ -94,10 +104,12 @@ const RUBRIQUES = [
   ] },
   { titre: 'Traitements', groupes: [
     { id: 'achats', titre: 'Achats', icone: I.bon, entrees: [
-      { to: '/commercial/demandes', libelle: 'Expressions de besoin', codes: ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'], icone: I.besoin, badge: 'a_corriger', badgeTitre: 'Vos demandes à corriger' },
+      { to: '/commercial/demandes', libelle: 'Demandes d\'achat', codes: ['com.da.creer', 'com.da.voir_tout', 'com.da.approuver', 'com.da.approuver_direction'], icone: I.besoin, badge: 'a_corriger', badgeTitre: 'Vos demandes à corriger' },
+      { to: '/commercial/consultations', libelle: 'Consultations fournisseurs', codes: DROITS_CONSULTATIONS, icone: I.consultation },
       { to: '/commercial/bons', libelle: 'Bons de commande', codes: ['com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir'], icone: I.bon, badge: 'a_commander', badgeTitre: 'Demandes approuvées à commander' },
       { to: '/commercial/receptions', libelle: 'Réceptions', codes: RECEPTIONS, icone: I.reception, badge: 'bons_a_recevoir', badgeTitre: 'Bons de commande à recevoir' },
       { to: '/commercial/retours-fournisseurs', libelle: 'Retours fournisseurs', codes: RECEPTIONS, icone: I.retour },
+      { to: '/commercial/frais', libelle: 'Frais d\'achat', codes: DROITS_FRAIS, icone: I.frais },
       { to: '/commercial/factures-fournisseurs', libelle: 'Factures fournisseurs', codes: FACTURES, icone: I.facture },
     ] },
     { id: 'ventes', titre: 'Ventes', icone: I.devis, entrees: [

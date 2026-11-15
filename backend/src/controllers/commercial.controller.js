@@ -60,6 +60,10 @@ module.exports = {
   putStockInitial: repondre('stock.initial', (req) => svc.enregistrerStockInitial({ ...ctx(req), body: req.body || {} })),
 
   getUtilisateurs: repondre('utilisateurs', (req) => svc.utilisateurs(req.tenantId)),
+  // 062 : types de gestion (achats, ventes, stock), distincts du rôle hiérarchique.
+  getTypesGestion: repondre('types de gestion', (req) => svc.listerTypesGestion(req.tenantId)),
+  putTypeGestion:  repondre('type de gestion.lot', (req) => svc.personnaliserTypeGestion({ ...ctx(req), code: req.params.code, body: req.body || {} })),
+  putTypesUtilisateur: repondre('types de gestion.utilisateur', (req) => svc.definirTypesUtilisateur({ ...ctx(req), id: req.params.id, body: req.body || {} })),
 };
 
 // ── Livraison B : demandes d'achat et autorisations (services/commercial/demandes.service.js) ──

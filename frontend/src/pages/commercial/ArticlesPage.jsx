@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { Entete, Statut, Tiroir, Section, Champ, Bascule, Cases, ChampUnite, useListe, useDiffere, enregistrer, fmtMontant, fmtQte } from '@/components/commercial/ui';
+import { Entete, Statut, Tiroir, Section, Champ, Bascule, Cases, ChampUnite, UniteRapide, useListe, useDiffere, enregistrer, fmtMontant, fmtQte } from '@/components/commercial/ui';
 
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
@@ -56,16 +56,16 @@ function StockInitial({ article, magasins, onEnregistre }) {
   );
 }
 
-function FicheArticle({ id, references, onFermer, onEnregistre }) {
+function FicheArticle({ id, references, onFermer, onEnregistre, onUniteCreee }) {
   const { can } = useApp();
   const modifiable = can('com.articles.modifier');
-  const { familles, taxes, magasins, fournisseurs, unites } = references;
+  const { familles, magasins, fournisseurs, unites } = references;
   const uniteParDefaut = unites.find((u) => u.actif && ['unité', 'unite', 'pièce', 'piece', 'u'].includes(u.code.toLowerCase())) || unites.find((u) => u.actif);
   const [article, setArticle] = useState(null);
   const [f, setF] = useState(id ? null : {
-    reference: '', designation: '', description: '', famille_id: '', prix_achat_indicatif: '', taxe_id: '', taxe_vente_id: '',
+    reference: '', designation: '', description: '', famille_id: '', prix_achat_indicatif: '',
     unite_stock_id: uniteParDefaut ? String(uniteParDefaut.id) : '', unite_achat_id: '', coef_achat: '', unite_vente_id: '', coef_vente: '', prix_vente_indicatif: '',
-    suivi_stock: true, methode_valorisation: 'cmup', seuil_alerte: '', suivi_comptable: null, actif: true, fournisseur_ids: [], magasin_ids: [],
+    suivi_stock: true, methode_valorisation: 'cmup', seuil_alerte: '', poids_kg: '', suivi_comptable: null, actif: true, fournisseur_ids: [], magasin_ids: [],
   });
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
@@ -80,22 +80,22 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
       unite_achat_id: r.unite_achat_id === r.unite_stock_id ? '' : String(r.unite_achat_id), coef_achat: String(r.coef_achat).replace('.', ','),
       unite_vente_id: r.unite_vente_id === r.unite_stock_id ? '' : String(r.unite_vente_id), coef_vente: String(r.coef_vente).replace('.', ','),
       prix_vente_indicatif: r.prix_vente_indicatif === null ? '' : String(r.prix_vente_indicatif),
-      prix_achat_indicatif: r.prix_achat_indicatif === null ? '' : String(r.prix_achat_indicatif), taxe_id: r.taxe_id ? String(r.taxe_id) : '',
-      taxe_vente_id: r.taxe_vente_id ? String(r.taxe_vente_id) : '', suivi_stock: r.suivi_stock, methode_valorisation: r.methode_valorisation,
-      seuil_alerte: r.seuil_alerte === null ? '' : String(r.seuil_alerte), suivi_comptable: r.suivi_comptable, actif: r.actif,
+      prix_achat_indicatif: r.prix_achat_indicatif === null ? '' : String(r.prix_achat_indicatif),
+      suivi_stock: r.suivi_stock, methode_valorisation: r.methode_valorisation,
+      seuil_alerte: r.seuil_alerte === null ? '' : String(r.seuil_alerte), poids_kg: r.poids_kg === null || r.poids_kg === undefined ? '' : String(r.poids_kg).replace('.', ','),
+      suivi_comptable: r.suivi_comptable, actif: r.actif,
       fournisseur_ids: r.fournisseurs_directs.map((x) => x.id), magasin_ids: r.magasins.map((x) => x.id),
     });
   };
   useEffect(() => { if (id) charger(id); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
-  // Nouvel article : le choix de la famille reprend ses paramètres (taxes, stock, méthode), modifiables ensuite.
+  // Nouvel article : le choix de la famille reprend ses paramètres (unités, stock, méthode), modifiables ensuite.
   const choisirFamille = (e) => {
     const v = e.target.value;
     const fam = familles.find((x) => String(x.id) === v);
     setF((x) => (article || !fam ? { ...x, famille_id: v } : {
-      ...x, famille_id: v, taxe_id: fam.taxe_achat_id ? String(fam.taxe_achat_id) : '', taxe_vente_id: fam.taxe_vente_id ? String(fam.taxe_vente_id) : '',
-      suivi_stock: fam.suivi_stock, methode_valorisation: fam.methode_valorisation,
+      ...x, famille_id: v, suivi_stock: fam.suivi_stock, methode_valorisation: fam.methode_valorisation,
       ...(fam.unite_stock_id ? {
         unite_stock_id: String(fam.unite_stock_id),
         unite_achat_id: fam.unite_achat_id && fam.unite_achat_id !== fam.unite_stock_id ? String(fam.unite_achat_id) : '',
@@ -108,8 +108,7 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
   const valider = async () => {
     if (f.suivi_comptable === null) { setErreur('Indiquez si l\'article est suivi en comptabilité (oui / non).'); return; }
     setEnCours(true);
-    const corps = { ...f, taxe_id: f.taxe_id || null, taxe_vente_id: f.taxe_vente_id || null,
-      unite_achat_id: f.unite_achat_id || f.unite_stock_id, unite_vente_id: f.unite_vente_id || f.unite_stock_id };
+    const corps = { ...f, unite_achat_id: f.unite_achat_id || f.unite_stock_id, unite_vente_id: f.unite_vente_id || f.unite_stock_id };
     if (!f.unite_stock_id) { delete corps.unite_stock_id; delete corps.unite_achat_id; delete corps.unite_vente_id; corps.unite = 'unité'; }
     const r = await enregistrer('/commercial/articles', article?.id, corps);
     setEnCours(false);
@@ -131,6 +130,8 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
   const uAchat = f ? code(f.unite_achat_id || f.unite_stock_id, uStock) : '';
   const uVente = f ? code(f.unite_vente_id || f.unite_stock_id, uStock) : '';
   const viaFamille = famille ? famille.fournisseurs.filter((x) => x.actif) : [];
+  // Unité créée dans la fenêtre rapide (062) : ajoutée à la liste et choisie ; la saisie en cours est gardée.
+  const uniteCreee = (u) => { onUniteCreee(u); setF((x) => ({ ...x, unite_stock_id: String(u.id) })); };
   return (
     <Tiroir titre={article ? article.designation : 'Nouvel article'} sousTitre={article ? `${article.reference} · ${article.famille_nom}` : 'Catalogue des articles'} onFermer={onFermer}
       pied={<>
@@ -171,10 +172,13 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
         <Section titre="Unités et conversions">
           <div className="cm-grille">
             <Champ label="Unité de stock" requis id="aus" aide={article?.utilise ? 'Figée : l\'article a déjà du stock ou des documents.' : 'Celle dans laquelle le stock est compté.'}>
-              <select id="aus" value={f.unite_stock_id} onChange={set('unite_stock_id')} disabled={!modifiable || article?.utilise}>
-                {!f.unite_stock_id && <option value="">« unité » (créée automatiquement)</option>}
-                {unites.filter((u) => u.actif || String(u.id) === f.unite_stock_id).map((u) => <option key={u.id} value={u.id}>{u.code}{u.libelle !== u.code ? ` — ${u.libelle}` : ''}</option>)}
-              </select>
+              <div className="cm-avec-plus">
+                <select id="aus" value={f.unite_stock_id} onChange={set('unite_stock_id')} disabled={!modifiable || article?.utilise}>
+                  {!f.unite_stock_id && <option value="">« unité » (créée automatiquement)</option>}
+                  {unites.filter((u) => u.actif || String(u.id) === f.unite_stock_id).map((u) => <option key={u.id} value={u.id}>{u.code}{u.libelle !== u.code ? ` — ${u.libelle}` : ''}</option>)}
+                </select>
+                {modifiable && !article?.utilise && <UniteRapide unites={unites} onCree={uniteCreee} titre="Créer une unité de stock" />}
+              </div>
             </Champ>
             <div />
             <ChampUnite label="Unité d'achat" id="aua" unites={unites} valeur={f.unite_achat_id} stockId={f.unite_stock_id} disabled={!modifiable || !f.unite_stock_id}
@@ -182,17 +186,15 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
             <ChampUnite label="Unité de vente" id="auv" unites={unites} valeur={f.unite_vente_id} stockId={f.unite_stock_id} disabled={!modifiable || !f.unite_stock_id}
               onUnite={(v) => setF((x) => ({ ...x, unite_vente_id: v === x.unite_stock_id ? '' : v }))} coef={f.coef_vente} onCoef={(v) => setF((x) => ({ ...x, coef_vente: v }))} />
           </div>
-          <p className="cm-aide" style={{ marginTop: 8 }}>Les documents gardent la conversion appliquée le jour de leur saisie : changer un coefficient ne modifie aucun document passé.</p>
+          <p className="cm-aide" style={{ marginTop: 8 }}>Achat et vente reprennent l'unité de stock tant qu'on n'en choisit pas une autre. Les documents gardent la conversion appliquée le jour de leur saisie : changer un coefficient ne modifie aucun document passé.</p>
         </Section>
         <Section titre="Achat">
           <div className="cm-grille">
             <Champ label={`Prix d'achat indicatif (par ${uAchat})`} id="ap" aide="Sert à estimer le montant des demandes."><input id="ap" inputMode="decimal" value={f.prix_achat_indicatif} onChange={set('prix_achat_indicatif')} disabled={!modifiable} /></Champ>
-            <Champ label="Taxe à l'achat" id="at" aide={!article && famille ? 'Reprise de la famille ; modifiable.' : undefined}>
-              <select id="at" value={f.taxe_id} onChange={set('taxe_id')} disabled={!modifiable}>
-                <option value="">Aucune taxe</option>
-                {taxes.filter((x) => x.usage !== 'vente' && (x.actif || String(x.id) === String(f.taxe_id))).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.intitule} ({x.taux.toLocaleString('fr-FR')} %)</option>)}
-              </select>
-            </Champ>
+            <div className="cm-champ">
+              <span className="cm-etiquette">Taxe</span>
+              <span className="cm-aide">Choisie à la saisie de chaque achat (bon de commande, facture fournisseur).</span>
+            </div>
             <div className="cm-champ cm-pleine">
               <span className="cm-etiquette">Fournisseurs de la famille</span>
               {viaFamille.length ? <div className="cm-puces">{viaFamille.map((x) => <span key={x.id} className="cm-puce">{x.nom}</span>)}</div>
@@ -209,12 +211,10 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
         <Section titre="Vente">
           <div className="cm-grille">
             <Champ label={`Prix de vente indicatif (par ${uVente})`} id="apv"><input id="apv" inputMode="decimal" value={f.prix_vente_indicatif} onChange={set('prix_vente_indicatif')} disabled={!modifiable} /></Champ>
-            <Champ label="Taxe à la vente" id="atv" aide="Distincte de la taxe d'achat ; jamais copiée d'office.">
-              <select id="atv" value={f.taxe_vente_id} onChange={set('taxe_vente_id')} disabled={!modifiable}>
-                <option value="">Aucune taxe</option>
-                {taxes.filter((x) => x.usage !== 'achat' && (x.actif || String(x.id) === String(f.taxe_vente_id))).map((x) => <option key={x.id} value={x.id}>{x.code} — {x.intitule} ({x.taux.toLocaleString('fr-FR')} %)</option>)}
-              </select>
-            </Champ>
+            <div className="cm-champ">
+              <span className="cm-etiquette">Taxe</span>
+              <span className="cm-aide">Choisie à la saisie de chaque vente (devis, commande client).</span>
+            </div>
           </div>
         </Section>
         <Section titre="Stock">
@@ -234,7 +234,12 @@ function FicheArticle({ id, references, onFermer, onEnregistre }) {
             )}
           </div>
           <div className="cm-grille">
-            <Champ label={`Seuil d'alerte (${uStock})`} id="asa"><input id="asa" inputMode="decimal" value={f.seuil_alerte} onChange={set('seuil_alerte')} disabled={!modifiable} /></Champ>
+            <Champ label={`Seuil d'alerte — stock de sécurité (${uStock})`} id="asa" aide="Sert aussi de stock de sécurité dans les demandes d'achat.">
+              <input id="asa" inputMode="decimal" value={f.seuil_alerte} onChange={set('seuil_alerte')} disabled={!modifiable} />
+            </Champ>
+            <Champ label={`Poids unitaire (kg par ${uStock})`} id="apk" aide="Facultatif : permet de répartir les frais d'achat au poids.">
+              <input id="apk" inputMode="decimal" value={f.poids_kg} onChange={set('poids_kg')} disabled={!modifiable} />
+            </Champ>
             <div className="cm-champ cm-pleine">
               <span className="cm-etiquette">Magasins où l'article est géré</span>
               <Cases label="Magasins" options={magasins.filter((m) => m.actif || f.magasin_ids.includes(m.id)).map((m) => ({ id: m.id, libelle: `${m.code} — ${m.nom}` }))}
@@ -283,12 +288,17 @@ export default function ArticlesPage() {
 
   useEffect(() => {
     Promise.all([
-      api.get('/commercial/familles'), api.get('/commercial/taxes'), api.get('/commercial/magasins'),
+      api.get('/commercial/familles'), api.get('/commercial/magasins'),
       api.get('/commercial/tiers?type=fournisseur'), api.get('/commercial/unites'),
-    ]).then(([fa, ta, ma, fo, un]) => setRefs({
-      familles: fa?.error ? [] : fa, taxes: ta?.error ? [] : ta, magasins: ma?.error ? [] : ma, fournisseurs: fo?.error ? [] : fo, unites: un?.error ? [] : un,
+    ]).then(([fa, ma, fo, un]) => setRefs({
+      familles: fa?.error ? [] : fa, magasins: ma?.error ? [] : ma, fournisseurs: fo?.error ? [] : fo, unites: un?.error ? [] : un,
     }));
   }, []);
+  // Création rapide d'une unité depuis la fiche : la liste est mise à jour sans fermer la fiche.
+  const ajouterUnite = (u) => {
+    setRefs((r) => ({ ...r, unites: r.unites.some((x) => x.id === u.id) ? r.unites : [...r.unites, u] }));
+    api.get('/commercial/unites').then((un) => { if (Array.isArray(un)) setRefs((r) => ({ ...r, unites: un })); });
+  };
 
   const liste = (donnees || []).filter((a) => statut !== 'inactifs' || !a.actif);
   return (
@@ -317,7 +327,7 @@ export default function ArticlesPage() {
       {erreur && <div className="cm-erreur">{erreur}</div>}
       <div className="cm-table-wrap">
         <table className="cm-table">
-          <thead><tr><th>Référence</th><th>Désignation</th><th>Famille</th><th>Unité</th><th className="cm-num">Prix indicatif</th><th>Taxes achat · vente</th><th>Comptabilité</th><th>Statut</th></tr></thead>
+          <thead><tr><th>Référence</th><th>Désignation</th><th>Famille</th><th>Unité</th><th className="cm-num">Prix indicatif</th><th>Stock</th><th>Comptabilité</th><th>Statut</th></tr></thead>
           <tbody>
             {!donnees ? <tr><td colSpan={8} className="cm-vide">Chargement…</td></tr>
               : liste.length === 0 ? <tr><td colSpan={8} className="cm-vide"><strong>Aucun article</strong>{modifiable ? 'Créez d\'abord les familles, puis les articles.' : ''}</td></tr>
@@ -328,7 +338,7 @@ export default function ArticlesPage() {
                     <td>{a.famille_nom}</td>
                     <td>{a.unite}{a.unite_achat_code !== a.unite ? <span className="cm-sous">achat : {a.unite_achat_code} ×{fmtQte(a.coef_achat)}</span> : null}{a.unite_vente_code !== a.unite ? <span className="cm-sous">vente : {a.unite_vente_code} ×{fmtQte(a.coef_vente)}</span> : null}</td>
                     <td className="cm-num">{fmtMontant(a.prix_achat_indicatif)}</td>
-                    <td>{a.taxe_code || '—'} · {a.taxe_vente_code || '—'}{!a.suivi_stock && <span className="cm-sous">non suivi en stock</span>}</td>
+                    <td>{a.suivi_stock ? <span className="cm-puce">{a.methode_valorisation === 'fifo' ? 'FIFO' : 'CMUP'}</span> : <span className="cm-sous" style={{ marginTop: 0 }}>Non suivi</span>}</td>
                     <td>{a.suivi_comptable ? <span className="cm-pastille cm-violet">Suivi</span> : <span className="cm-pastille cm-off">Non suivi</span>}</td>
                     <td><Statut actif={a.actif} /></td>
                   </tr>
@@ -336,7 +346,7 @@ export default function ArticlesPage() {
           </tbody>
         </table>
       </div>
-      {fiche && refs && <FicheArticle id={fiche === 'nouveau' ? null : fiche} references={refs} onFermer={() => setFiche(null)}
+      {fiche && refs && <FicheArticle id={fiche === 'nouveau' ? null : fiche} references={refs} onFermer={() => setFiche(null)} onUniteCreee={ajouterUnite}
         onEnregistre={(msg, fermer) => { toast(msg, 'success'); recharger(); if (fermer) setFiche(null); }} />}
     </div>
   );

@@ -18,6 +18,12 @@
 //     FIFO, le lot de cette réception est consommé en premier ;
 //   • excédent d'inventaire : dernier coût connu de l'article dans le magasin.
 // La méthode est celle de l'article ; elle ne change plus dès qu'un mouvement valorisé existe.
+//
+// Frais accessoires (063) : le coût d'une réception est son coût d'achat net
+// (cout_achat) + la part des frais accessoires par unité de stock (cout_frais).
+// Des frais validés après la réception mettent à jour cout_frais puis rejouent :
+// la part des quantités déjà sorties passe dans le coût de ces sorties, le reste
+// reste en stock.
 const { sequelize } = require('../../models');
 
 const T = sequelize.QueryTypes;
@@ -51,10 +57,11 @@ const ecrire = async (tr, m) => {
   const sens = ENTREES.includes(m.type) ? 1 : -1;
   const [r] = await Q(
     `INSERT INTO com_stock_mouvements (tenant_id, article_id, magasin_id, type, sens, quantite, date_mouvement, piece, observation,
-       cout_unitaire, document_type, document_id, ligne_id, mouvement_lie_id, cree_par, modifie_par)
-     VALUES (:t, :a, :m, :type, :sens, :q, :d, :piece, :obs, :cout, :dt, :di, :li, :lie, :u, :u) RETURNING id`,
+       cout_unitaire, cout_achat, cout_frais, document_type, document_id, ligne_id, mouvement_lie_id, cree_par, modifie_par)
+     VALUES (:t, :a, :m, :type, :sens, :q, :d, :piece, :obs, :cout, :achat, :frais, :dt, :di, :li, :lie, :u, :u) RETURNING id`,
     { t: m.tenantId, a: m.articleId, m: m.magasinId, type: m.type, sens, q: q3(m.quantite), d: m.date, piece: String(m.piece || '').slice(0, 60),
       obs: String(m.observation || '').slice(0, 500), cout: m.cout === undefined || m.cout === null ? null : c6(m.cout),
+      achat: m.type === 'reception' && m.cout !== undefined && m.cout !== null ? c6(m.cout) : null, frais: c6(m.frais || 0),
       dt: m.documentType || '', di: m.documentId || null, li: m.ligneId || null, lie: m.lieId || null, u: m.userId }, tr);
   return Number(r.id);
 };
@@ -63,7 +70,7 @@ const ecrire = async (tr, m) => {
 const rejouer = async (tr, tenantId, articleId) => {
   const [art] = await Q('SELECT methode_valorisation FROM com_articles WHERE id = :a', { a: articleId }, tr);
   const fifo = art?.methode_valorisation === 'fifo';
-  const mvts = await Q(`SELECT id, magasin_id, type, sens, quantite, date_mouvement, cout_unitaire, valeur, mouvement_lie_id
+  const mvts = await Q(`SELECT id, magasin_id, type, sens, quantite, date_mouvement, cout_unitaire, cout_achat, cout_frais, valeur, mouvement_lie_id
                           FROM com_stock_mouvements WHERE article_id = :a AND NOT annule ORDER BY id`, { a: articleId }, tr);
   const etats = new Map();
   const etat = (mag) => {
@@ -82,6 +89,7 @@ const rejouer = async (tr, tenantId, articleId) => {
       let cout;
       if (m.type === 'transfert_entree') cout = coutSortie.has(Number(m.mouvement_lie_id)) ? coutSortie.get(Number(m.mouvement_lie_id)) : null;
       else if (m.type === 'inventaire_plus') cout = s.dernier;
+      else if (m.type === 'reception' && m.cout_achat !== null) cout = c6(Number(m.cout_achat) + Number(m.cout_frais || 0));
       else cout = m.cout_unitaire === null ? null : Number(m.cout_unitaire);
       if (cout === null) s.aValoriser = true;
       const c = cout ?? 0;

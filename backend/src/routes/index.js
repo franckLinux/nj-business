@@ -183,6 +183,19 @@ router.delete('/controle/inventaires/:id',                 authGuard, tenantGuar
 router.post  ('/controle/inventaires/:id/pv',              authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.postPvInventaire);
 router.post  ('/controle/inventaires/:id/validation',      authGuard, tenantGuard, requirePermission('controle.saisir'),   aiCtrl.postValidationInventaire);
 router.post  ('/controle/inventaires/:id/reouverture',     authGuard, tenantGuard, requirePermission('controle.reouvrir'), aiCtrl.postReouvertureInventaire);
+
+// ── Registre des écarts de caisse (migration 061) ─────────────────────────
+// Lecture controle.view ; constat, affectation, régularisation controle.saisir ;
+// annulation (contre-passation de l'écriture) controle.reouvrir.
+const ecCtrl = require('../controllers/ecarts_caisse.controller');
+router.get ('/controle/ecarts',                     authGuard, tenantGuard, requirePermission('controle.view'),     ecCtrl.getEcarts);
+router.get ('/controle/ecarts/parametres',          authGuard, tenantGuard, requirePermission('controle.view'),     ecCtrl.getParametres);
+router.get ('/controle/ecarts/solde-theorique',     authGuard, tenantGuard, requirePermission('controle.view'),     ecCtrl.getSoldeTheorique);
+router.get ('/controle/ecarts/:id',                 authGuard, tenantGuard, requirePermission('controle.view'),     ecCtrl.getEcart);
+router.post('/controle/ecarts',                     authGuard, tenantGuard, requirePermission('controle.saisir'),   ecCtrl.postEcart);
+router.post('/controle/ecarts/:id/affectation',     authGuard, tenantGuard, requirePermission('controle.saisir'),   ecCtrl.postAffectation);
+router.post('/controle/ecarts/:id/regularisation',  authGuard, tenantGuard, requirePermission('controle.saisir'),   ecCtrl.postRegularisation);
+router.post('/controle/ecarts/:id/annulation',      authGuard, tenantGuard, requirePermission('controle.reouvrir'), ecCtrl.postAnnulation);
 router.get   ('/controle/pv/:objet/:id',                   authGuard, tenantGuard, requirePermission('controle.view'),     aiCtrl.getPv);
 
 // ── Registre des clients / fournisseurs (migration 043) ───────────────────
@@ -230,6 +243,9 @@ const { updateConfigRules } = require('../validators/config.validator');
 router.get('/config',             authGuard, tenantGuard, requirePermission('config.view'), cfgCtrl.getConfig);
 router.put('/config',             authGuard, tenantGuard, requirePermission('config.edit'), updateConfigRules, validate, cfgCtrl.updateConfig);
 router.get('/config/referentiel', authGuard,              cfgCtrl.getReferentiel);
+// 060 : référentiel du plan comptable (SYSCOHADA / SYCEBNL) — état, aperçu, bascule.
+router.get ('/config/plan-referentiel',         authGuard, tenantGuard, requireAnyPermission('config.view', 'plan_comptable.view'), cfgCtrl.getPlanReferentiel);
+router.post('/config/plan-referentiel/bascule', authGuard, tenantGuard, requirePermission('config.edit'), cfgCtrl.postBasculePlan);
 // En-tête des documents imprimés (logo, raison sociale, coordonnées) : lisible
 // par tout utilisateur du client — la caissière imprime des bons sans avoir
 // accès à l'écran de configuration.
@@ -427,6 +443,19 @@ router.get('/verification/bc/:jeton', rateLimit({
   windowMs: 60 * 1000, max: parseInt(process.env.VERIFICATION_RATE_MAX, 10) || 30,
   message: { error: 'Trop de vérifications depuis cet appareil. Réessayez dans une minute.' },
 }), require('../controllers/commercial.controller').getVerification);
+
+// ── NJ COMMERCIAL (063) : portail PUBLIC de réponse des fournisseurs (demande de proforma) ──
+// Lien individuel (jeton de 256 bits) ; aucune session ; débit limité ; seule l'offre du
+// fournisseur concerné est lisible. Hors /commercial, comme la vérification des bons.
+{
+  const portail = require('../controllers/commercial_appro.controller');
+  const limite = rateLimit({ windowMs: 60 * 1000, max: parseInt(process.env.PORTAIL_RATE_MAX, 10) || 40,
+    message: { error: 'Trop de requêtes depuis cet appareil. Réessayez dans une minute.' } });
+  router.get ('/offres-fournisseurs/:jeton',       limite, portail.getOffrePublique);
+  router.get ('/offres-fournisseurs/:jeton/pdf',   limite, portail.getPdfPublic);
+  router.post('/offres-fournisseurs/:jeton',       limite, portail.postOffrePublique);
+  router.post('/offres-fournisseurs/:jeton/refus', limite, portail.postRefusPublic);
+}
 
 // ── NJ COMMERCIAL (migration 050) : /api/commercial/* ─────────────────────
 router.use('/commercial', require('./commercial.routes'));

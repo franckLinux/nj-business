@@ -1,6 +1,8 @@
 // NJ COMMERCIAL — briques d'interface partagées par les écrans du module.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '@/lib/api';
+import { useToast } from '@/context/ToastContext';
 
 export function Entete({ titre, description, children }) {
   return (
@@ -142,6 +144,115 @@ export function ChampUnite({ label, id, unites, valeur, onUnite, coef, onCoef, s
         )}
       </div>
       {aide && <span className="cm-aide">{aide}</span>}
+    </div>
+  );
+}
+
+// ── Création rapide d'une unité (062) ──────────────────────────────────────
+// Bouton « + » placé à côté d'un champ d'unité : ouvre une fenêtre modale AU-DESSUS
+// du formulaire en cours. Le formulaire n'est ni fermé, ni rechargé, ni vidé :
+// Échap, Annuler ou un clic hors de la fenêtre ne ferment que la modale. Après
+// l'enregistrement, `onCree(unite)` reçoit l'unité créée (le parent l'ajoute à sa
+// liste et la sélectionne).
+export const DECIMALES_UNITE = [[0, 'Aucune — nombres entiers (pièce, carton, sac)'], [1, '1 décimale'], [2, '2 décimales'], [3, '3 décimales (kg, litre, mètre)']];
+const memeMot = (a, b) => String(a || '').trim().replace(/\s+/g, ' ').toLowerCase() === String(b || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+export function UniteRapide({ unites = [], onCree, disabled, titre = 'Créer une nouvelle unité' }) {
+  const [ouvert, setOuvert] = useState(false);
+  return (
+    <>
+      <button type="button" className="cm-btn-plus" onClick={() => setOuvert(true)} disabled={disabled} title={titre} aria-label={titre}>+</button>
+      {ouvert && <ModaleUnite unites={unites} onFermer={() => setOuvert(false)} onCree={(x) => { setOuvert(false); onCree(x); }} />}
+    </>
+  );
+}
+
+function ModaleUnite({ unites, onFermer, onCree }) {
+  const toast = useToast();
+  const [f, setF] = useState({ code: '', libelle: '', decimales: '0' });
+  const [erreur, setErreur] = useState('');
+  const [enCours, setEnCours] = useState(false);
+  const boite = useRef(null);
+  const retour = useRef(typeof document !== 'undefined' ? document.activeElement : null);
+  useEffect(() => {
+    // Phase de capture : Échap est arrêté ici et n'atteint jamais le formulaire en dessous.
+    const touche = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); onFermer(); return; }
+      if (e.key === 'Tab' && boite.current) {           // le focus reste dans la fenêtre
+        const z = [...boite.current.querySelectorAll('input, select, button:not([disabled])')];
+        if (!z.length) return;
+        if (e.shiftKey && document.activeElement === z[0]) { e.preventDefault(); z[z.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === z[z.length - 1]) { e.preventDefault(); z[0].focus(); }
+      }
+    };
+    window.addEventListener('keydown', touche, true);
+    boite.current?.querySelector('input')?.focus();
+    return () => { window.removeEventListener('keydown', touche, true); retour.current?.focus?.(); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const code = f.code.trim();
+  const libelle = f.libelle.trim();
+  const doublon = code ? unites.find((x) => [x.code, x.libelle].some((m) => memeMot(m, code) || (libelle && memeMot(m, libelle)))) : null;
+  const valider = async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!code) { setErreur('Indiquez le code de l\'unité (ex. CARTON, SAC, KG).'); return; }
+    if (doublon) { setErreur(`L'unité « ${doublon.code} » existe déjà : choisissez-la dans la liste.`); return; }
+    setEnCours(true); setErreur('');
+    const r = await api.post('/commercial/unites', { code, libelle: libelle || code, decimales: Number(f.decimales) });
+    setEnCours(false);
+    if (r?.error) { setErreur(r.error); return; }
+    toast(`Unité ${r.code} créée et sélectionnée.`, 'success');
+    onCree(r);
+  };
+  return createPortal(
+    <div className="cm-modale-voile" onMouseDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) onFermer(); }}>
+      <form className="cm-modale" role="dialog" aria-modal="true" aria-labelledby="cm-mu-titre" ref={boite} onSubmit={valider} noValidate>
+        <div className="cm-modale-tete">
+          <h3 id="cm-mu-titre">Nouvelle unité de mesure</h3>
+          <button type="button" className="cm-fermer" onClick={onFermer} aria-label="Fermer la fenêtre">✕</button>
+        </div>
+        <div className="cm-modale-corps">
+          <p className="cm-aide" style={{ marginTop: 0, marginBottom: 12 }}>Le formulaire en cours reste ouvert : rien de ce qui est saisi n'est perdu.</p>
+          {erreur && <div className="cm-erreur" role="alert">{erreur}</div>}
+          <div className="cm-grille">
+            <Champ label="Code" requis id="mu-code" aide="Tel qu'il s'affiche sur les documents : CARTON, SAC, KG…">
+              <input id="mu-code" value={f.code} onChange={(e) => { setF({ ...f, code: e.target.value }); setErreur(''); }} maxLength={20} autoComplete="off" />
+            </Champ>
+            <Champ label="Libellé" id="mu-lib" aide="Facultatif. Ex. Carton de 12 bouteilles.">
+              <input id="mu-lib" value={f.libelle} onChange={(e) => { setF({ ...f, libelle: e.target.value }); setErreur(''); }} maxLength={60} autoComplete="off" />
+            </Champ>
+            <Champ label="Décimales autorisées" id="mu-dec" pleine>
+              <select id="mu-dec" value={f.decimales} onChange={(e) => setF({ ...f, decimales: e.target.value })}>
+                {DECIMALES_UNITE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Champ>
+          </div>
+          {doublon && !erreur && <p className="cm-aide" style={{ color: '#b45309', marginTop: 8 }}>« {doublon.code} » existe déjà{doublon.actif ? '' : ' (inactive)'} : inutile de la recréer.</p>}
+        </div>
+        <div className="cm-modale-pied">
+          <button type="button" className="cm-btn cm-secondaire" onClick={onFermer}>Annuler</button>
+          <button type="submit" className="cm-btn cm-primaire" disabled={enCours || !code || Boolean(doublon)}>{enCours ? 'Enregistrement…' : 'Créer l\'unité'}</button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
+// ── Taxe choisie à la saisie de l'opération (062) ─────────────────────────
+// Les taxes ne sont plus portées par les familles ni les articles : on choisit ici
+// la taxe de l'opération, appliquée d'un clic à toutes les lignes (puis modifiable
+// ligne par ligne). `valeur` sert aussi de taxe proposée aux lignes ajoutées ensuite.
+export function TaxeOperation({ taxes, valeur, onChange, onAppliquer, nature = 'achat', disabled }) {
+  return (
+    <div className="cm-applique-tout">
+      <label htmlFor={`taxe-op-${nature}`}><strong>Taxe de l'opération</strong></label>
+      <select id={`taxe-op-${nature}`} value={valeur} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
+        <option value="">Aucune (exonéré)</option>
+        {taxes.map((t) => <option key={t.id} value={t.id}>{t.code} — {String(t.taux).replace('.', ',')} %</option>)}
+      </select>
+      <button type="button" className="cm-btn cm-secondaire" style={{ height: 34 }} onClick={() => onAppliquer(valeur)} disabled={disabled}>Appliquer à toutes les lignes</button>
+      <span className="cm-aide">{nature === 'vente' ? 'Taxes de vente' : 'Taxes d\'achat'} seulement. Chaque ligne reste modifiable.</span>
     </div>
   );
 }

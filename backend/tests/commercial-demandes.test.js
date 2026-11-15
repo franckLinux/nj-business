@@ -85,14 +85,16 @@ before(async () => {
   R.mag2 = (await appel('POST', '/commercial/magasins', 'dir', { code: 'ANX', nom: 'Annexe' })).data.id;
   R.fou = (await appel('POST', '/commercial/tiers', 'dir', { type: 'fournisseur', nom: 'Bureau Plus' })).data.id;
   R.fou2 = (await appel('POST', '/commercial/tiers', 'dir', { type: 'fournisseur', nom: 'Info Services' })).data.id;
-  R.fam = (await appel('POST', '/commercial/familles', 'dir', { code: 'FB', nom: 'Fournitures', fournisseur_ids: [R.fou] })).data.id;
+  R.unite = (await appel('POST', '/commercial/unites', 'dir', { code: 'unité' })).data.id;   // 062 : unité de stock de la famille obligatoire
+  R.fam = (await appel('POST', '/commercial/familles', 'dir', { code: 'FB', nom: 'Fournitures', unite_stock_id: R.unite, fournisseur_ids: [R.fou] })).data.id;
   R.rame = (await appel('POST', '/commercial/articles', 'dir', { reference: 'RAME', designation: 'Rame A4', famille_id: R.fam, unite: 'rame', prix_achat_indicatif: 3500, suivi_comptable: true })).data.id;
   R.pc = (await appel('POST', '/commercial/articles', 'dir', { reference: 'PC', designation: 'Ordinateur portable', famille_id: R.fam, prix_achat_indicatif: 450000, suivi_comptable: true, fournisseur_ids: [R.fou2] })).data.id;
   R.stylo = (await appel('POST', '/commercial/articles', 'dir', { reference: 'STYLO', designation: 'Stylo', famille_id: R.fam, suivi_comptable: false })).data.id;
   await appel('PUT', '/commercial/stock/initial', 'dir', { article_id: R.rame, magasin_id: R.mag, quantite: 100, date_mouvement: '2026-10-01' });
   // Référentiels de B.
   const magB = (await appel('POST', '/commercial/magasins', 'dirB', { code: 'MAG', nom: 'B' })).data.id;
-  const famB = (await appel('POST', '/commercial/familles', 'dirB', { code: 'FB', nom: 'B' })).data.id;
+  const uB = (await appel('POST', '/commercial/unites', 'dirB', { code: 'unité' })).data.id;
+  const famB = (await appel('POST', '/commercial/familles', 'dirB', { code: 'FB', nom: 'B', unite_stock_id: uB })).data.id;
   R.articleB = (await appel('POST', '/commercial/articles', 'dirB', { reference: 'X', designation: 'X', famille_id: famB, suivi_comptable: true })).data.id;
   R.magB = magB;
 });
@@ -119,14 +121,20 @@ test('Brouillon : numéro automatique, stock constaté, fournisseurs proposés',
   assert.equal(d.statut, 'brouillon');
   const rame = d.lignes.find((l) => l.article_id === R.rame);
   assert.deepEqual([rame.stock_actuel.suivi, rame.stock_actuel.disponible, rame.stock_actuel.a_approvisionner], [true, 100, 20]);
-  assert.deepEqual(rame.fournisseurs_proposes.map((f) => f.id), [R.fou], 'fournisseur de la famille');
+  // 063 : aucun fournisseur proposé au demandeur ; le responsable des achats les voit.
+  assert.deepEqual(rame.fournisseurs_proposes, [], 'aucun fournisseur à l\'expression du besoin');
+  assert.equal(rame.stock_ligne.theorique, 20, 'sécurité 0 : 120 demandés − 100 en stock');
+  const vueResp = (await appel('GET', `/commercial/demandes/${d.id}`, 'resp')).data.lignes.find((l) => l.article_id === R.rame);
+  assert.deepEqual(vueResp.fournisseurs_proposes.map((f) => f.id), [R.fou], 'fournisseur de la famille');
   const stylo = d.lignes.find((l) => l.article_id === R.stylo);
   assert.equal(stylo.stock_actuel.suivi, false, 'pas de stock inventé');
   assert.equal(stylo.stock_actuel.disponible, null);
   const d2 = await nouvelle('dem', [{ article_id: R.pc, quantite: 1 }]);
   assert.match(d2.numero, /-0002$/);
   const pc = d2.lignes[0];
-  assert.deepEqual(pc.fournisseurs_proposes.map((f) => f.id).sort(), [R.fou, R.fou2].sort(), 'famille + fournisseur propre à l\'article');
+  const pcResp = (await appel('GET', `/commercial/demandes/${d2.id}`, 'resp')).data.lignes[0];
+  assert.deepEqual(pcResp.fournisseurs_proposes.map((f) => f.id).sort(), [R.fou, R.fou2].sort(), 'famille + fournisseur propre à l\'article');
+  assert.deepEqual(pc.fournisseurs_proposes, []);
   R.d1 = d.id; R.d2 = d2.id;
 });
 

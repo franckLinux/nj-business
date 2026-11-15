@@ -45,19 +45,11 @@ const nombre = (v, nom, { min = 0, max = Number.MAX_SAFE_INTEGER, vide = null } 
   if (!Number.isFinite(n) || n < min || n > max) throw new ErreurCom(400, `${nom} invalide.`);
   return n;
 };
-// Taxe d'achat ou de vente (054) : une taxe réservée aux ventes n'est jamais une taxe
-// d'achat, et inversement. Rien n'est copié d'un usage à l'autre.
+// Taxes (062) : plus aucune taxe sur les familles ni sur les articles. La taxe se
+// choisit sur chaque ligne d'opération (bon de commande, facture fournisseur,
+// devis…), où son taux est copié ; une taxe réservée aux ventes n'y est jamais
+// une taxe d'achat, et inversement (contrôle dans chaque service de document).
 const METHODES = { cmup: 'CMUP (coût moyen unitaire pondéré)', fifo: 'FIFO (premier entré, premier sorti)' };
-const taxePour = async (tenantId, v, usage, tr) => {
-  if (v === undefined || v === null || v === '') return null;
-  const id = entier(v, usage === 'achat' ? 'Taxe d\'achat' : 'Taxe de vente');
-  const [x] = await Q('SELECT id, code, usage FROM com_taxes WHERE id = :id AND tenant_id = :t', { id, t: tenantId }, tr);
-  if (!x) throw new ErreurCom(400, 'Taxe inconnue.');
-  if (x.usage !== 'les_deux' && x.usage !== usage) {
-    throw new ErreurCom(400, `La taxe ${x.code} est réservée aux ${x.usage === 'achat' ? 'achats' : 'ventes'}.`);
-  }
-  return id;
-};
 const methode = (v) => {
   const m = txt(v || 'cmup').toLowerCase();
   if (!METHODES[m]) throw new ErreurCom(400, 'Méthode de valorisation inconnue (CMUP ou FIFO).');
@@ -176,6 +168,13 @@ const modifierSociete = async ({ tenantId, userId, body }) => {
       if (d) {
         await X(`UPDATE tenants SET ${Object.keys(n).map((k) => `${k} = :${k}`).join(', ')} WHERE id = :t`, { ...n, t: tenantId }, tr);
         await auditer(tr, { tenantId, userId, action: 'COM_IDENTITE_ENTITE', id: tenantId, ...d });
+        // 060 : une forme juridique Association / ONG charge le plan SYCEBNL
+        // (et inversement). Bascule non destructive, dans la même transaction.
+        if (n.forme_juridique !== undefined) {
+          const planRef = require('../plan_referentiel.service');
+          const e = await planRef.etat(tenantId, { transaction: tr });
+          if (e.a_basculer) await planRef.basculer(tenantId, e.attendu, userId, { transaction: tr });
+        }
       }
     }
   });
@@ -361,9 +360,18 @@ const enregistrerUnite = async ({ tenantId, userId, id, body }) => {
         avant.decimales = Number(avant.decimales);
       }
       const b = { ...(avant || {}), ...body };
-      const code = txt(b.code);
+      const code = txt(b.code).replace(/\s+/g, ' ');
       if (!/^[\p{L}\p{N}_.\-/ ]{1,20}$/u.test(code)) throw new ErreurCom(400, 'Code de l\'unité : 1 à 20 lettres, chiffres, espace, point, tiret ou barre.');
-      const libelle = longueur(b.libelle || code, 60, 'Libellé');
+      const libelle = longueur(txt(b.libelle).replace(/\s+/g, ' ') || code, 60, 'Libellé');
+      // Pas de doublon (062) : ni le code ni le libellé ne reprennent, sans tenir compte
+      // des majuscules, le code ou le libellé d'une autre unité (« CARTON » / « carton »).
+      if (!avant || avant.code.toLowerCase() !== code.toLowerCase() || avant.libelle.toLowerCase() !== libelle.toLowerCase()) {
+        const [dbl] = await Q(
+          `SELECT code FROM com_unites WHERE tenant_id = :t AND id <> :id
+              AND (lower(code) IN (lower(:c), lower(:l)) OR lower(libelle) IN (lower(:c), lower(:l))) LIMIT 1`,
+          { t: tenantId, id: avant ? avant.id : 0, c: code, l: libelle }, tr);
+        if (dbl) throw new ErreurCom(409, `L'unité « ${dbl.code} » existe déjà (même code ou même libellé).`);
+      }
       const decimales = Number.parseInt(b.decimales ?? 0, 10);
       if (!Number.isInteger(decimales) || decimales < 0 || decimales > 3) throw new ErreurCom(400, 'Décimales : de 0 à 3.');
       const v = { code, libelle, decimales, actif: b.actif === undefined ? true : Boolean(b.actif) };
@@ -474,11 +482,18 @@ const enregistrerFamille = async ({ tenantId, userId, id, body }) => {
       const nom = longueur(b.nom, 120, 'Nom de la famille');
       if (!nom) throw new ErreurCom(400, 'Le nom de la famille est obligatoire.');
       const suivi = booleen(b.suivi_stock, true);
+      // 062 : l'unité de stock est l'unité de référence de la famille (obligatoire) ;
+      // achat et vente valent l'unité de stock tant qu'on n'en choisit pas une autre.
+      const unitesF = await unitesFamille(tenantId, b, tr);
+      if (!unitesF.unite_stock_id) throw new ErreurCom(400, 'L\'unité de stock de la famille est obligatoire.');
+      if (!unitesF.unite_achat_id) { unitesF.unite_achat_id = unitesF.unite_stock_id; unitesF.coef_achat = 1; }
+      if (!unitesF.unite_vente_id) { unitesF.unite_vente_id = unitesF.unite_stock_id; unitesF.coef_vente = 1; }
       const v = {
         code, nom, description: longueur(b.description, 1000, 'Description'), actif: b.actif === undefined ? true : Boolean(b.actif),
-        taxe_achat_id: await taxePour(tenantId, b.taxe_achat_id, 'achat', tr), taxe_vente_id: await taxePour(tenantId, b.taxe_vente_id, 'vente', tr),
+        // 062 : plus de taxe sur la famille ; elle se choisit à la saisie de chaque opération.
+        taxe_achat_id: null, taxe_vente_id: null,
         suivi_stock: suivi, methode_valorisation: methode(b.methode_valorisation),
-        ...await unitesFamille(tenantId, b, tr),
+        ...unitesF,
       };
       let famId;
       if (avant) {
@@ -524,8 +539,12 @@ const TYPES_TAXE = { tva: 'TVA', precompte: 'Précompte / retenue', autre: 'Autr
 const USAGES_TAXE = { achat: 'Achats', vente: 'Ventes', les_deux: 'Achats et ventes' };
 const listerTaxes = async (tenantId, { actifs = '' } = {}) => {
   exigerClient(tenantId);
+  // 062 : une taxe ne s'attache plus aux articles ; on compte les lignes de documents qui l'appliquent.
+  const tables = (await Q(`SELECT t FROM unnest(ARRAY['com_bc_lignes', 'com_facture_fourn_lignes', 'com_devis_lignes', 'com_commande_client_lignes']) t
+                             WHERE to_regclass('public.' || t) IS NOT NULL`, {})).map((r) => r.t);
+  const compte = tables.length ? tables.map((t) => `(SELECT COUNT(*) FROM ${t} l WHERE l.taxe_id = x.id)`).join(' + ') : '0';
   const rows = await Q(
-    `SELECT x.*, (SELECT COUNT(*)::int FROM com_articles a WHERE a.taxe_id = x.id OR a.taxe_vente_id = x.id) AS nb_articles
+    `SELECT x.*, (${compte})::int AS nb_utilisations
        FROM com_taxes x WHERE x.tenant_id = :t AND (:actifs <> '1' OR x.actif) ORDER BY x.actif DESC, upper(x.code)`,
     { t: tenantId, actifs: String(actifs) });
   return rows.map((r) => ({ ...r, id: Number(r.id), taux: Number(r.taux), type_libelle: TYPES_TAXE[r.type], usage_libelle: USAGES_TAXE[r.usage] }));
@@ -562,16 +581,12 @@ const enregistrerTaxe = async ({ tenantId, userId, id, body }) => {
         usage: b.usage || 'les_deux',
       };
       if (!USAGES_TAXE[v.usage]) throw new ErreurCom(400, 'Usage de la taxe inconnu (achats, ventes ou les deux).');
-      // Une taxe déjà choisie comme taxe d'achat (ou de vente) ne peut pas perdre cet usage.
-      if (avant && v.usage !== 'les_deux') {
-        const col = v.usage === 'achat' ? ['taxe_vente_id', 'taxe_vente_id'] : ['taxe_id', 'taxe_achat_id'];
-        const [u] = await Q(`SELECT 1 FROM com_articles WHERE ${col[0]} = :x UNION ALL SELECT 1 FROM com_familles WHERE ${col[1]} = :x LIMIT 1`, { x: avant.id }, tr);
-        if (u) throw new ErreurCom(409, `Cette taxe sert déjà de taxe ${v.usage === 'achat' ? 'de vente' : 'd\'achat'} sur des articles ou des familles.`);
-      }
+      // 062 : la taxe n'est plus portée par les fiches ; changer son usage ne vaut que pour
+      // les saisies à venir (les documents enregistrés gardent la taxe copiée).
       if (v.debut && v.fin && v.fin < v.debut) throw new ErreurCom(400, 'La fin de validité précède le début.');
       // Un taux déjà repris dans un document ne change jamais : on crée une nouvelle taxe datée.
       if (avant && Number(avant.taux) !== taux && await tauxUtilise(Number(avant.id), tr)) {
-        throw new ErreurCom(409, 'Ce taux figure déjà dans des documents d\'achat : désactivez cette taxe et créez-en une nouvelle avec sa date de début.');
+        throw new ErreurCom(409, 'Ce taux figure déjà dans des documents d\'achat ou de vente : désactivez cette taxe et créez-en une nouvelle avec sa date de début.');
       }
       if (avant) {
         await X(`UPDATE com_taxes SET code = :code, intitule = :intitule, taux = :taux, type = :type, description = :description,
@@ -590,11 +605,12 @@ const enregistrerTaxe = async ({ tenantId, userId, id, body }) => {
   } catch (err) { return unicite(err, 'Ce code de taxe existe déjà.'); }
 };
 
-// Les documents d'achat (livraison C) copient le taux ; tant qu'ils n'existent pas, rien n'est figé.
+// Les documents d'achat et de vente copient le taux ; tant qu'aucun ne l'applique, rien n'est figé.
 const tauxUtilise = async (taxeId, tr) => {
-  const [t] = await Q("SELECT to_regclass('public.com_bc_lignes') IS NOT NULL AS ok", {}, tr);
-  if (!t.ok) return false;
-  const [u] = await Q('SELECT 1 FROM com_bc_lignes WHERE taxe_id = :id LIMIT 1', { id: taxeId }, tr);
+  const tables = (await Q(`SELECT t FROM unnest(ARRAY['com_bc_lignes', 'com_facture_fourn_lignes', 'com_devis_lignes', 'com_commande_client_lignes']) t
+                             WHERE to_regclass('public.' || t) IS NOT NULL`, {}, tr)).map((r) => r.t);
+  if (!tables.length) return false;
+  const [u] = await Q(tables.map((t) => `SELECT 1 FROM ${t} WHERE taxe_id = :id`).join(' UNION ALL ') + ' LIMIT 1', { id: taxeId }, tr);
   return Boolean(u);
 };
 
@@ -608,6 +624,14 @@ const CHAMPS_TIERS = {
   contact_telephone: (v) => longueur(v, 40, 'Téléphone du contact'),
   contact_email: (v) => { const s = longueur(v, 150, 'E-mail du contact'); if (s && !EMAIL_RE.test(s)) throw new ErreurCom(400, 'E-mail du contact invalide.'); return s; },
   conditions_paiement: (v) => longueur(v, 300, 'Conditions de paiement'),
+  // 063 : délai habituel de livraison (évaluation des offres, suivi des commandes).
+  delai_livraison_jours: (v) => {
+    if (v === undefined || v === null || txt(v) === '') return null;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 0 || n > 365) throw new ErreurCom(400, 'Délai de livraison : un nombre entier de jours, de 0 à 365.');
+    return n;
+  },
+  delai_type: (v) => { const s = txt(v) || 'calendaires'; if (!['calendaires', 'ouvres'].includes(s)) throw new ErreurCom(400, 'Délai : jours calendaires ou jours ouvrés.'); return s; },
 };
 
 const listerTiers = async (tenantId, { type = '', q = '', actifs = '', avecBanque = false } = {}) => {
@@ -619,6 +643,7 @@ const listerTiers = async (tenantId, { type = '', q = '', actifs = '', avecBanqu
             COALESCE(c.pays, '') AS pays, COALESCE(c.contact_nom, '') AS contact_nom,
             COALESCE(c.contact_telephone, '') AS contact_telephone, COALESCE(c.contact_email, '') AS contact_email,
             COALESCE(c.conditions_paiement, '') AS conditions_paiement,
+            c.delai_livraison_jours, COALESCE(c.delai_type, 'calendaires') AS delai_type,
             COALESCE((SELECT json_agg(json_build_object('id', f.id, 'code', f.code, 'nom', f.nom) ORDER BY upper(f.code))
                         FROM com_famille_fournisseurs ff JOIN com_familles f ON f.id = ff.famille_id
                        WHERE ff.tiers_id = r.id), '[]') AS familles,
@@ -733,6 +758,7 @@ const formaterArticle = (r) => ({
   ...r, id: Number(r.id), famille_id: Number(r.famille_id), taxe_id: r.taxe_id ? Number(r.taxe_id) : null,
   prix_achat_indicatif: r.prix_achat_indicatif === null ? null : Number(r.prix_achat_indicatif),
   seuil_alerte: r.seuil_alerte === null ? null : Number(r.seuil_alerte),
+  poids_kg: r.poids_kg === null || r.poids_kg === undefined ? null : Number(r.poids_kg),
   taxe_taux: r.taxe_taux === null || r.taxe_taux === undefined ? null : Number(r.taxe_taux),
   taxe_vente_id: r.taxe_vente_id ? Number(r.taxe_vente_id) : null,
   unite_stock_id: Number(r.unite_stock_id), unite_achat_id: Number(r.unite_achat_id), unite_vente_id: Number(r.unite_vente_id),
@@ -817,13 +843,9 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
           if (body.unite_achat_id === undefined && fam.unite_achat_id) { b.unite_achat_id = fam.unite_achat_id; b.coef_achat = fam.coef_achat; }
           if (body.unite_vente_id === undefined && fam.unite_vente_id) { b.unite_vente_id = fam.unite_vente_id; b.coef_vente = fam.coef_vente; }
         }
-        if (body.taxe_id === undefined) b.taxe_id = fam.taxe_achat_id;
-        if (body.taxe_vente_id === undefined) b.taxe_vente_id = fam.taxe_vente_id;
         if (body.suivi_stock === undefined) b.suivi_stock = fam.suivi_stock;
         if (body.methode_valorisation === undefined) b.methode_valorisation = fam.methode_valorisation;
       }
-      const taxeId = await taxePour(tenantId, b.taxe_id, 'achat', tr);
-      const taxeVenteId = await taxePour(tenantId, b.taxe_vente_id, 'vente', tr);
       const suiviStock = booleen(b.suivi_stock, true);
       const methodeV = methode(b.methode_valorisation);
       if (avant) {
@@ -855,8 +877,10 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
         unite: uStock.code, unite_stock_id: uStock.id, unite_achat_id: uAchat, unite_vente_id: uVente,
         prix_vente_indicatif: nombre(b.prix_vente_indicatif, 'Prix de vente indicatif', { vide: null }),
         prix_achat_indicatif: nombre(b.prix_achat_indicatif, 'Prix d\'achat indicatif', { vide: null }),
-        taxe_id: taxeId, taxe_vente_id: taxeVenteId, suivi_stock: suiviStock, methode_valorisation: methodeV,
+        // 062 : plus de taxe sur l'article ; elle se choisit à la saisie de chaque opération.
+        taxe_id: null, taxe_vente_id: null, suivi_stock: suiviStock, methode_valorisation: methodeV,
         seuil_alerte: nombre(b.seuil_alerte, 'Seuil d\'alerte', { vide: null }),
+        poids_kg: (() => { const p = nombre(b.poids_kg, 'Poids unitaire', { vide: null }); if (p !== null && !(p > 0)) throw new ErreurCom(400, 'Poids unitaire : un nombre positif (kg).'); return p; })(),
         suivi_comptable: b.suivi_comptable === true || b.suivi_comptable === 'true' || b.suivi_comptable === 1 || b.suivi_comptable === '1',
         actif: b.actif === undefined ? true : Boolean(b.actif),
       };
@@ -865,7 +889,7 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
         artId = Number(avant.id);
         await X(`UPDATE com_articles SET reference = :reference, designation = :designation, description = :description, famille_id = :famille_id,
                    unite = :unite, prix_achat_indicatif = :prix_achat_indicatif, taxe_id = :taxe_id, taxe_vente_id = :taxe_vente_id,
-                   suivi_stock = :suivi_stock, methode_valorisation = :methode_valorisation, seuil_alerte = :seuil_alerte,
+                   suivi_stock = :suivi_stock, methode_valorisation = :methode_valorisation, seuil_alerte = :seuil_alerte, poids_kg = :poids_kg,
                    unite_stock_id = :unite_stock_id, unite_achat_id = :unite_achat_id, unite_vente_id = :unite_vente_id, prix_vente_indicatif = :prix_vente_indicatif,
                    suivi_comptable = :suivi_comptable, actif = :actif, modifie_par = :u, modifie_le = NOW() WHERE id = :id`,
         { ...v, u: userId, id: artId }, tr);
@@ -874,15 +898,15 @@ const enregistrerArticle = async ({ tenantId, userId, id, body }) => {
           unite_stock_id: Number(avant.unite_stock_id), unite_achat_id: Number(avant.unite_achat_id), unite_vente_id: Number(avant.unite_vente_id),
           prix_vente_indicatif: avant.prix_vente_indicatif === null ? null : Number(avant.prix_vente_indicatif),
           prix_achat_indicatif: avant.prix_achat_indicatif === null ? null : Number(avant.prix_achat_indicatif),
-          seuil_alerte: avant.seuil_alerte === null ? null : Number(avant.seuil_alerte) };
+          seuil_alerte: avant.seuil_alerte === null ? null : Number(avant.seuil_alerte), poids_kg: avant.poids_kg === null ? null : Number(avant.poids_kg) };
         const d = differences(norm, v);
         if (d) await auditer(tr, { tenantId, userId, action: 'COM_ARTICLE_MODIFICATION', id: artId, ...d });
       } else {
         const [r] = await Q(`INSERT INTO com_articles (tenant_id, reference, designation, description, famille_id, unite, prix_achat_indicatif,
-                               taxe_id, taxe_vente_id, suivi_stock, methode_valorisation, seuil_alerte, suivi_comptable, actif, cree_par, modifie_par,
+                               taxe_id, taxe_vente_id, suivi_stock, methode_valorisation, seuil_alerte, poids_kg, suivi_comptable, actif, cree_par, modifie_par,
                                unite_stock_id, unite_achat_id, unite_vente_id, prix_vente_indicatif)
                              VALUES (:t, :reference, :designation, :description, :famille_id, :unite, :prix_achat_indicatif,
-                               :taxe_id, :taxe_vente_id, :suivi_stock, :methode_valorisation, :seuil_alerte, :suivi_comptable, :actif, :u, :u,
+                               :taxe_id, :taxe_vente_id, :suivi_stock, :methode_valorisation, :seuil_alerte, :poids_kg, :suivi_comptable, :actif, :u, :u,
                                :unite_stock_id, :unite_achat_id, :unite_vente_id, :prix_vente_indicatif) RETURNING id`, { ...v, t: tenantId, u: userId }, tr);
         artId = Number(r.id);
         await auditer(tr, { tenantId, userId, action: 'COM_ARTICLE_CREATION', id: artId, apres: v });
@@ -1018,17 +1042,121 @@ const enregistrerStockInitial = async ({ tenantId, userId, body }) => {
 const utilisateurs = async (tenantId) => {
   exigerClient(tenantId);
   const perm = require('../permission.service');
+  const avecTypes = await typesGestionPresents();
   const users = await Q(`SELECT u.id, u.username, u.email, u.role, u.actif, r.nom AS profil,
-                                COALESCE((SELECT json_agg(ua.agence_id ORDER BY ua.agence_id) FROM com_utilisateur_agences ua WHERE ua.user_id = u.id), '[]') AS agences
+                                COALESCE((SELECT json_agg(ua.agence_id ORDER BY ua.agence_id) FROM com_utilisateur_agences ua WHERE ua.user_id = u.id), '[]') AS agences,
+                                ${avecTypes ? `COALESCE((SELECT json_agg(ut.type_code ORDER BY tg.ordre) FROM com_utilisateur_types_gestion ut
+                                            JOIN com_types_gestion tg ON tg.code = ut.type_code WHERE ut.user_id = u.id), '[]')` : `'[]'::json`} AS types_gestion
                            FROM users u LEFT JOIN roles r ON r.id = u.custom_role_id
                           WHERE u.tenant_id = :t ORDER BY u.actif DESC, lower(u.username)`, { t: tenantId });
   const out = [];
   for (const u of users) {
     const p = await perm.getEffectivePermissions({ tenantId, userId: u.id, role: u.role });
-    out.push({ ...u, agences: u.agences.map(Number), permissions: (p || []).filter((c) => c.startsWith('com.')) });
+    const parTypes = new Set(await perm.getPermissionsTypes(u.id));
+    const com = (p || []).filter((c) => c.startsWith('com.'));
+    out.push({ ...u, agences: u.agences.map(Number), permissions: com, permissions_types: com.filter((c) => parTypes.has(c)) });
   }
   const catalogue = await Q("SELECT code, nom, description FROM permissions WHERE module = 'commercial' ORDER BY code", {});
-  return { utilisateurs: out, catalogue, agences: await listerAgences(tenantId) };
+  return { utilisateurs: out, catalogue, agences: await listerAgences(tenantId), types_gestion: avecTypes ? await listerTypesGestion(tenantId) : [] };
+};
+
+// ── Types de gestion (062) : achats, ventes, stock ────────────────────────
+// Le type dit le DOMAINE où la personne travaille ; le rôle ou le profil métier
+// garde le NIVEAU. Les droits de niveau (approuver, émettre, valider, annuler,
+// paramétrer) ne s'obtiennent jamais par un type de gestion, même personnalisé.
+const DROITS_DE_NIVEAU = /\.(approuver|approuver_direction|emettre|valider|valider_direction|annuler|livrer)$/;
+const estDroitDeNiveau = (code) => DROITS_DE_NIVEAU.test(code) || code === 'com.parametrage.modifier';
+
+const typesGestionPresents = async (tr) => {
+  const [r] = await Q("SELECT to_regclass('public.com_utilisateur_types_gestion') IS NOT NULL AS ok", {}, tr);
+  return Boolean(r?.ok);
+};
+
+const listerTypesGestion = async (tenantId, tr) => {
+  exigerClient(tenantId);
+  if (!(await typesGestionPresents(tr))) throw new ErreurCom(503, 'Types de gestion indisponibles : la migration 062 n\'est pas encore appliquée.');
+  const rows = await Q(
+    `SELECT tg.code, tg.libelle, tg.description, tg.ordre, (c.tenant_id IS NOT NULL) AS personnalise, c.personnalise_le,
+            COALESCE((SELECT json_agg(d.permission_code ORDER BY d.permission_code) FROM com_type_gestion_permissions_defaut d WHERE d.type_code = tg.code), '[]') AS defaut,
+            COALESCE((SELECT json_agg(pc.permission_code ORDER BY pc.permission_code) FROM com_type_gestion_permissions_client pc
+                       WHERE pc.tenant_id = :t AND pc.type_code = tg.code), '[]') AS client,
+            (SELECT COUNT(*)::int FROM com_utilisateur_types_gestion ut WHERE ut.tenant_id = :t AND ut.type_code = tg.code) AS nb_utilisateurs
+       FROM com_types_gestion tg
+       LEFT JOIN com_types_gestion_client c ON c.tenant_id = :t AND c.type_code = tg.code
+      WHERE tg.actif ORDER BY tg.ordre, tg.code`, { t: tenantId }, tr);
+  return rows.map((r) => ({ code: r.code, libelle: r.libelle, description: r.description, personnalise: r.personnalise,
+    personnalise_le: r.personnalise_le, nb_utilisateurs: r.nb_utilisateurs,
+    permissions: r.personnalise ? r.client : r.defaut, permissions_defaut: r.defaut }));
+};
+
+// Types de gestion d'une personne : liste complète (remplace l'ancienne). Vide = aucun.
+const definirTypesUtilisateur = async ({ tenantId, userId, id, body }) => {
+  exigerClient(tenantId);
+  if (!Array.isArray(body.types)) throw new ErreurCom(400, 'Liste des types de gestion attendue (achats, ventes, stock).');
+  const types = [...new Set(body.types.map((t) => txt(t).toLowerCase()))];
+  await sequelize.transaction(async (tr) => {
+    if (!(await typesGestionPresents(tr))) throw new ErreurCom(503, 'Types de gestion indisponibles : la migration 062 n\'est pas encore appliquée.');
+    const [u] = await Q('SELECT id, username FROM users WHERE id::text = :u AND tenant_id = :t FOR UPDATE', { u: txt(id), t: tenantId }, tr);
+    if (!u) throw new ErreurCom(404, 'Utilisateur introuvable pour ce client.');
+    if (types.length) {
+      const ok = await Q('SELECT code FROM com_types_gestion WHERE actif AND code IN (:c)', { c: types }, tr);
+      if (ok.length !== types.length) throw new ErreurCom(400, 'Type de gestion inconnu (achats, ventes ou stock).');
+    }
+    const avant = (await Q('SELECT type_code FROM com_utilisateur_types_gestion WHERE user_id = :u ORDER BY type_code', { u: u.id }, tr)).map((r) => r.type_code);
+    await X('DELETE FROM com_utilisateur_types_gestion WHERE user_id = :u AND NOT (type_code = ANY (CAST(:c AS TEXT[])))',
+      { u: u.id, c: `{${types.join(',')}}` }, tr);
+    for (const c of types) {
+      await X(`INSERT INTO com_utilisateur_types_gestion (user_id, type_code, tenant_id, attribue_par) VALUES (:u, :c, :t, :p)
+               ON CONFLICT (user_id, type_code) DO NOTHING`, { u: u.id, c, t: tenantId, p: userId }, tr);
+    }
+    const apres = [...types].sort();
+    if (JSON.stringify(avant) !== JSON.stringify(apres)) {
+      await auditer(tr, { tenantId, userId, action: 'COM_TYPES_GESTION_UTILISATEUR', id: u.id,
+        avant: { username: u.username, types: avant }, apres: { username: u.username, types: apres } });
+    }
+  });
+  return utilisateurs(tenantId);
+};
+
+// Lot de permissions d'un type pour CE client : liste choisie, ou retour au lot par défaut.
+const personnaliserTypeGestion = async ({ tenantId, userId, code, body }) => {
+  exigerClient(tenantId);
+  const type = txt(code).toLowerCase();
+  await sequelize.transaction(async (tr) => {
+    if (!(await typesGestionPresents(tr))) throw new ErreurCom(503, 'Types de gestion indisponibles : la migration 062 n\'est pas encore appliquée.');
+    const [tg] = await Q('SELECT code, libelle FROM com_types_gestion WHERE code = :c AND actif', { c: type }, tr);
+    if (!tg) throw new ErreurCom(404, 'Type de gestion inconnu.');
+    const avant = (await listerTypesGestion(tenantId, tr)).find((x) => x.code === tg.code);
+    if (body.defaut === true) {
+      await X('DELETE FROM com_types_gestion_client WHERE tenant_id = :t AND type_code = :c', { t: tenantId, c: tg.code }, tr);
+      if (avant.personnalise) {
+        await auditer(tr, { tenantId, userId, action: 'COM_TYPE_GESTION_DEFAUT', id: tg.code, avant: { permissions: avant.permissions }, apres: { permissions: avant.permissions_defaut } });
+      }
+      return;
+    }
+    if (!Array.isArray(body.permissions)) throw new ErreurCom(400, 'Liste des permissions attendue.');
+    const codes = [...new Set(body.permissions.map(txt))];
+    const niveau = codes.filter(estDroitDeNiveau);
+    if (niveau.length) {
+      throw new ErreurCom(400, `Droits de validation ou de paramétrage, attribués par le rôle ou le profil et jamais par un type de gestion : ${niveau.join(', ')}.`);
+    }
+    if (codes.some((c) => !c.startsWith('com.'))) throw new ErreurCom(400, 'Un type de gestion ne porte que des permissions de NJ COMMERCIAL.');
+    if (codes.length) {
+      const connus = await Q("SELECT code FROM permissions WHERE module = 'commercial' AND code IN (:c)", { c: codes }, tr);
+      if (connus.length !== codes.length) throw new ErreurCom(400, 'Permission inconnue dans la liste.');
+    }
+    const { verifierCodesAccordables } = require('../permission.service');
+    const { erreur } = await verifierCodesAccordables(codes, tenantId);
+    if (erreur) throw new ErreurCom(400, erreur);
+    await X(`INSERT INTO com_types_gestion_client (tenant_id, type_code, personnalise_par) VALUES (:t, :c, :u)
+             ON CONFLICT (tenant_id, type_code) DO UPDATE SET personnalise_par = :u, personnalise_le = NOW()`, { t: tenantId, c: tg.code, u: userId }, tr);
+    await X('DELETE FROM com_type_gestion_permissions_client WHERE tenant_id = :t AND type_code = :c', { t: tenantId, c: tg.code }, tr);
+    for (const p of codes) {
+      await X('INSERT INTO com_type_gestion_permissions_client (tenant_id, type_code, permission_code) VALUES (:t, :c, :p)', { t: tenantId, c: tg.code, p }, tr);
+    }
+    await auditer(tr, { tenantId, userId, action: 'COM_TYPE_GESTION_PERSONNALISATION', id: tg.code, avant: { permissions: avant.permissions }, apres: { permissions: [...codes].sort() } });
+  });
+  return listerTypesGestion(tenantId);
 };
 
 // Périmètre d'une personne : aucune agence = tout le client ; sinon ces agences seulement.
@@ -1062,4 +1190,5 @@ module.exports = {
   listerArticles, lireArticle, enregistrerArticle, supprimerArticle,
   consulterStock, enregistrerStockInitial, stockArticle,
   utilisateurs,
+  listerTypesGestion, definirTypesUtilisateur, personnaliserTypeGestion,
 };

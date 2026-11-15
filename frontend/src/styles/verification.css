@@ -30,3 +30,36 @@
   .njv-marque { color: #93c5fd; } .njv-resultat.njv-ok { color: #bbf7d0 !important; } .njv-resultat.njv-ko { color: #fecaca !important; }
   .njv-bouton { background: #2563eb; }
 }
+
+/* 063 — Portail de réponse des fournisseurs (demande de proforma), même charte que la vérification. */
+.njp-carte { width: min(860px, 100%); }
+.njp-tete { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.njp-logo { width: 56px; height: 56px; object-fit: contain; border-radius: 10px; border: 1px solid var(--njv-trait); background: #fff; }
+.njp-conditions { font-size: 13px; line-height: 1.55; color: var(--njv-doux); background: var(--njv-fond); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; white-space: pre-wrap; }
+.njp-lien { color: #1d4ed8; font-weight: 700; }
+.njp-titre2 { font-size: 15px; font-weight: 800; margin: 20px 0 6px; }
+.njp-lignes { display: flex; flex-direction: column; gap: 10px; }
+.njp-ligne { border: 1px solid var(--njv-trait); border-radius: 12px; padding: 12px 14px; margin: 0; min-width: 0; }
+.njp-ligne legend { padding: 0 6px; font-size: 14px; }
+.njp-ligne legend span { color: var(--njv-doux); font-size: 12.5px; margin-left: 4px; }
+.njp-grille { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px 14px; }
+.njp-grille label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 700; color: var(--njv-texte); }
+.njp-grille .njp-pleine { grid-column: 1 / -1; }
+.njp-grille input, .njp-grille select, .njp-grille textarea { height: 40px; border: 1.5px solid var(--njv-trait); border-radius: 9px; padding: 0 10px; font: inherit; font-size: 14px; font-weight: 400; background: var(--njv-carte); color: var(--njv-texte); }
+.njp-grille textarea { height: 80px; padding: 8px 10px; resize: vertical; }
+.njp-grille input[type=file] { height: auto; padding: 8px; }
+.njp-grille input:focus, .njp-grille select:focus, .njp-grille textarea:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, .18); }
+.njp-montant { margin: 8px 0 0; font-size: 13px; color: var(--njv-doux); text-align: right; }
+.njp-total { margin: 12px 0 0; font-size: 14px; text-align: right; }
+.njp-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; margin-top: 18px; }
+.njp-bouton { border: 0; font-family: inherit; }
+.njp-bouton:disabled, .njp-secondaire:disabled { opacity: .55; cursor: not-allowed; }
+.njp-secondaire { height: 40px; padding: 0 16px; border-radius: 9px; border: 1.5px solid var(--njv-trait); background: var(--njv-carte); color: var(--njv-texte); font: inherit; font-weight: 700; font-size: 13.5px; cursor: pointer; }
+.njp-erreur { margin-top: 14px !important; background: #fef2f2; }
+.njp-recap h2 { font-size: 14px; margin: 0 0 8px; }
+.njp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.njp-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--njv-doux); border-bottom: 1px solid var(--njv-trait); padding: 6px; }
+.njp-table td { border-bottom: 1px solid var(--njv-trait); padding: 8px 6px; vertical-align: top; }
+.njp-table td span { display: block; color: var(--njv-doux); font-size: 12px; }
+@media (max-width: 480px) { .njp-actions > * { flex: 1; } .njp-tete { align-items: flex-start; } }
+@media (prefers-color-scheme: dark) { .njp-lien { color: #93c5fd; } .njp-erreur { background: #3b0a0a; } }

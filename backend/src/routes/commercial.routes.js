@@ -17,7 +17,9 @@ router.get ('/societe',            ...P('com.parametrage.voir'),     c.getSociet
 router.put ('/societe',            ...P('com.parametrage.modifier'), c.putSociete);
 
 router.get ('/unites',             ...LECTURE,                       c.getUnites);
-router.post('/unites',             ...P('com.parametrage.modifier'), c.postUnite);
+// 062 : création rapide depuis la fiche d'un article, ouverte aussi à qui gère les articles
+// (la modification d'une unité existante reste au paramétrage).
+router.post('/unites',             ...[...base, requireAnyPermission('com.parametrage.modifier', 'com.articles.modifier')], c.postUnite);
 router.put ('/unites/:id',         ...P('com.parametrage.modifier'), c.putUnite);
 router.get ('/agences',            ...LECTURE,                       c.getAgences);
 router.post('/agences',            ...P('com.parametrage.modifier'), c.postAgence);
@@ -50,6 +52,9 @@ router.put ('/stock/initial',      ...P('com.stock.initial'),        c.putStockI
 
 // Droits de chacun : réservé à qui administre le module.
 router.get ('/utilisateurs',       ...P('com.parametrage.modifier'), c.getUtilisateurs);
+router.put ('/utilisateurs/:id/types-gestion', ...P('com.parametrage.modifier'), c.putTypesUtilisateur);
+router.get ('/types-gestion',      ...P('com.parametrage.modifier'), c.getTypesGestion);
+router.put ('/types-gestion/:code', ...P('com.parametrage.modifier'), c.putTypeGestion);
 
 // ── Livraison B : demandes d'achat (les droits fins — auteur, étape, auto-validation —
 // sont vérifiés par le service ; ici, l'entrée minimale du module achats).
@@ -68,7 +73,8 @@ router.post  ('/demandes/:id/pieces/:doc/retrait', ...P('com.documents.ajouter')
 router.get   ('/demandes/:id/pieces/:doc',      ...DA, c.getPiece);
 
 // ── Livraison C : bons de commande (contrôles fins dans le service) ─────────
-const BC_VUE = [...base, requireAnyPermission('com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir')];
+const BC_VUE = [...base, requireAnyPermission('com.bc.preparer', 'com.bc.emettre', 'com.bc.annuler', 'com.da.voir_tout', 'com.tableau_bord.voir',
+  'com.factures_fourn.voir', 'com.frais.saisir', 'com.consultations.gerer')];
 router.get   ('/bons-commande',                          ...BC_VUE, c.getBons);
 router.get   ('/bons-commande/a-commander',              ...P('com.bc.preparer'), c.getACommander);
 router.get   ('/bons-commande/proposition/:id',          ...P('com.bc.preparer'), c.getProposition);
@@ -198,5 +204,36 @@ router.get   ('/livraisons/:id/pieces/:doc',             ...VT_VUE, c.pieceVente
 router.get   ('/tableau-bord',                           ...P('com.tableau_bord.voir'), c.getTableau);
 router.get   ('/documents',                              ...BC_VUE, c.getDocuments);
 router.get   ('/historique',                             ...[...base, requireAnyPermission('com.da.voir_tout', 'com.tableau_bord.voir')], c.getHistorique);
+
+// ── Lot 8 (063) : consultations, frais accessoires, envoi des bons (contrôles fins dans les services) ──
+const a = require('../controllers/commercial_appro.controller');
+const CONS_VUE = [...base, requireAnyPermission('com.consultations.gerer', 'com.da.voir_tout', 'com.bc.preparer', 'com.bc.emettre')];
+const CONS = P('com.consultations.gerer');
+router.get   ('/consultations',                          ...CONS_VUE, a.getConsultations);
+router.get   ('/consultations/:id',                      ...CONS_VUE, a.getConsultation);
+router.get   ('/consultations/:id/comparatif',           ...CONS_VUE, a.getComparatif);
+router.get   ('/consultations/:id/fournisseurs/:cf/pdf', ...CONS_VUE, a.getPdfConsultation);
+router.get   ('/consultations/:id/offres/:offre/proforma', ...CONS_VUE, a.getProformaOffre);
+router.post  ('/consultations',                          ...CONS, a.postConsultation);
+router.put   ('/consultations/:id',                      ...CONS, a.putConsultation);
+router.post  ('/consultations/:id/lancement',            ...CONS, a.postLancement);
+router.post  ('/consultations/:id/fournisseurs',         ...CONS, a.postAjoutFournisseur);
+router.post  ('/consultations/:id/fournisseurs/:cf/envoi', ...CONS, a.postEnvoiConsultation);
+router.post  ('/consultations/:id/fournisseurs/:cf/reouverture', ...CONS, a.postReouverture);
+router.post  ('/consultations/:id/annulation',           ...CONS, a.postAnnulationConsultation);
+router.post  ('/consultations/:id/attribution',          ...CONS, a.postAttribution);
+const FRAIS_VUE = [...base, requireAnyPermission('com.frais.saisir', 'com.frais.valider', 'com.factures_fourn.voir', 'com.bc.emettre', 'com.consultations.gerer')];
+router.get   ('/frais',                                  ...FRAIS_VUE, a.getFrais);
+router.post  ('/frais/apercu',                           ...P('com.frais.saisir'), a.postApercuFrais);
+router.get   ('/frais/:id',                              ...FRAIS_VUE, a.getUnFrais);
+router.post  ('/frais',                                  ...P('com.frais.saisir'), a.postFrais);
+router.put   ('/frais/:id',                              ...P('com.frais.saisir'), a.putFrais);
+router.delete('/frais/:id',                              ...P('com.frais.saisir'), a.deleteFrais);
+router.post  ('/frais/:id/validation',                   ...P('com.frais.valider'), a.postValidationFrais);
+router.post  ('/frais/:id/annulation',                   ...P('com.frais.valider'), a.postAnnulationFrais);
+router.post  ('/frais/:id/pieces',                       ...P('com.frais.saisir'), a.postPieceFrais);
+router.get   ('/frais/:id/pieces/:doc',                  ...FRAIS_VUE, a.getPieceFrais);
+router.get   ('/bons-commande/:id/couts',                ...BC_VUE, a.getCoutsBon);
+router.post  ('/bons-commande/:id/envoi',                ...P('com.bc.emettre'), a.postEnvoiBon);
 
 module.exports = router;

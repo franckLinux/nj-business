@@ -1,6 +1,6 @@
 // tests/commercial-agences.test.js — NJ COMMERCIAL, lot 2 (migration 054).
 //
-//  Société → Agences → Magasins ; familles (taxes d'achat et de vente, suivi en
+//  Société → Agences → Magasins ; familles (unités, — taxes retirées en 062 —, suivi en
 //  stock, méthode de valorisation) reprises par l'article puis modifiables ;
 //  usage des taxes ; périmètre par agence (lecture, saisie, listes, tableau de
 //  bord, notifications) ; isolation entre clients.
@@ -136,46 +136,40 @@ test('Agence : désactivation refusée tant qu\'un magasin est actif ; historiqu
   assert.ok(a.length >= 2, 'créations tracées');
 });
 
-test('Familles : taxes d\'achat et de vente distinctes, usage contrôlé ; l\'article hérite puis s\'en détache', async () => {
-  const mauvaise = await appel('POST', '/commercial/familles', 'dir', { code: 'X1', nom: 'Erreur', taxe_achat_id: R.tvaV });
-  assert.equal(mauvaise.status, 400);
-  assert.match(mauvaise.message, /réservée aux ventes/);
-  const f = await appel('POST', '/commercial/familles', 'dir', { code: 'BUR', nom: 'Bureautique', taxe_achat_id: R.prec, taxe_vente_id: R.tvaV,
+test('Familles et articles sans taxe (062) ; l\'article hérite unités, suivi et méthode puis s\'en détache', async () => {
+  R.u = (await appel('POST', '/commercial/unites', 'dir', { code: 'unité' })).data.id;
+  // Une taxe envoyée par un ancien écran est ignorée : la famille n'en porte plus.
+  const f = await appel('POST', '/commercial/familles', 'dir', { code: 'BUR', nom: 'Bureautique', unite_stock_id: R.u, taxe_achat_id: R.prec, taxe_vente_id: R.tvaV,
     suivi_stock: true, methode_valorisation: 'fifo', fournisseur_ids: [R.fou] });
   assert.equal(f.status, 201, f.message);
-  assert.equal(f.data.taxe_achat_code, 'PRECA');
-  assert.equal(f.data.taxe_vente_code, 'TVAV');
+  assert.equal(f.data.taxe_achat_id, null);
+  assert.equal(f.data.taxe_vente_id, null);
+  assert.equal(f.data.unite_achat_id, R.u, 'achat = unité de stock par défaut');
+  assert.equal(f.data.unite_vente_id, R.u, 'vente = unité de stock par défaut');
   R.fam = f.data.id;
-  // Article créé sans préciser : tout vient de la famille.
-  const a = await appel('POST', '/commercial/articles', 'dir', { reference: 'RAME', designation: 'Rame A4', famille_id: R.fam, unite: 'rame', prix_achat_indicatif: 3500, suivi_comptable: true });
+  const a = await appel('POST', '/commercial/articles', 'dir', { reference: 'RAME', designation: 'Rame A4', famille_id: R.fam, unite: 'rame', prix_achat_indicatif: 3500, suivi_comptable: true, taxe_id: R.tva });
   assert.equal(a.status, 201, a.message);
-  assert.equal(a.data.taxe_id, R.prec);
-  assert.equal(a.data.taxe_vente_id, R.tvaV);
+  assert.equal(a.data.taxe_id, null, 'aucune taxe sur l\'article');
+  assert.equal(a.data.taxe_vente_id, null);
   assert.equal(a.data.methode_valorisation, 'fifo');
   assert.equal(a.data.suivi_stock, true);
   R.rame = a.data.id;
-  // Modifiable sur l'article…
   const b = await appel('POST', '/commercial/articles', 'dir', { reference: 'STYLO', designation: 'Stylo', famille_id: R.fam, suivi_comptable: false,
-    taxe_id: R.tva, taxe_vente_id: '', methode_valorisation: 'cmup', suivi_stock: false });
+    methode_valorisation: 'cmup', suivi_stock: false });
   assert.equal(b.status, 201, b.message);
-  assert.equal(b.data.taxe_id, R.tva);
-  assert.equal(b.data.taxe_vente_id, null, 'jamais de taxe de vente copiée d\'office');
   assert.equal(b.data.methode_valorisation, 'cmup');
+  assert.equal(b.data.unite_stock_id, R.u, 'unité de stock reprise de la famille');
   R.stylo = b.data.id;
-  // … et la famille modifiée ne touche plus les articles existants.
-  assert.equal((await appel('PUT', `/commercial/familles/${R.fam}`, 'dir', { methode_valorisation: 'cmup', taxe_achat_id: R.tva })).status, 200);
-  const relu = (await appel('GET', `/commercial/articles/${R.rame}`, 'dir')).data;
-  assert.equal(relu.methode_valorisation, 'fifo');
-  assert.equal(relu.taxe_id, R.prec);
-  // Taxe de vente choisie comme taxe d'achat sur l'article : refusée.
-  assert.equal((await appel('PUT', `/commercial/articles/${R.rame}`, 'dir', { taxe_id: R.tvaV })).status, 400);
+  // La famille modifiée ne touche plus les articles existants.
+  assert.equal((await appel('PUT', `/commercial/familles/${R.fam}`, 'dir', { methode_valorisation: 'cmup' })).status, 200);
+  assert.equal((await appel('GET', `/commercial/articles/${R.rame}`, 'dir')).data.methode_valorisation, 'fifo');
 });
 
-test('Usage d\'une taxe : ne peut pas perdre un usage déjà employé', async () => {
-  const r = await appel('PUT', `/commercial/taxes/${R.tvaV}`, 'dir', { usage: 'achat' });
-  assert.equal(r.status, 409);
-  assert.match(r.message, /taxe de vente/);
+test('Usage d\'une taxe : modifiable tant qu\'aucun document ne l\'applique', async () => {
+  assert.equal((await appel('PUT', `/commercial/taxes/${R.tvaV}`, 'dir', { usage: 'vente' })).status, 200);
   assert.equal((await appel('PUT', `/commercial/taxes/${R.tva}`, 'dir', { usage: 'achat' })).status, 200);
+  const l = (await appel('GET', '/commercial/taxes', 'dir')).data.find((x) => x.id === R.tva);
+  assert.equal(l.nb_utilisations, 0);
 });
 
 test('Suivi en stock : pas de stock pour un article non suivi ; un article avec stock reste suivi', async () => {

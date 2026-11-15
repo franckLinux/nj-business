@@ -56,10 +56,13 @@ const creerUtilisateur = async (cle, role, tenant, profil = null) => {
   U[cle] = { id: u.id, username, token: jwt.sign({ sub: u.id, username, role, tenantId: tenant }, SECRET, { expiresIn: '1h' }) };
 };
 // Demande approuvée (soumise par dem, approuvée par resp) ; renvoie la demande lue.
+// 063 : le demandeur n'indique aucun fournisseur ; le responsable des achats le propose en approuvant.
 const demandeApprouvee = async (lignes) => {
-  const d = (await appel('POST', '/commercial/demandes', 'dem', { magasin_id: R.mag, motif: 'Besoin de fournitures', lignes })).data;
+  const d = (await appel('POST', '/commercial/demandes', 'dem', { magasin_id: R.mag, motif: 'Besoin de fournitures',
+    lignes: lignes.map(({ fournisseur_id, ...l }) => l) })).data;
   await appel('POST', `/commercial/demandes/${d.id}/soumission`, 'dem', {});
-  const r = await appel('POST', `/commercial/demandes/${d.id}/decision`, 'resp', { decision: 'approuver' });
+  const fournisseurs = d.lignes.map((l) => ({ id: l.id, fournisseur_id: lignes.find((x) => x.article_id === l.article_id)?.fournisseur_id || '' }));
+  const r = await appel('POST', `/commercial/demandes/${d.id}/decision`, 'resp', { decision: 'approuver', lignes: fournisseurs });
   assert.equal(r.data.statut, 'approuvee', r.message);
   return r.data;
 };
@@ -93,8 +96,10 @@ before(async () => {
   R.fou = (await appel('POST', '/commercial/tiers', 'dir', { type: 'fournisseur', nom: 'Bureau Plus SARL', ville: 'Douala', conditions_paiement: '30 jours fin de mois' })).data.id;
   R.fou2 = (await appel('POST', '/commercial/tiers', 'dir', { type: 'fournisseur', nom: 'Papeterie Centrale' })).data.id;
   R.tva = (await appel('POST', '/commercial/taxes', 'dir', { code: 'TVA', intitule: 'TVA', taux: '19,25' })).data.id;
-  R.fam = (await appel('POST', '/commercial/familles', 'dir', { code: 'FB', nom: 'Fournitures', fournisseur_ids: [R.fou, R.fou2] })).data.id;
-  R.rame = (await appel('POST', '/commercial/articles', 'dir', { reference: 'RAME', designation: 'Rame A4 80 g', famille_id: R.fam, unite: 'rame', prix_achat_indicatif: 3500, taxe_id: R.tva, suivi_comptable: true })).data.id;
+  // 062 : l'unité de stock de la famille est obligatoire ; plus de taxe sur l'article.
+  R.unite = (await appel('POST', '/commercial/unites', 'dir', { code: 'unité' })).data.id;
+  R.fam = (await appel('POST', '/commercial/familles', 'dir', { code: 'FB', nom: 'Fournitures', unite_stock_id: R.unite, fournisseur_ids: [R.fou, R.fou2] })).data.id;
+  R.rame = (await appel('POST', '/commercial/articles', 'dir', { reference: 'RAME', designation: 'Rame A4 80 g', famille_id: R.fam, unite: 'rame', prix_achat_indicatif: 3500, suivi_comptable: true })).data.id;
   R.stylo = (await appel('POST', '/commercial/articles', 'dir', { reference: 'STYLO', designation: 'Stylo bille bleu', famille_id: R.fam, prix_achat_indicatif: 150, suivi_comptable: false })).data.id;
   R.agraf = (await appel('POST', '/commercial/articles', 'dir', { reference: 'AGRAF', designation: 'Agrafeuse', famille_id: R.fam, suivi_comptable: true })).data.id;
 });
@@ -141,7 +146,7 @@ test('Préparation : uniquement depuis une demande approuvée, quantités et dro
 test('Calculs : HT, remise, taxe, TTC arrondis au franc ; conditions reprises du fournisseur', async () => {
   const d = R.d;
   const r = await appel('POST', '/commercial/bons-commande', 'gas', { demande_id: d.id, fournisseur_id: R.fou, delai_livraison: 'Sous 10 jours',
-    lignes: [{ demande_ligne_id: ligneDe(d, R.rame), quantite: 60, prix_unitaire: 3500, remise_pct: 5 }] });
+    lignes: [{ demande_ligne_id: ligneDe(d, R.rame), quantite: 60, prix_unitaire: 3500, remise_pct: 5, taxe_id: R.tva }] });
   assert.equal(r.status, 201, r.message);
   const bc = r.data;
   R.bc = bc.id;
@@ -149,7 +154,7 @@ test('Calculs : HT, remise, taxe, TTC arrondis au franc ; conditions reprises du
   assert.equal(bc.conditions_paiement, '30 jours fin de mois', 'repris de la fiche fournisseur');
   const l = bc.lignes[0];
   assert.equal(l.montant_ht, 199500, '60 × 3 500 × 0,95');
-  assert.equal(l.taxe_code, 'TVA', 'taxe par défaut de l\'article');
+  assert.equal(l.taxe_code, 'TVA', 'taxe choisie à la saisie de la ligne (062)');
   assert.equal(l.montant_taxe, 38404, '199 500 × 19,25 % = 38 403,75 → 38 404');
   assert.deepEqual([bc.total_ht, bc.total_taxes, bc.total_ttc], [199500, 38404, 237904]);
   assert.ok(bc.controles.every((c) => c.ok), JSON.stringify(bc.controles.filter((c) => !c.ok)));

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useToast } from '@/context/ToastContext';
-import { Section, Champ, fmtMontant, fmtQte } from '@/components/commercial/ui';
+import { Section, Champ, TaxeOperation, fmtMontant, fmtQte } from '@/components/commercial/ui';
 
 const num = (v) => { const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
 const decimales = (devise) => (['FCFA', 'XAF', 'XOF', 'CFA'].includes(String(devise || '').toUpperCase()) ? 0 : 2);
@@ -41,7 +41,7 @@ export default function BonFormPage() {
         setLignes(b.disponibles.filter((d) => d.reste > 0 || dans.has(d.demande_ligne_id)).map((d) => {
           const l = dans.get(d.demande_ligne_id);
           return { ...d, inclus: Boolean(l), quantite: enSaisie(l ? l.quantite : d.reste), prix_unitaire: enSaisie(l ? l.prix_unitaire : d.prix_approuve),
-            remise_pct: enSaisie(l ? l.remise_pct : 0), taxe_id: String((l ? l.taxe_id : d.taxe_id) || '') };
+            remise_pct: enSaisie(l ? l.remise_pct : 0), taxe_id: String((l ? l.taxe_id : '') || '') };
         }));
       } else {
         const demandeId = params.get('demande');
@@ -54,7 +54,7 @@ export default function BonFormPage() {
         setF({ fournisseur_id: String(fournisseur), magasin_id: String(p.demande.magasin_id), conditions_paiement: fiche?.conditions_paiement || '',
           delai_livraison: '', observations: '' });
         setLignes(p.lignes.map((d) => ({ ...d, inclus: !d.fournisseur_id || d.fournisseur_id === Number(fournisseur),
-          quantite: enSaisie(d.reste), prix_unitaire: enSaisie(d.prix_approuve), remise_pct: '0', taxe_id: String(d.taxe_id || '') })));
+          quantite: enSaisie(d.reste), prix_unitaire: enSaisie(d.prix_approuve), remise_pct: '0', taxe_id: '' })));
       }
     })();
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -77,6 +77,9 @@ export default function BonFormPage() {
   }, [lignes, refs, dec]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const maj = (i, champ, v) => setLignes((ls) => ls.map((l, k) => (k === i ? { ...l, [champ]: v } : l)));
+  // 062 : la taxe se choisit ici, à la saisie du bon (plus aucune taxe venant de l'article).
+  const [taxeOp, setTaxeOp] = useState('');
+  const appliquerTaxe = (v) => setLignes((ls) => ls.map((l) => (l.inclus ? { ...l, taxe_id: v } : l)));
   const choisirFournisseur = (v) => {
     const fiche = refs.fournisseurs.find((x) => x.id === Number(v));
     setF((x) => ({ ...x, fournisseur_id: v, conditions_paiement: x.conditions_paiement || fiche?.conditions_paiement || '' }));
@@ -150,6 +153,7 @@ export default function BonFormPage() {
       </Section>
 
       <Section titre="Lignes">
+        <TaxeOperation taxes={refs.taxes} valeur={taxeOp} onChange={setTaxeOp} onAppliquer={appliquerTaxe} nature="achat" />
         <table className="cm-lignes cm-bc-lignes">
           <thead><tr><th /><th>Article</th><th style={{ textAlign: 'right' }}>Quantité</th><th style={{ textAlign: 'right' }}>P.U. HT</th><th style={{ textAlign: 'right' }}>Remise %</th><th>Taxe</th><th style={{ textAlign: 'right' }}>Montant HT</th></tr></thead>
           <tbody>
