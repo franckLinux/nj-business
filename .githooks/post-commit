@@ -1,0 +1,14 @@
+#!/bin/sh
+# NJ BUSINESS — envoie automatiquement chaque nouveau commit vers GitHub (origin).
+# Activé par : git config core.hooksPath .githooks   (à refaire sur un nouveau PC)
+# Désactivé par : git config --unset core.hooksPath
+branche=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+[ "$branche" = "HEAD" ] && exit 0          # tête détachée (rebase, etc.) : rien à envoyer
+git remote get-url origin >/dev/null 2>&1 || exit 0
+echo "[NJ] Envoi de $branche vers GitHub…"
+if GIT_TERMINAL_PROMPT=0 git push -u origin "$branche" --quiet; then
+  echo "[NJ] Publié sur GitHub ($branche)."
+else
+  echo "[NJ] Envoi impossible pour l'instant (réseau ou connexion GitHub). Le commit est enregistré en local ; relancez : git push"
+fi
+exit 0

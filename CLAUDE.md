@@ -26,11 +26,12 @@ Ne jamais faire `git push --force` ni réécrire l'historique publié sans l'acc
 - **Claude Code sur le PC de Franck** : `git push` utilise ses identifiants GitHub (Git Credential Manager). L'envoi se fait directement.
 - **Session claude.ai reliée au dossier** : commiter dans le dossier. Si l'envoi n'est pas possible depuis la session, laisser le commit prêt : le crochet `post-commit` du PC (ci-dessous) ou un simple `git push` de Franck l'enverra.
 
-### Envoi automatique à chaque commit (PC de Franck)
+### Envoi automatique à chaque commit
 
-Le fichier `.git/hooks/post-commit` envoie chaque nouveau commit vers GitHub, quel qu'en soit l'auteur (Claude ou Franck). Il n'est pas versionné.
-- Le désactiver une fois : `git -c core.hooksPath=/dev/null commit …`.
-- Le désactiver durablement : renommer le fichier.
+Le crochet versionné `.githooks/post-commit` envoie chaque nouveau commit vers GitHub, quel qu'en soit l'auteur (Claude ou Franck).
+- Il est actif grâce à `git config core.hooksPath .githooks`, déjà réglé sur ce dossier. Sur un nouveau PC ou un nouveau clone, relancer cette commande.
+- Le désactiver : `git config --unset core.hooksPath`.
+- En cas d'échec (pas de réseau, pas de connexion GitHub), le commit reste en local : il partira au prochain `git push` ou au prochain commit.
 
 ## Rappels techniques
 
