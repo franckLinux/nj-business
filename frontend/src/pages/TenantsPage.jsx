@@ -4,108 +4,10 @@ import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import PermissionsAssignModal from '@/components/PermissionsAssignModal';
 import SuppressionClient from '@/components/SuppressionClient';
+import NouveauClientAssistant from '@/components/NouveauClientAssistant';
 
 // Reprend loadTenants()/openModalNewTenant()/saveNewTenant()/toggleTenantActif()/
 // switchTenant() de legacy/js/app.js (l. 5987-6124).
-// Lot B (065) : le client est créé avec son identité seule ; les modules cochés
-// sont activés dans la même opération (chacun prépare alors ses données). Aucun
-// module n'est obligatoire : un client peut être créé puis configuré avant toute
-// activation. Les signataires de la caisse se règlent dans ses paramètres.
-function NewTenantModal({ onClose, onSaved }) {
-  const [nom, setNom] = useState('');
-  const [slug, setSlug] = useState('');
-  const [devise, setDevise] = useState('FCFA');
-  const [catalogue, setCatalogue] = useState(null);
-  const [choisis, setChoisis] = useState(['caisse']);
-  const [erreur, setErreur] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    api.get('/plateforme/modules').then((r) => {
-      if (r?.error) { setCatalogue([]); return; }
-      setCatalogue((r.modules || []).filter((m) => m.statut !== 'retire'));
-    });
-  }, []);
-
-  const onNomChange = (e) => {
-    const v = e.target.value;
-    setNom(v);
-    setSlug(v.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''));
-  };
-  const basculer = (code) => setChoisis((x) => (x.includes(code) ? x.filter((c) => c !== code) : [...x, code]));
-
-  const onSave = async () => {
-    if (!nom.trim()) { setErreur('Le nom du client est obligatoire.'); return; }
-    if (!slug.trim()) { setErreur("L'identifiant (slug) est obligatoire."); return; }
-    if (!/^[a-z0-9-]+$/.test(slug.trim())) { setErreur('Slug invalide : minuscules, chiffres et tirets uniquement.'); return; }
-    setSaving(true);
-    const res = await api.post('/tenants', { nom: nom.trim(), slug: slug.trim(), devise, modules: choisis });
-    setSaving(false);
-    if (res.error) { setErreur(res.error); return; }
-    const noms = (catalogue || []).filter((m) => choisis.includes(m.code)).map((m) => m.nom);
-    onSaved(`Client "${nom.trim()}" créé ${noms.length ? `avec ${noms.join(' et ')}` : 'sans module (à activer plus tard)'}.`);
-  };
-
-  return (
-    <div className="modal-overlay" style={{ display: 'flex' }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal-box" style={{ maxWidth: 560 }}>
-        <div className="modal-head">
-          <h3>🏢 Nouveau client</h3>
-          <button className="modal-close" onClick={onClose}>✕</button>
-        </div>
-        <div className="modal-body">
-          <div className="form-section">
-            <label>Nom du client <span className="req">*</span></label>
-            <input type="text" value={nom} onChange={onNomChange} placeholder="Ex: Cabinet Dupont" maxLength={100} />
-          </div>
-          <div className="form-section">
-            <label>Identifiant unique (slug) <span className="req">*</span></label>
-            <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="cabinet-dupont" maxLength={60} style={{ fontFamily: 'monospace' }} />
-            <span className="field-hint">Minuscules, chiffres et tirets uniquement — immuable après création.</span>
-          </div>
-          <div className="form-section">
-            <label>Devise</label>
-            <select value={devise} onChange={(e) => setDevise(e.target.value)}>
-              <option value="FCFA">FCFA — Franc CFA</option>
-              <option value="XAF">XAF — Franc CFA (BEAC)</option>
-              <option value="EUR">EUR — Euro</option>
-              <option value="USD">USD — Dollar américain</option>
-            </select>
-          </div>
-          <fieldset style={{ border: 0, padding: 0, margin: '16px 0 0', minWidth: 0 }}>
-            <legend style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.6, color: 'var(--text-muted)', marginBottom: 4, padding: 0 }}>Modules à activer</legend>
-            <span className="field-hint" style={{ display: 'block', marginBottom: 10 }}>Facultatif : un client peut être créé sans module, puis configuré. Les modules s'activent aussi plus tard (Plateforme → Modules).</span>
-            {catalogue === null ? <div className="loading-msg">Chargement…</div> : (
-              <div style={{ display: 'grid', gap: 8 }}>
-                {catalogue.map((m) => {
-                  const dispo = m.statut === 'operationnel';
-                  return (
-                    <label key={m.code} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 12px', borderRadius: 9, cursor: dispo ? 'pointer' : 'not-allowed',
-                      textTransform: 'none', letterSpacing: 0, fontWeight: 400, color: 'var(--text)', margin: 0, width: '100%', boxSizing: 'border-box',
-                      border: `1.5px solid ${choisis.includes(m.code) ? 'var(--accent)' : 'var(--border)'}`, background: dispo ? 'white' : '#f8fafc', opacity: dispo ? 1 : 0.7 }}>
-                      <input type="checkbox" checked={choisis.includes(m.code)} disabled={!dispo} onChange={() => basculer(m.code)}
-                        style={{ width: 16, height: 16, minWidth: 16, flex: '0 0 16px', margin: '2px 0 0', padding: 0, appearance: 'auto', WebkitAppearance: 'checkbox', accentColor: 'var(--accent)', borderRadius: 3 }} />
-                      <span style={{ minWidth: 0, flex: 1 }}>
-                        <b style={{ fontSize: 13 }}>{m.nom}</b>{!dispo && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}> · bientôt disponible</span>}
-                        <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{m.description}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </fieldset>
-          {erreur && <div className="alert-err" style={{ marginTop: 10 }}>{erreur}</div>}
-        </div>
-        <div className="modal-foot" style={{ gap: 10 }}>
-          <button className="btn-secondary" onClick={onClose}>Annuler</button>
-          <button className="btn-add" onClick={onSave} disabled={saving}>Créer le client</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function TenantsPage() {
   const { user, activeTenantId, selectTenant } = useApp();
   const toast = useToast();
@@ -215,7 +117,7 @@ export default function TenantsPage() {
       </div>
 
       {modal === 'new' && (
-        <NewTenantModal onClose={() => setModal(null)} onSaved={(msg) => { setModal(null); toast(msg, 'success'); charger(); }} />
+        <NouveauClientAssistant slugsExistants={tenants.map((t) => t.slug)} onFermer={() => setModal(null)} onCree={() => charger()} />
       )}
       {modal?.suppr && (
         <SuppressionClient

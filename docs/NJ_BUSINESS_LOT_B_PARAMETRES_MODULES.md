@@ -5,10 +5,21 @@
 
 ## 1. Ce qui change pour l'utilisateur
 
-- **Création d'un client (cabinet, « Nouveau client ») :**
-  - on saisit le nom, l'identifiant et la devise, puis on **coche les modules à activer** ;
-  - NJ CAISSE PRO est coché par défaut, mais on peut tout décocher : le client est alors créé **sans module**, et sa configuration d'entreprise est accessible ;
-  - les noms du caissier et du directeur ne se saisissent plus à cette étape : ils vont dans les paramètres de la caisse.
+- **Création d'un client (super_admin) : un assistant en trois étapes**, puis un écran de fin.
+  1. **Entreprise :**
+     - raison sociale ;
+     - identifiant proposé automatiquement (modifiable ; un doublon est signalé avant l'envoi) ;
+     - forme juridique (pour une association ou une ONG, l'assistant indique « plan suggéré : SYCEBNL ») ;
+     - sigle, secteur d'activité, devise ;
+     - premières coordonnées, facultatives : pays, ville, téléphone, e-mail.
+  2. **Modules :** cartes à cocher. NJ CAISSE PRO est coché par défaut ; tout peut être décoché pour créer le client **sans module**. Les modules à venir sont affichés « Bientôt ».
+  3. **Vérification :** récapitulatif, et ce que chaque module va préparer (journaux, rubriques, plan comptable, profils métier).
+
+  Une fois le client créé, deux raccourcis s'offrent : « Compléter la configuration de l'entreprise » ou « Travailler sur ce client », ainsi que « Créer un autre client ».
+  - Les erreurs sont signalées sous le champ concerné, et le premier champ en erreur reçoit le focus.
+  - Échap ferme l'assistant, après confirmation si une saisie est en cours.
+  - Sur téléphone, l'assistant s'affiche en plein écran.
+  - Les noms du caissier et du directeur ne se saisissent plus à cette étape : ils vont dans les paramètres de la caisse.
 - **Activation de la caisse**, à la création ou plus tard (Plateforme → Modules) : elle prépare ses données de départ.
   - Rubriques et journaux par défaut.
   - Plan comptable, initialisé avec le référentiel que suggère la forme juridique, par exemple le SYCEBNL pour une ONG.
@@ -61,7 +72,7 @@ Les clients existants ne sont pas touchés : ceux qui ont la caisse la gardent, 
 
 | Route | Droit | Rôle |
 |---|---|---|
-| `POST /api/tenants` `{ nom, slug, devise, modules: [...] }` | super_admin | création ; `modules` facultatif, liste vide = aucun module |
+| `POST /api/tenants` `{ nom, slug, devise, modules: [...], identite: {...} }` | super_admin | création ; `modules` facultatif (liste vide = aucun module) ; `identite` facultative, limitée à forme juridique, sigle, activité, pays, ville, téléphone et e-mail, avec les mêmes contrôles que la configuration de l'entreprise |
 | `GET /api/caisse/parametres` | `config.view` ou `plan_comptable.view` | plan (en place, suggéré, écart), signataires, exercice |
 | `PUT /api/caisse/parametres` | `config.edit` | signataires et exercice ; un champ absent n'est pas modifié |
 | `GET /api/caisse/parametres/plan?referentiel=X` | `config.edit` | aperçu d'un changement de plan, sans aucune écriture |
@@ -107,14 +118,16 @@ Toutes les modifications sont inscrites au journal d'audit :
 - `src/components/config/EntiteTab.jsx`
 - `src/components/config/BasculePlanModal.jsx`
 - `src/pages/TenantsPage.jsx`
+- `src/components/NouveauClientAssistant.jsx` et `src/styles/nouveau-client.css` (nouveaux)
 - `public/sw.js` (v64)
 - `dist/`
 
 ## 7. Tests
 
-**Backend : 24 suites, 200 tests, tous passent**, sur une base PostgreSQL 16 jetable (jamais la production).
+**Backend : 24 suites, 201 tests, tous passent**, sur une base PostgreSQL 16 jetable (jamais la production).
 
-La nouvelle suite `caisse-parametres` (7 tests) couvre :
+La nouvelle suite `caisse-parametres` (8 tests) couvre :
+- les premières informations d'identité saisies dans l'assistant : contrôles, champs limités, plan suggéré par la forme juridique dès la création ;
 - le **scénario 1**, client créé sans module : aucune donnée de caisse, configuration de l'entreprise accessible, caisse fermée ;
 - la création avec modules ;
 - le refus d'un module invalide, sans aucun reste de client à moitié créé ;
@@ -127,7 +140,7 @@ La nouvelle suite `caisse-parametres` (7 tests) couvre :
 **Correctif :** la date de création de l'entreprise (lot A) et les dates d'exercice sont désormais restituées sans décalage de fuseau horaire. C'est vérifié en fuseau Africa/Lagos.
 
 **Navigateur :**
-- formulaire « Nouveau client » avec les modules à cocher ;
+- assistant « Nouveau client » parcouru en entier, sur ordinateur et sur téléphone, avec une erreur volontaire (identifiant déjà pris) ;
 - client créé sans module ;
 - paramètres de la caisse ;
 - fenêtre de choix du plan avec son aperçu.

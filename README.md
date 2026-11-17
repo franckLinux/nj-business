@@ -99,7 +99,7 @@ cd backend
 TEST_DATABASE_URL=postgres://…/base_de_test node --test tests/
 ```
 
-Il y a 24 suites et 200 tests, qui couvrent la caisse, la passerelle comptable, le contrôle, les budgets, les permissions, la configuration de l'entreprise et tout NJ COMMERCIAL.
+Il y a 24 suites et 201 tests, qui couvrent la caisse, la passerelle comptable, le contrôle, les budgets, les permissions, la configuration de l'entreprise et tout NJ COMMERCIAL.
 
 ## Déploiement
 

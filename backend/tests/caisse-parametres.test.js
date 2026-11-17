@@ -186,6 +186,22 @@ test('Scénario 7 — désactivation puis réactivation : données et réglages 
   assert.equal(p.data.plan.actuel, 'SYSCOHADA');
 });
 
+test('Assistant « Nouveau client » : premières informations d\'identité contrôlées, forme juridique prise en compte par la caisse', async () => {
+  let r = await appel('POST', '/tenants', 'adm', { slug: `idko-${sfx}`, nom: 'Identité invalide', identite: { email: 'pas-un-email' } });
+  assert.equal(r.status, 400);
+  assert.match(r.message, /e-mail/);
+  assert.equal((await sql('SELECT 1 FROM tenants WHERE slug = $1', [`idko-${sfx}`])).length, 0);
+  assert.equal((await appel('POST', '/tenants', 'adm', { slug: `idko-${sfx}`, nom: 'X', identite: { forme_juridique: 'XYZ' } })).status, 400);
+  r = await appel('POST', '/tenants', 'adm', { slug: `assoc-${sfx}`, nom: `Association ${sfx}`, devise: 'FCFA', modules: ['caisse'],
+    identite: { forme_juridique: 'assoc', sigle: 'ae', activite: 'Éducation', pays: 'Cameroun', ville: 'Ebolowa', telephone: '+237 677', email: 'Contact@Asso.CM', nui: 'ignoré' } });
+  assert.equal(r.status, 201, r.message);
+  T.assoc = r.data.id;
+  const [t] = await sql('SELECT forme_juridique, sigle, ville, email, nui, plan_referentiel FROM tenants WHERE id = $1', [T.assoc]);
+  assert.deepEqual([t.forme_juridique, t.sigle, t.ville, t.email, t.nui], ['ASSOC', 'AE', 'Ebolowa', 'contact@asso.cm', ''], 'seuls les champs prévus sont repris');
+  assert.equal(t.plan_referentiel, 'SYCEBNL', 'plan suggéré par la forme dès la création');
+  assert.equal(r.data.forme_juridique, 'ASSOC', 'réponse à jour');
+});
+
 test('Migration 065 rejouable', async () => {
   const migration = fs.readFileSync(path.join(__dirname, '..', 'db', 'migrations', '065_creation_client_sans_module.sql'), 'utf8');
   const client = await pool.connect();

@@ -345,5 +345,5 @@ const identitePour = async (tenantId, figee, db) => (figee && typeof figee === '
 
 module.exports = {
   ErreurEntreprise, DEVISES, lire, modifier, definirLogo, modifierRepresentant, changerRepresentant,
-  identiteDocuments, identitePour,
+  identiteDocuments, identitePour, validerIdentite,
 };

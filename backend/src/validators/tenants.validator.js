@@ -6,6 +6,7 @@ const createTenantRules = [
   body('nom').trim().notEmpty().withMessage('Nom et slug obligatoires.'),
   body('caissier_nom').optional({ checkFalsy: true }).isString(),
   body('modules').optional().isArray().withMessage('Modules : liste attendue.'),
+  body('identite').optional().isObject().withMessage('Identité : objet attendu.'),
   body('directeur_nom').optional({ checkFalsy: true }).isString(),
   body('devise').optional({ checkFalsy: true }).isString(),
 ];

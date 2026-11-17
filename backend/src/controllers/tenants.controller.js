@@ -4,6 +4,7 @@ const { sequelize, Tenant } = require('../models');
 const { query, getClient } = require('../config/database');
 const { tenantsAccessibles } = require('../services/affectation.service');
 const modules = require('../services/modules.service');
+const entreprise = require('../services/entreprise.service');
 
 // ── GET /api/tenants ───────────────────────────────────────────────────────
 const getTenants = async (req, res) => {
@@ -31,6 +32,23 @@ const getTenants = async (req, res) => {
 const createTenant = async (req, res) => {
   const { slug, nom, caissier_nom, directeur_nom, devise } = req.body;
   const codes = req.body.modules === undefined ? [] : req.body.modules;
+  // Premières informations d'identité, facultatives (assistant « Nouveau client ») :
+  // mêmes règles que la configuration de l'entreprise (064). La forme juridique
+  // est enregistrée AVANT l'activation des modules : la caisse en tire le plan suggéré.
+  const IDENTITE_CREATION = ['forme_juridique', 'sigle', 'activite', 'pays', 'ville', 'telephone', 'email'];
+  let identite = {};
+  if (req.body.identite !== undefined) {
+    if (!req.body.identite || typeof req.body.identite !== 'object' || Array.isArray(req.body.identite)) {
+      return res.status(400).json({ error: 'Identité : objet attendu.' });
+    }
+    try {
+      const brut = Object.fromEntries(IDENTITE_CREATION.filter((k) => req.body.identite[k] !== undefined).map((k) => [k, req.body.identite[k]]));
+      identite = entreprise.validerIdentite(brut, { devise: devise || 'FCFA' });
+    } catch (err) {
+      if (err instanceof entreprise.ErreurEntreprise) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+  }
   if (!slug || !nom) return res.status(400).json({ error: 'Nom et slug obligatoires.' });
   if (!/^[a-z0-9-]+$/.test(slug)) return res.status(400).json({ error: 'Slug invalide.' });
   if (!Array.isArray(codes)) return res.status(400).json({ error: 'Modules : liste attendue.' });
@@ -45,6 +63,11 @@ const createTenant = async (req, res) => {
         directeur_nom: directeur_nom || '',
         devise: devise || 'FCFA',
       }, { transaction });
+      const cles = Object.keys(identite).filter((k) => identite[k] !== '' && identite[k] !== null);
+      if (cles.length) {
+        await sequelize.query(`UPDATE tenants SET ${cles.map((k) => `${k} = :${k}`).join(', ')} WHERE id = :id`,
+          { replacements: { ...identite, id: t.id }, transaction });
+      }
       const client = modules.clientSequelize(sequelize, transaction);
       const faits = await modules.activerALaCreation(client, { tenantId: t.id, codes, userId: req.user.id });
       await sequelize.query(
@@ -52,6 +75,7 @@ const createTenant = async (req, res) => {
          VALUES (:id, :userId, 'CREATION_CLIENT', 'plateforme', :id, CAST(:v AS jsonb))`,
         { replacements: { id: t.id, userId: req.user.id, v: JSON.stringify({ nom, slug, modules: faits }) },
           transaction, type: sequelize.QueryTypes.INSERT });
+      await t.reload({ transaction });
       return { tenant: t, actives: faits };
     });
     res.status(201).json({ ...tenant.toJSON(), modules: actives });
