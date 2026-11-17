@@ -291,6 +291,13 @@ const creerEspaceDemo = async (t, p, userId) => {
     `INSERT INTO users (tenant_id, username, email, password_hash, role, actif)
      VALUES (:tid, :mail, :mail, :pw, 'directeur', false) RETURNING id`,
     { tid: tenant.id, mail: p.email, pw: leurre }, { transaction: t });
+  // 066 : le compte du prospect est rattaché au module de la démonstration.
+  const [um] = await q("SELECT to_regclass('public.user_modules') IS NOT NULL AS ok", {}, { transaction: t });
+  if (um?.ok) {
+    await q(`INSERT INTO user_modules (user_id, module_code, tenant_id, origine, affecte_par)
+             VALUES (:u, 'caisse', :tid, 'creation', :par) ON CONFLICT DO NOTHING`,
+    { u: user.id, tid: tenant.id, par: userId }, { transaction: t });
+  }
   await auditer(t, { tenantId: tenant.id, userId, action: 'DEMO_ESPACE_CREATION', entiteId: p.id, apres: { slug, nom } });
   return { tenantId: tenant.id, userIdProspect: user.id };
 };

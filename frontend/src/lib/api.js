@@ -68,7 +68,8 @@ const request = async (method, url, body) => {
     }
     // NJ BUSINESS (048) : module désactivé pour l'espace. AppContext relit les
     // modules et App ramène l'utilisateur à l'accueil NJ BUSINESS.
-    if (res.status === 403 && out?.code === 'MODULE_INACTIF' && authToken && typeof window !== 'undefined') {
+    // 066 : personne non rattachée au module (MODULE_NON_AUTORISE) : même retour à l'accueil.
+    if (res.status === 403 && ['MODULE_INACTIF', 'MODULE_NON_AUTORISE'].includes(out?.code) && authToken && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('module-inactif', { detail: { module: out.module } }));
     }
     // Démonstration expirée (contrôle serveur) : AppContext ferme la session
@@ -105,5 +106,5 @@ export const api = {
   post:   (url, body) => request('POST', url, body ?? {}),
   put:    (url, body) => request('PUT', url, body ?? {}),
   patch:  (url, body) => request('PATCH', url, body ?? {}),
-  delete: (url)       => request('DELETE', url),
+  delete: (url, body) => request('DELETE', url, body),   // corps facultatif (motif d'un retrait, 066)
 };

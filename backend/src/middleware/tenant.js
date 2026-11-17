@@ -5,6 +5,7 @@ const { isCabinet } = require('./auth');
 const { peutAccederTenant } = require('../services/affectation.service');
 const support = require('../services/support.service');
 const modules = require('../services/modules.service');
+const perm = require('../services/permission.service');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -76,6 +77,17 @@ const tenantGuard = async (req, res, next) => {
           });
         }
         console.warn(`[Modules] refus simulé (mode observer) : ${module} inactif pour ${rows[0].id} — ${req.method} ${cheminRoute} (utilisateur ${req.user.id})`);
+      }
+      // 066 : utilisateurs par module. Une personne du client n'entre dans un
+      // module que si elle y est rattachée (mode « appliquer »).
+      if (perm.ROLES_CLIENT.includes(req.user.role) && (await perm.modeAccesModules()) === 'appliquer') {
+        const membre = await perm.modulesDe(req.user.id);
+        if (!membre.has(module)) {
+          return res.status(403).json({
+            error: 'Vous n\'êtes pas rattaché(e) à ce module. Demandez l\'accès à votre directeur.',
+            code: 'MODULE_NON_AUTORISE', module,
+          });
+        }
       }
     }
     // super_admin « limité » (étape 8) : données métier du client uniquement

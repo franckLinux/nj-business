@@ -92,6 +92,12 @@ const getUsers = async (req, res) => {
 // POST /api/users
 const createUser = async (req, res) => {
   const { username, password, role, email, custom_role_id } = req.body;
+  // 066 : modules auxquels le compte est rattaché dès sa création (ceux de
+  // l'écran d'où il est créé). Aucun autre module ne lui est ouvert.
+  const modulesCompte = req.body.modules === undefined ? [] : req.body.modules;
+  if (!Array.isArray(modulesCompte) || modulesCompte.some((c) => typeof c !== 'string')) {
+    return res.status(400).json({ error: 'Modules : liste attendue.' });
+  }
   if (!username || !password || password.length < 6 || !role) {
     return res.status(400).json({ error: 'Tous les champs sont requis. Mot de passe : minimum 6 caractères.' });
   }
@@ -106,14 +112,28 @@ const createUser = async (req, res) => {
     try { await rolesClient.verifierRole(req.tenantId, role); }
     catch (e) { if (e instanceof rolesClient.ErreurMetier) return res.status(e.status).json({ error: e.message }); throw e; }
 
+    if (modulesCompte.length) {
+      const [{ n }] = await sequelize.query(
+        'SELECT COUNT(*)::int AS n FROM tenant_modules WHERE tenant_id = :t AND actif AND module_code IN (:m)',
+        { replacements: { t: req.tenantId, m: [...new Set(modulesCompte)] }, type: sequelize.QueryTypes.SELECT });
+      if (n !== new Set(modulesCompte).size) return res.status(400).json({ error: 'Module non activé pour ce client.' });
+    }
     const hash = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS, 10) || 12);
-    const user = await User.create({
-      tenant_id: req.tenantId,
-      username: username.trim(),
-      email: email || null,
-      password_hash: hash,
-      role,
-      custom_role_id: roleId,
+    const user = await sequelize.transaction(async (transaction) => {
+      const u = await User.create({
+        tenant_id: req.tenantId,
+        username: username.trim(),
+        email: email || null,
+        password_hash: hash,
+        role,
+        custom_role_id: roleId,
+      }, { transaction });
+      const db = require('../services/modules.service').clientSequelize(sequelize, transaction);
+      const um = require('../services/utilisateurs_modules.service');
+      for (const code of [...new Set(modulesCompte)]) {
+        await um.affecter({ tenantId: req.tenantId, code, cibleId: u.id, roleId: null, par: req.user.id, origine: 'creation', db });
+      }
+      return u;
     });
     res.status(201).json({
       id: user.id,
@@ -123,6 +143,7 @@ const createUser = async (req, res) => {
       actif: user.actif,
       created_at: user.created_at,
       custom_role_id: user.custom_role_id,
+      modules: [...new Set(modulesCompte)],
     });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: "Ce nom d'utilisateur existe déjà." });

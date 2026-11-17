@@ -78,11 +78,19 @@ const modulesActifs = async (tenantId) => {
  * null = système de modules non installé : l'interface garde le comportement
  * d'avant (NJ CAISSE PRO seul). Sans client (cabinet sans client choisi) : [].
  */
-const modulesPourSession = async (tenantId) => {
+const modulesPourSession = async (tenantId, personne = null) => {
   if (!(await estInstalle())) return null;
   if (!tenantId) return [];
   const [liste, actifs] = await Promise.all([catalogue(), modulesActifs(tenantId)]);
+  // 066 : en mode « appliquer », une personne du client n'entre que dans les
+  // modules auxquels elle est rattachée (membre). null : pas de contrôle.
+  let membre = null;
+  const perm = require('./permission.service');
+  if (personne?.userId && perm.ROLES_CLIENT.includes(personne.role) && (await perm.modeAccesModules()) === 'appliquer') {
+    membre = await perm.modulesDe(personne.userId);
+  }
   return liste.map((m) => ({
+    membre: membre ? membre.has(m.code) : null,
     code: m.code,
     nom: m.nom,
     description: m.description,

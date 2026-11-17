@@ -118,6 +118,9 @@ app.use(storage.BASE_URL, express.static(storage.STORAGE_DIR, {
 // Compte de démonstration NJ COMMERCIAL (DEMO_COMMERCIAL=true) : créé une seule fois,
 // APRÈS les migrations ; s'il existe déjà, rien ne se passe (tools/demo-commercial.js).
 const demoAuDemarrage = () => {
+  // 066 : reprise unique des comptes existants dans les modules (sans effet ensuite).
+  require('./src/services/utilisateurs_modules.service').repriseAuDemarrage()
+    .catch((err) => console.error('[Modules/utilisateurs] Reprise non faite :', err.message));
   if (process.env.DEMO_COMMERCIAL !== 'true') return;
   require('./tools/demo-commercial').creerDemoAuDemarrage();
 };

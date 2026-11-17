@@ -39,6 +39,7 @@ const SQL_BASE = `
     SELECT rp.permission_code, ${GROUPE} AS groupe
       FROM role_permissions rp JOIN permissions p ON p.code = rp.permission_code
       JOIN u ON rp.role_id = u.custom_role_id
+     /*PROFIL_MODULE_EXCLU*/
   ),
   systeme AS (
     SELECT rp.permission_code, ${GROUPE} AS groupe
@@ -79,10 +80,36 @@ const typesDisponibles = async () => {
   typesPresents = Boolean(r?.ok);
   return typesPresents;
 };
-const sqlBase = (avecTypes) => (avecTypes ? `${SQL_BASE} UNION ${SQL_TYPES}` : SQL_BASE);
+// Profil propre à un module (066, user_modules.role_id) : pour ce module, il
+// remplace le profil métier du compte ; ailleurs, rien ne change.
+const PROFIL_MODULE = `
+    UNION
+    SELECT rp.permission_code, ${GROUPE} AS groupe
+      FROM user_modules um
+      JOIN role_permissions rp ON rp.role_id = um.role_id
+      JOIN permissions p ON p.code = rp.permission_code
+     WHERE um.user_id = :userId AND um.actif AND um.role_id IS NOT NULL AND ${GROUPE} = um.module_code`;
+const PROFIL_MODULE_EXCLU = `WHERE ${GROUPE} NOT IN (
+      SELECT module_code FROM user_modules WHERE user_id = :userId AND actif AND role_id IS NOT NULL)`;
 
-const sqlEffectives = (avecTypes) => `
-  WITH base AS (${sqlBase(avecTypes)}),
+let modulesUtilisateursPresents = false;
+const modulesUtilisateursDisponibles = async () => {
+  if (modulesUtilisateursPresents) return true;
+  const [r] = await sequelize.query("SELECT to_regclass('public.user_modules') IS NOT NULL AS ok",
+    { type: sequelize.QueryTypes.SELECT });
+  modulesUtilisateursPresents = Boolean(r?.ok);
+  return modulesUtilisateursPresents;
+};
+
+const sqlBase = (avecTypes, avecModules = false) => {
+  const base = avecModules
+    ? SQL_BASE.replace('/*PROFIL_MODULE_EXCLU*/', PROFIL_MODULE_EXCLU + PROFIL_MODULE)
+    : SQL_BASE.replace('/*PROFIL_MODULE_EXCLU*/', '');
+  return avecTypes ? `${base} UNION ${SQL_TYPES}` : base;
+};
+
+const sqlEffectives = (avecTypes, avecModules) => `
+  WITH base AS (${sqlBase(avecTypes, avecModules)}),
   ex AS (
     SELECT permission_code, effet FROM user_permissions WHERE user_id = :userId
   ),
@@ -104,7 +131,7 @@ const sqlEffectives = (avecTypes) => `
 
 /** Permissions de BASE (rôle système ou profil métier, + types de gestion), sans exceptions ni plafond. */
 const getBasePermissions = async (userId) => {
-  const rows = await sequelize.query(sqlBase(await typesDisponibles()), {
+  const rows = await sequelize.query(sqlBase(await typesDisponibles(), await modulesUtilisateursDisponibles()), {
     replacements: { userId }, type: sequelize.QueryTypes.SELECT,
   });
   return rows.map((r) => r.permission_code);
@@ -116,14 +143,58 @@ const getBasePermissions = async (userId) => {
  * frontend par /auth/login et /auth/me : interface et API appliquent la même règle.
  * `tenantId` = client du CONTEXTE (req.tenantId), qui fixe le plafond.
  */
-const getEffectivePermissions = async ({ tenantId, userId, role }) => {
+const getEffectivePermissions = async ({ tenantId, userId, role, brut = false }) => {
   if (role === 'super_admin') return null;
-  const rows = await sequelize.query(sqlEffectives(await typesDisponibles()), {
+  const avecModules = await modulesUtilisateursDisponibles();
+  const rows = await sequelize.query(sqlEffectives(await typesDisponibles(), avecModules), {
     replacements: { userId, tenantId: tenantId || null },
     type: sequelize.QueryTypes.SELECT,
   });
-  return rows.map((r) => r.permission_code);
+  const codes = rows.map((r) => r.permission_code);
+  // 066 : accès par module. En mode « appliquer », une personne d'un client ne
+  // garde les droits d'un module que si elle y est rattachée (user_modules).
+  // Les droits du socle (entreprise, utilisateurs, rôles) ne dépendent d'aucun module.
+  // `brut` : droits avant ce filtre (reprise, rapport de répartition).
+  if (brut || !avecModules || !ROLES_CLIENT.includes(role) || (await modeAccesModules()) !== 'appliquer') return codes;
+  const [modules, membre] = await Promise.all([modulesDesPermissions(), modulesDe(userId)]);
+  return codes.filter((c) => {
+    const g = groupeDe(modules.get(c));
+    return g === 'socle' || membre.has(g);
+  });
 };
+
+// ── Accès par module (066) ────────────────────────────────────────────────
+const ROLES_CLIENT = ['directeur', 'caissier', 'auditeur', 'collaborateur'];
+const MODULES_SOCLE = new Set(['entreprise', 'users', 'roles', 'plateforme']);
+/** Module NJ BUSINESS d'une permission, pour le contrôle d'accès ('socle' : aucun). */
+const groupeDe = (moduleCatalogue) => {
+  if (!moduleCatalogue || MODULES_SOCLE.has(moduleCatalogue)) return 'socle';
+  return ['commercial', 'dsf', 'revis', 'cg'].includes(moduleCatalogue) ? moduleCatalogue : 'caisse';
+};
+let cacheModulesPerm = null;
+const modulesDesPermissions = async () => {
+  if (cacheModulesPerm && Date.now() - cacheModulesPerm.t < 60000) return cacheModulesPerm.m;
+  const rows = await sequelize.query('SELECT code, module FROM permissions', { type: sequelize.QueryTypes.SELECT });
+  cacheModulesPerm = { t: Date.now(), m: new Map(rows.map((r) => [r.code, r.module])) };
+  return cacheModulesPerm.m;
+};
+const modulesDe = async (userId) => new Set((await sequelize.query(
+  'SELECT module_code FROM user_modules WHERE user_id = :userId AND actif', { replacements: { userId }, type: sequelize.QueryTypes.SELECT }))
+  .map((r) => r.module_code));
+let cacheMode = null;
+/** Mode du contrôle d'accès par module : 'observer' (défaut) ou 'appliquer'. Mis en cache 15 s. */
+const modeAccesModules = async () => {
+  if (cacheMode && Date.now() - cacheMode.t < 15000) return cacheMode.v;
+  let v = 'observer';
+  if (await modulesUtilisateursDisponibles()) {
+    const [r] = await sequelize.query("SELECT valeur #>> '{}' AS v FROM plateforme_reglages WHERE cle = 'acces_modules_utilisateurs'",
+      { type: sequelize.QueryTypes.SELECT });
+    if (r?.v === 'appliquer') v = 'appliquer';
+  }
+  cacheMode = { t: Date.now(), v };
+  return v;
+};
+const oublierModeAccesModules = () => { cacheMode = null; };
 
 /**
  * Permissions accordées INDIVIDUELLEMENT à la personne (exceptions 'grant').
@@ -196,4 +267,5 @@ const getPermissionsTypes = async (userId) => {
 module.exports = {
   getEffectivePermissions, getBasePermissions, getPermissionsAccordees, getPermissionsTypes, userHasPermission,
   verifierCodesAccordables, usersAvecPermission,
+  ROLES_CLIENT, groupeDe, modulesDesPermissions, modulesDe, modeAccesModules, oublierModeAccesModules,
 };

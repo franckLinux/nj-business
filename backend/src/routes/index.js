@@ -251,6 +251,18 @@ router.post('/config/plan-referentiel/bascule', authGuard, tenantGuard, requireP
 // accès à l'écran de configuration.
 router.get('/config/entete',      authGuard, tenantGuard,           cfgCtrl.getEntete);
 
+// ── Utilisateurs d'un module (066) — SOCLE : chaque module a sa liste ─────
+// Lecture : gestion des utilisateurs, ou paramétrage du commercial pour ses
+// propres utilisateurs. Modification : users.edit.
+const umModCtrl = require('../controllers/utilisateurs_modules.controller');
+const voirUtilisateursModule = (req, res, next) => (req.params.code === 'commercial'
+  ? requireAnyPermission('users.view', 'com.parametrage.modifier')(req, res, next)
+  : requirePermission('users.view')(req, res, next));
+router.get   ('/modules/:code/utilisateurs',          authGuard, tenantGuard, voirUtilisateursModule, umModCtrl.lister);
+router.post  ('/modules/:code/utilisateurs',          authGuard, tenantGuard, requirePermission('users.edit'), umModCtrl.affecter);
+router.put   ('/modules/:code/utilisateurs/:userId',  authGuard, tenantGuard, requirePermission('users.edit'), umModCtrl.modifierProfil);
+router.delete('/modules/:code/utilisateurs/:userId',  authGuard, tenantGuard, requirePermission('users.edit'), umModCtrl.retirer);
+
 // ── Configuration centrale de l'entreprise (064) — SOCLE NJ BUSINESS ──────
 // Indépendante des modules : accessible même sans aucun module activé.
 const entCtrl = require('../controllers/entreprise.controller');
@@ -396,6 +408,11 @@ router.post  ('/plateforme/clients/:id/suppression', ...admin, pfCtrl.postSuppre
 router.get   ('/plateforme/clients/:id/roles',  ...admin, pfCtrl.getRoles);
 router.put   ('/plateforme/clients/:id/roles',  ...admin, pfCtrl.putRoles);
 // NJ BUSINESS (048) : modules activés par client — super_admin uniquement.
+// 066 : utilisateurs par module — répartition, écarts, mode du contrôle.
+const umCtrl = require('../controllers/utilisateurs_modules.controller');
+router.get   ('/plateforme/utilisateurs-modules',          ...admin, umCtrl.rapport);
+router.put   ('/plateforme/utilisateurs-modules/mode',     ...admin, umCtrl.definirMode);
+router.post  ('/plateforme/utilisateurs-modules/reprise',  ...admin, umCtrl.reprendre);
 router.get   ('/plateforme/modules',                    ...admin, pfCtrl.getModules);
 router.get   ('/plateforme/clients/:id/modules',        ...admin, pfCtrl.getModulesClient);
 router.put   ('/plateforme/clients/:id/modules/:code',  ...admin, pfCtrl.putModuleClient);

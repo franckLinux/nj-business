@@ -3,6 +3,8 @@
 // 062 : types de gestion (achats, ventes, stock) — le DOMAINE de travail, attribué ici,
 // distinct du rôle et du profil métier qui fixent le NIVEAU (les validations).
 import { useState } from 'react';
+import { UserModal } from '@/components/config/UsersTab';
+import { useUtilisateursModule, BandeauModule, ComptesHorsModule, ProfilModule, RetraitModule } from '@/components/UtilisateursModule';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
@@ -142,11 +144,18 @@ const PROFILS = [
 export default function UtilisateursPage() {
   const { can } = useApp();
   const toast = useToast();
-  const { donnees, erreur, recharger } = useListe('/commercial/utilisateurs');
+  const { donnees, erreur, recharger: rechargerListe } = useListe('/commercial/utilisateurs');
+  // 066 : les utilisateurs de NJ COMMERCIAL (rattachés au module).
+  const mod = useUtilisateursModule('commercial');
+  const [nouveau, setNouveau] = useState(false);
+  const [retrait, setRetrait] = useState(null);
+  const peutGerer = can('users.edit');
+  const recharger = () => { rechargerListe(); mod.recharger(); };
   const [perim, setPerim] = useState(null);
   const [typesDe, setTypesDe] = useState(null);
   const [lot, setLot] = useState(null);
-  const liste = donnees?.utilisateurs || [];
+  const membres = mod.data ? new Map(mod.data.utilisateurs.map((u) => [u.id, u])) : null;
+  const liste = (donnees?.utilisateurs || []).filter((u) => !membres || membres.has(u.id));
   const agences = donnees?.agences || [];
   const types = donnees?.types_gestion || [];
   const catalogue = donnees?.catalogue || [];
@@ -156,9 +165,11 @@ export default function UtilisateursPage() {
   const codes = (ids) => (ids.length ? agences.filter((a) => ids.includes(a.id)).map((a) => a.code).join(', ') : 'Toutes');
   return (
     <div className="cm-page">
-      <Entete titre="Utilisateurs et rôles" description="Types de gestion et droits d'achat, de stock et de vente de chaque personne, tels que le serveur les applique. Personne n'approuve sa propre demande ni ne valide son propre document de stock.">
-        {can('users.view') && <Link to="/config" className="cm-btn cm-secondaire" style={{ textDecoration: 'none' }}>Gérer dans Configuration</Link>}
+      <Entete titre="Utilisateurs et rôles" description="Les personnes qui travaillent dans NJ COMMERCIAL : types de gestion et droits d'achat, de stock et de vente, tels que le serveur les applique. Personne n'approuve sa propre demande ni ne valide son propre document de stock.">
+        {can('users.create') && <button type="button" className="cm-btn cm-primaire" onClick={() => setNouveau(true)}>+ Nouvel utilisateur</button>}
       </Entete>
+      {mod.data && <BandeauModule data={mod.data} />}
+      {mod.erreur && <div className="cm-erreur">{mod.erreur}</div>}
       <div className="cm-note">
         Deux notions distinctes : le <strong>type de gestion</strong> (achats, ventes, stock — un ou plusieurs par personne, attribués ici) dit dans quel domaine la personne travaille et ouvre la consultation et la saisie de ce domaine ;
         le <strong>rôle et le profil métier</strong> (Configuration → Utilisateurs) fixent son niveau, dont les validations. Les droits se cumulent ; une permission retirée à la personne ou désactivée pour le client reste refusée.
@@ -193,13 +204,18 @@ export default function UtilisateursPage() {
       </div>
       <div className="cm-table-wrap">
         <table className="cm-table" style={{ minWidth: 1060 }}>
-          <thead><tr><th>Utilisateur</th><th>Rôle · profil</th><th>Types de gestion</th><th>Agences</th>{COLONNES.map(([c, l]) => <th key={c} style={{ textAlign: 'center' }}>{l}</th>)}<th>Statut</th></tr></thead>
+          <thead><tr><th>Utilisateur</th><th>Rôle · profil</th><th>Types de gestion</th><th>Agences</th>{COLONNES.map(([c, l]) => <th key={c} style={{ textAlign: 'center' }}>{l}</th>)}<th>Statut</th>{mod.data && peutGerer && <th aria-label="Action" />}</tr></thead>
           <tbody>
             {!donnees ? <tr><td colSpan={COLONNES.length + 5} className="cm-vide">Chargement…</td></tr>
               : liste.map((u) => (
                 <tr key={u.id} className={u.actif ? '' : 'cm-inactif'}>
                   <td><strong>{u.username}</strong>{u.email && <span className="cm-sous">{u.email}</span>}</td>
-                  <td>{ROLES[u.role] || u.role}{u.profil && <span className="cm-sous">{u.profil}</span>}</td>
+                  <td>
+                    {ROLES[u.role] || u.role}{u.profil && <span className="cm-sous">{u.profil}</span>}
+                    {mod.data && peutGerer && membres?.get(u.id) && (mod.data.profils.length > 0) && (
+                      <div style={{ marginTop: 4 }}><ProfilModule u={membres.get(u.id)} data={mod.data} code="commercial" onChange={() => recharger()} /></div>
+                    )}
+                  </td>
                   <td style={{ whiteSpace: 'nowrap' }}>
                     <div className="cm-types">
                       {u.types_gestion.length ? u.types_gestion.map((c) => <span key={c} className={`cm-type cm-type-${c}`}>{libType(c)}</span>) : <span className="cm-sous" style={{ marginTop: 0 }}>Aucun</span>}
@@ -218,12 +234,18 @@ export default function UtilisateursPage() {
                     </td>
                   ))}
                   <td><Statut actif={u.actif} /></td>
+                  {mod.data && peutGerer && (
+                    <td><button type="button" className="um-btn um-retirer" onClick={() => setRetrait(u)} aria-label={`Retirer ${u.username} de NJ COMMERCIAL`}>Retirer</button></td>
+                  )}
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
       <p className="cm-aide" style={{ marginTop: 8 }}><span style={{ color: '#0369a1', fontWeight: 800 }}>✓</span> bleu : droit ouvert par un type de gestion ; <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> vert : par le rôle, le profil ou une exception. Une personne voit ses nouveaux droits à sa prochaine connexion (ou en rechargeant la page).</p>
+      {mod.data && <ComptesHorsModule data={mod.data} code="commercial" peutGerer={peutGerer} onChange={() => recharger()} />}
+      {retrait && <RetraitModule cible={retrait} code="commercial" onFermer={() => setRetrait(null)} onFait={() => { setRetrait(null); recharger(); }} />}
+      {nouveau && <UserModal module="commercial" onClose={() => setNouveau(false)} onSaved={(msg) => { setNouveau(false); toast(`${msg} Il fait partie de NJ COMMERCIAL.`, 'success'); recharger(); }} />}
       {perim && <Perimetre u={perim} agences={agences} onFermer={() => setPerim(null)} onEnregistre={() => { setPerim(null); toast('Périmètre enregistré.', 'success'); recharger(); }} />}
       {typesDe && <TypesPersonne u={typesDe} types={types} onFermer={() => setTypesDe(null)} onEnregistre={() => { setTypesDe(null); toast('Types de gestion enregistrés.', 'success'); recharger(); }} />}
       {lot && <LotType type={lot} catalogue={catalogue} onFermer={() => setLot(null)} onEnregistre={(m) => { setLot(null); toast(m, 'success'); recharger(); }} />}

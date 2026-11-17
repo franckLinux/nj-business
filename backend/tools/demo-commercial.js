@@ -107,12 +107,17 @@ async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = fa
     }
     etape('Types de gestion attribués (achats, ventes, stock — dont deux personnes sur deux domaines)');
   }
+  // 066 : chaque compte est rattaché aux modules où il a des droits.
+  const rep = await require('../src/services/utilisateurs_modules.service').reprendre({ tenantId, origine: 'creation' });
+  etape(`Comptes rattachés aux modules (${rep.affectations.length} sur ${rep.comptes})`);
   const C = {};
   for (const [k, u] of Object.entries(U)) C[k] = await da.contexte({ tenantId, user: u });
   const base = (k) => ({ tenantId, userId: U[k].id });
 
   // ── 2. Paramétrage ─────────────────────────────────────────────────────
-  await ref.modifierSociete({ ...base('directeur'), body: { nom_commercial: 'Nkolo Distribution', mentions_documents: 'Document de démonstration — société fictive.' } }).catch(() => {});
+  // 064 : le nom commercial appartient à l'identité centrale de l'entreprise.
+  await Q("UPDATE tenants SET nom_commercial = 'Nkolo Distribution' WHERE id = :t", { t: tenantId });
+  await ref.modifierSociete({ ...base('directeur'), body: { mentions_documents: 'Document de démonstration — société fictive.' } });
   const agences = await ref.listerAgences(tenantId, {});
   const siege = agences[0];
   const dla = await ref.enregistrerAgence({ ...base('directeur'), body: { code: 'DLA', nom: 'Agence de Douala', adresse: 'Akwa (fictif)' } });

@@ -64,7 +64,7 @@ const login = async (req, res) => {
     const permissions = await getEffectivePermissions({ tenantId: user.tenant_id, userId: user.id, role: user.role });
     const permissionsAccordees = await getPermissionsAccordees(user.id);
     // NJ BUSINESS (048) : modules de l'espace client (null = système non installé).
-    const modules = await modulesPourSession(user.tenant_id);
+    const modules = await modulesPourSession(user.tenant_id, { userId: user.id, role: user.role });
 
     res.json({
       accessToken,
@@ -117,7 +117,7 @@ const me = async (req, res) => {
     const permissions = await getEffectivePermissions({ tenantId: tenantContexte, userId: u.id, role: u.role });
     const permissionsAccordees = await getPermissionsAccordees(u.id);
     // Modules du client CONSULTÉ (même contexte que les permissions).
-    const modules = await modulesPourSession(tenantContexte);
+    const modules = await modulesPourSession(tenantContexte, { userId: u.id, role: u.role });
     res.json({ ...u, permissions, permissionsAccordees, modules });
   } catch (err) {
     console.error('[Auth] /me :', err.message);

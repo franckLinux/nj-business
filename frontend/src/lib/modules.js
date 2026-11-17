@@ -17,6 +17,9 @@ export const systemeInstalle = (user) => Array.isArray(user?.modules);
  */
 export const accesModule = (user, code) => {
   if (user?.role === 'super_admin') return true;
+  // 066 : rattachement au module (contrôle appliqué) : il décide.
+  const m = Array.isArray(user?.modules) ? user.modules.find((x) => x.code === code) : null;
+  if (m && m.membre === false) return false;
   if (code === 'caisse') return user?.role !== 'collaborateur';
   if (code === 'commercial') return Array.isArray(user?.permissions) && user.permissions.some((p) => p.startsWith('com.'));
   return true;

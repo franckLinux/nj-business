@@ -4,6 +4,7 @@ import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import { ModulesClient, ModulesMatrice } from '@/components/ModulesClients';
 import SuppressionClient from '@/components/SuppressionClient';
+import RepartitionUtilisateurs from '@/components/RepartitionUtilisateurs';
 
 // Administration PLATEFORME (réforme, étape 8) — super_admin.
 // Vue administrative et technique des clients : aucune donnée de transaction.
@@ -323,6 +324,9 @@ export default function PlateformePage() {
       <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>▦ Modules NJ BUSINESS par client</h3>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0 }}>Un module désactivé n'est plus accessible aux utilisateurs du client (contrôle serveur). Ses données sont conservées et retrouvées à la réactivation.</p>
       <div style={{ marginBottom: 24 }}><ModulesMatrice /></div>
+      <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>👥 Utilisateurs par module</h3>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0 }}>Chaque module a ses utilisateurs. Les comptes existants ont été rattachés d'après leurs droits ; les directeurs gèrent ensuite leurs équipes depuis chaque module.</p>
+      <div style={{ marginBottom: 24 }}><RepartitionUtilisateurs /></div>
       <h3 style={{ fontSize: 15, margin: '0 0 8px' }}>Journal des actions administratives</h3>
       <AuditListe lignes={audit} />
       {detail && <DetailClient id={detail} onClose={() => setDetail(null)} onChange={charger} />}

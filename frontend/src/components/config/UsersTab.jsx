@@ -4,6 +4,7 @@ import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import PermissionsAssignModal from '@/components/PermissionsAssignModal';
 import AffectationsModal from '@/components/AffectationsModal';
+import { useUtilisateursModule, BandeauModule, ComptesHorsModule, ProfilModule, RetraitModule, nomModule } from '@/components/UtilisateursModule';
 
 // Reprend loadTabUsers()/openModalUser()/saveUser()/openModalResetPwd()/toggleUser()/deleteUser()
 // de legacy/js/app.js (l. 4774-5170).
@@ -24,7 +25,8 @@ const ROLES_CABINET = ['comptable_cabinet', 'commercial'];
 
 // Exporté : réutilisé par JournauxTab pour la création rapide d'un responsable
 // depuis la modale journal (bouton « + Créer »).
-export function UserModal({ user, onClose, onSaved }) {
+// 066 : `module` = module d'où le compte est créé ; il y est rattaché (et à lui seul).
+export function UserModal({ user, onClose, onSaved, module = 'caisse' }) {
   const isEdit = !!user;
   const { activeTenantId, user: me } = useApp();
   // Rôles proposés : ceux que le cabinet autorise pour ce client
@@ -38,7 +40,9 @@ export function UserModal({ user, onClose, onSaved }) {
   const rolesCreables = isEdit && !rolesBase.includes(user.role) ? [user.role, ...rolesBase] : rolesBase;
   const [username, setUsername] = useState(user?.username || '');
   const [email, setEmail] = useState(user?.email || '');
-  const [role, setRole] = useState(user?.role || (rolesBase.includes('caissier') ? 'caissier' : rolesBase[0]));
+  // Rôle de base proposé : caissier pour la caisse, collaborateur pour les autres modules.
+  const roleDefaut = module === 'caisse' ? 'caissier' : 'collaborateur';
+  const [role, setRole] = useState(user?.role || (rolesBase.includes(roleDefaut) ? roleDefaut : rolesBase[0]));
   const [customRoleId, setCustomRoleId] = useState(user?.custom_role_id || null);
   const [pwd, setPwd] = useState('');
   const [pwd2, setPwd2] = useState('');
@@ -53,7 +57,7 @@ export function UserModal({ user, onClose, onSaved }) {
       if (annule || !Array.isArray(r?.roles) || r.roles.length === 0) return;
       setRolesSrv(r.roles);
       // Nouveau compte : rôle par défaut pris dans la liste autorisée.
-      if (!isEdit) setRole((cur) => (r.roles.includes(cur) ? cur : (r.roles.includes('caissier') ? 'caissier' : r.roles[0])));
+      if (!isEdit) setRole((cur) => (r.roles.includes(cur) ? cur : (r.roles.includes(roleDefaut) ? roleDefaut : r.roles[0])));
     });
     return () => { annule = true; };
   }, [isEdit]);
@@ -65,6 +69,7 @@ export function UserModal({ user, onClose, onSaved }) {
       if (!pwd || pwd.length < 6) { setErreur('Minimum 6 caractères.'); return; }
       if (pwd !== pwd2) { setErreur('Les mots de passe ne correspondent pas.'); return; }
       body = { ...body, password: pwd };
+      if (dansClient && module) body.modules = [module];
     }
     setSaving(true);
     const res = isEdit ? await api.put(`/users/${user.id}`, body) : await api.post('/users', body);
@@ -228,6 +233,10 @@ export default function UsersTab() {
   const [users, setUsers] = useState(null);
   const [erreur, setErreur] = useState('');
   const [modal, setModal] = useState(null); // null | 'new' | user | { reset:user } | { perms:user }
+  // 066 : dans un client, la liste est celle des utilisateurs de NJ CAISSE PRO.
+  const dansClient = Boolean(activeTenantId || me?.tenantId);
+  const mod = useUtilisateursModule('caisse', dansClient);
+  const [retrait, setRetrait] = useState(null);
 
   const canCreate = can('users.create');
   const canEdit = can('users.edit');
@@ -272,12 +281,13 @@ export default function UsersTab() {
   }, []);
 
   useEffect(() => { charger(); }, [charger]);
+  const rechargerTout = () => { charger(); mod.recharger(); };
 
   const onToggle = async (id) => {
     const res = await api.patch(`/users/${id}/actif`, {});
     if (res.error) { toast(res.error, 'error'); return; }
     toast(res.message, 'success');
-    charger();
+    rechargerTout();
   };
 
   const onDelete = async (id, username) => {
@@ -289,12 +299,15 @@ export default function UsersTab() {
   };
 
   if (erreur) return <div className="alert-err">{erreur}</div>;
-  if (!users) return <div className="loading-msg">Chargement…</div>;
+  if (!users || (dansClient && !mod.data && !mod.indisponible && !mod.erreur)) return <div className="loading-msg">Chargement…</div>;
+  const parModule = Boolean(dansClient && mod.data);
+  const membres = parModule ? new Map(mod.data.utilisateurs.map((u) => [u.id, u])) : null;
+  const visibles = parModule ? users.filter((u) => membres.has(u.id)) : users;
 
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700 }}>Utilisateurs ({users.length})</h3>
+        <h3 style={{ fontSize: 15, fontWeight: 700 }}>{parModule ? `Utilisateurs de ${nomModule('caisse')} (${visibles.length})` : `Utilisateurs (${users.length})`}</h3>
         {canCreate && (
           <button className="btn-add" onClick={() => setModal('new')}>+ Nouvel utilisateur</button>
         )}
@@ -305,18 +318,20 @@ export default function UsersTab() {
           Les autres rôles seront disponibles après souscription.
         </div>
       )}
+      {parModule && <BandeauModule data={mod.data} />}
+      {mod.erreur && <div className="alert-err">{mod.erreur}</div>}
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Utilisateur</th><th>Accès système</th><th>Profil métier</th><th>Email</th><th>Dernière connexion</th><th>Statut</th>
+              <th>Utilisateur</th><th>Accès système</th><th>{parModule ? 'Profil métier · caisse' : 'Profil métier'}</th><th>Email</th><th>Dernière connexion</th><th>Statut</th>
               {canRattrapage && <th title="Saisie d'opérations antidatées">Rattrapage</th>}
               {canActivite && <th title="Activité / projet obligatoire à chaque saisie">Activité obligatoire</th>}
               {showActions && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => {
+            {visibles.map((u) => {
               const isMe = u.id === me?.id;
               const bg = ROLES_COLORS[u.role] || '#f1f5f9';
               const conn = u.derniere_connexion
@@ -344,6 +359,11 @@ export default function UsersTab() {
                         {u.custom_role_nom}
                       </span>
                     ) : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>}
+                    {parModule && canEdit && (mod.data.profils.length > 0 || membres.get(u.id)?.profil_module) && (
+                      <div style={{ marginTop: 4 }}>
+                        <ProfilModule u={membres.get(u.id)} data={mod.data} code="caisse" onChange={(r) => mod.setData(r)} />
+                      </div>
+                    )}
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.email || '—'}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{conn}</td>
@@ -415,6 +435,10 @@ export default function UsersTab() {
                           <button className="btn-icon" title="Clients affectés" onClick={() => setModal({ affect: u })}>🏢</button>
                         )}
                         {canEdit && <button className={'btn-icon' + (u.actif ? ' danger' : '')} onClick={() => onToggle(u.id)} disabled={isMe}>{u.actif ? '⏸' : '▶️'}</button>}
+                        {parModule && canEdit && !isMe && (
+                          <button className="btn-icon" title={`Retirer de ${nomModule('caisse')}`} aria-label={`Retirer ${u.username} de ${nomModule('caisse')}`}
+                            onClick={() => setRetrait(u)}>🚪</button>
+                        )}
                         {canDelete && !isMe && <button className="btn-icon danger" onClick={() => onDelete(u.id, u.username)}>✕</button>}
                       </div>
                     </td>
@@ -426,11 +450,16 @@ export default function UsersTab() {
         </table>
       </div>
 
+      {parModule && <ComptesHorsModule data={mod.data} code="caisse" peutGerer={canEdit} onChange={(r) => { mod.setData(r); charger(); }} />}
+      {retrait && (
+        <RetraitModule cible={retrait} code="caisse" onFermer={() => setRetrait(null)}
+          onFait={(r) => { setRetrait(null); mod.setData(r); charger(); }} />
+      )}
       {(modal === 'new' || modal?.edit) && (
         <UserModal
           user={modal === 'new' ? null : modal.edit}
           onClose={() => setModal(null)}
-          onSaved={(msg) => { setModal(null); toast(msg, 'success'); charger(); }}
+          onSaved={(msg) => { setModal(null); toast(msg, 'success'); rechargerTout(); }}
         />
       )}
       {modal?.reset && (
