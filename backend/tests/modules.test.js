@@ -1,7 +1,7 @@
 // tests/modules.test.js — NJ BUSINESS : modules activés par client (migration 048).
 //
-//  • tous les clients ont NJ CAISSE PRO après la migration ; un nouveau client
-//    le reçoit automatiquement (déclencheur) ; migration rejouable ;
+//  • 065 : plus aucun module n'est activé d'office à la création d'un client ;
+//    les clients existants gardent les leurs ; migration 048 rejouable ;
 //  • /auth/login et /auth/me renvoient les modules de l'espace ;
 //  • module désactivé → 403 MODULE_INACTIF sur ses routes, pour ce client
 //    seulement, rôle cabinet compris ; les routes du socle restent ouvertes ;
@@ -75,6 +75,10 @@ const caisse = async (tenant) => (await sql(
 before(async () => {
   [{ id: A }] = await sql('INSERT INTO tenants (slug, nom, initialise_le) VALUES ($1, $2, NOW()) RETURNING id', [`ma-${sfx}`, `Modules A ${sfx}`]);
   [{ id: B }] = await sql('INSERT INTO tenants (slug, nom, initialise_le) VALUES ($1, $2, NOW()) RETURNING id', [`mb-${sfx}`, `Modules B ${sfx}`]);
+  // 065 : aucun module n'est plus activé d'office ; ces clients ont la caisse.
+  for (const t of [A, B]) {
+    await sql("INSERT INTO tenant_modules (tenant_id, module_code, actif, motif) VALUES ($1, 'caisse', true, 'Test') ON CONFLICT DO NOTHING", [t]);
+  }
   const [{ id: jA }] = await sql(`INSERT INTO journaux (tenant_id, code, nom, type) VALUES ($1, 'CS1', 'Caisse', 'caisse') RETURNING id`, [A]);
   await sql(`INSERT INTO journal (tenant_id, date, mois, annee, journal_id, type_caisse, rubrique_code, intitule, beneficiaire, entree, sortie)
              VALUES ($1, '2025-03-02', 'Mars', 2025, $2, 'especes', 'D1', 'Test modules', 'X', 50000, 0)`, [A, jA]);
@@ -113,21 +117,28 @@ after(async () => {
   await pool.end();
 });
 
-test('T1/T3/T4 — tous les clients ont NJ CAISSE PRO ; déclencheur à la création ; migration rejouable', async () => {
-  const [{ n }] = await sql(`SELECT COUNT(*)::int AS n FROM tenants t
-     WHERE NOT EXISTS (SELECT 1 FROM tenant_modules tm WHERE tm.tenant_id = t.id AND tm.module_code = 'caisse' AND tm.actif)`);
-  assert.equal(n, 0, 'aucun client sans NJ CAISSE PRO');
-  assert.equal(await caisse(A), true, 'nouveau client : module par défaut activé par le déclencheur');
+test('T1/T3/T4 — clients existants inchangés ; plus aucun module imposé à la création (065) ; migration 048 rejouable', async () => {
+  const [{ defaut }] = await sql("SELECT par_defaut AS defaut FROM modules WHERE code = 'caisse'");
+  assert.equal(defaut, false, '065 : la caisse n\'est plus un module par défaut');
+  // Un client créé sans module n'a aucun module : le déclencheur n'impose plus la caisse.
+  const [{ id: X }] = await sql('INSERT INTO tenants (slug, nom) VALUES ($1, $2) RETURNING id', [`mx-${sfx}`, `Modules X ${sfx}`]);
+  assert.equal(await caisse(X), undefined, 'aucune activation d\'office');
+  await sql('DELETE FROM tenants WHERE id = $1', [X]);
+  assert.equal(await caisse(A), true);
   const avant = await sql('SELECT COUNT(*)::int AS n FROM tenant_modules');
-  const migration = fs.readFileSync(path.join(__dirname, '..', 'db', 'migrations', '048_modules_nj_business.sql'), 'utf8');
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query(migration);
-    await client.query('COMMIT');
-  } finally { client.release(); }
-  assert.deepEqual(await sql('SELECT COUNT(*)::int AS n FROM tenant_modules'), avant, 'rejouée : aucune ligne en plus');
-  // Rejouer la 048 ne réécrit pas le catalogue : NJ COMMERCIAL reste opérationnel (050).
+  // Rejouer la 048 seule n'a de sens que si tout client a la caisse (contrôle de la 048).
+  const sansCaisse = await sql(`SELECT COUNT(*)::int AS n FROM tenants t WHERE NOT EXISTS
+     (SELECT 1 FROM tenant_modules tm WHERE tm.tenant_id = t.id AND tm.module_code = 'caisse')`);
+  if (sansCaisse[0].n === 0) {
+    const migration = fs.readFileSync(path.join(__dirname, '..', 'db', 'migrations', '048_modules_nj_business.sql'), 'utf8');
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(migration);
+      await client.query('ROLLBACK');   // contrôle seulement : la 065 a changé par_defaut après la 048
+    } finally { client.release(); }
+  }
+  assert.deepEqual(await sql('SELECT COUNT(*)::int AS n FROM tenant_modules'), avant, 'aucune ligne en plus');
   const [{ statut }] = await sql("SELECT statut FROM modules WHERE code = 'commercial'");
   assert.equal(statut, 'operationnel');
 });

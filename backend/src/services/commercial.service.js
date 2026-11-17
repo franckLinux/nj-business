@@ -10,8 +10,6 @@ const { sequelize } = require('../models');
 const { ErreurMetier } = require('./plateforme.service');
 const pr = require('./prospects.service');
 const email = require('./email.service');
-const { seedRubriquesDefaut } = require('../controllers/rubriques.controller');
-const { seedJournauxDefaut } = require('../controllers/journaux.controller');
 
 const SELECT = sequelize.QueryTypes.SELECT;
 const q = (sql, replacements, opts = {}) => sequelize.query(sql, { replacements, type: SELECT, ...opts });
@@ -196,10 +194,10 @@ const convertir = async ({ id, donnees, userId }) => {
       `INSERT INTO tenants (slug, nom, devise, contact_nom, contact_email, contact_telephone, pays, ville)
        VALUES (:slug, :nom, :devise, :cnom, :cmail, :ctel, :pays, :ville) RETURNING id`,
       { slug, nom, devise, cnom: p.nom_complet, cmail: p.email, ctel: p.telephone, pays: p.pays, ville: p.ville }, { transaction: t });
-    await seedRubriquesDefaut(tenant.id, { transaction: t });
-    await seedJournauxDefaut(tenant.id, { transaction: t });
-    const [fn] = await q("SELECT 1 AS ok FROM pg_proc WHERE proname = 'plan_client_initialiser'", {}, { transaction: t });
-    if (fn) await q('SELECT plan_client_initialiser(:id, NULL, :userId)', { id: tenant.id, userId }, { transaction: t });
+    // 065 : NJ CAISSE PRO activé (et préparé) explicitement, comme avant la réforme.
+    const modules = require('./modules.service');
+    await modules.activerALaCreation(modules.clientSequelize(sequelize, t),
+      { tenantId: tenant.id, codes: ['caisse'], userId, motif: 'Conversion d\'un prospect en client' });
     await ex(
       `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
        VALUES (:id, :userId, 'CREATION_CLIENT', 'plateforme', :id, CAST(:v AS jsonb))`,

@@ -378,7 +378,8 @@ const imprimerBon = async (req, res) => {
               o.numero AS numero_origine, a.numero AS numero_annulation, t.nom AS tenant_nom, t.sigle AS tenant_sigle, t.adresse AS tenant_adresse, t.boite_postale AS tenant_bp,
               t.nui AS tenant_nui, t.registre_commerce AS tenant_rc, t.logo_url AS tenant_logo, t.devise,
               to_jsonb(t)->>'telephone' AS tenant_tel, to_jsonb(t)->>'email' AS tenant_email,
-              t.caissier_nom, t.directeur_nom
+              -- 065 : directeur signataire de la caisse, à défaut le représentant légal.
+              t.caissier_nom, COALESCE(NULLIF(t.directeur_nom, ''), t.dirigeant_nom) AS directeur_nom
          FROM journal j
          LEFT JOIN journaux jx ON jx.id = j.journal_id
          LEFT JOIN rubriques r ON r.code = j.rubrique_code AND r.tenant_id = j.tenant_id

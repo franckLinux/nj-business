@@ -72,7 +72,9 @@ export default function BasculePlanModal({ de, vers, versInfo, apercu, contexte 
             <span style={{ fontSize: 12.5, color: '#334155', flex: '1 1 220px' }}>
               {contexte === 'forme'
                 ? <>La forme juridique choisie relève du <b>{versInfo?.libelle || LIBELLES[vers]}</b> — {versInfo?.description}.</>
-                : <>Votre entité est déclarée sous une forme qui relève du <b>{versInfo?.libelle || LIBELLES[vers]}</b> : alignez son plan comptable.</>}
+                : contexte === 'choix'
+                  ? <>Vous choisissez le <b>{versInfo?.libelle || LIBELLES[vers]}</b> pour la caisse — {versInfo?.description}.</>
+                  : <>Votre entité est déclarée sous une forme qui relève du <b>{versInfo?.libelle || LIBELLES[vers]}</b> : alignez son plan comptable.</>}
             </span>
           </div>
 
@@ -113,7 +115,7 @@ export default function BasculePlanModal({ de, vers, versInfo, apercu, contexte 
           <ul className="bp-garanties">
             <li><span aria-hidden>✅</span><span><b>Aucune suppression</b> : les comptes sortants sont archivés, jamais effacés ; les écritures de caisse ne sont pas modifiées.</span></li>
             <li><span aria-hidden>✅</span><span>Vos <b>comptes additifs</b> ({a.additifs_conserves ?? 0}) et vos <b>libellés personnalisés</b> sont conservés ; vous pourrez toujours ajouter des comptes.</span></li>
-            <li><span aria-hidden>↺</span><span><b>Réversible</b> : revenir à l'ancienne forme juridique restaure l'ancien plan.</span></li>
+            <li><span aria-hidden>↺</span><span><b>Réversible</b> : {contexte === 'choix' ? 'revenir au plan précédent, depuis les paramètres de la caisse, restaure l\'ancien plan.' : 'revenir à l\'ancienne forme juridique restaure l\'ancien plan.'}</span></li>
           </ul>
 
           <label style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 13, cursor: 'pointer', background: '#f8fafc', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', margin: 0, textTransform: 'none', letterSpacing: 0, fontWeight: 500, color: '#334155' }}>

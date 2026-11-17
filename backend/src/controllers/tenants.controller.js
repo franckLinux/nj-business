@@ -3,8 +3,7 @@ const { Op } = require('sequelize');
 const { sequelize, Tenant } = require('../models');
 const { query, getClient } = require('../config/database');
 const { tenantsAccessibles } = require('../services/affectation.service');
-const { seedRubriquesDefaut } = require('./rubriques.controller');
-const { seedJournauxDefaut } = require('./journaux.controller');
+const modules = require('../services/modules.service');
 
 // ── GET /api/tenants ───────────────────────────────────────────────────────
 const getTenants = async (req, res) => {
@@ -24,14 +23,21 @@ const getTenants = async (req, res) => {
 };
 
 // ── POST /api/tenants ──────────────────────────────────────────────────────
+// Lot B (065) : la création d'un client ne dépend d'aucun module. Il est créé
+// avec son identité seule ; les modules cochés (`modules`, facultatif) sont
+// activés dans la même transaction, et chacun prépare alors ses propres données
+// (NJ CAISSE PRO : rubriques, journaux, plan comptable). Sans module coché, le
+// client existe et sa configuration d'entreprise est accessible.
 const createTenant = async (req, res) => {
   const { slug, nom, caissier_nom, directeur_nom, devise } = req.body;
+  const codes = req.body.modules === undefined ? [] : req.body.modules;
   if (!slug || !nom) return res.status(400).json({ error: 'Nom et slug obligatoires.' });
   if (!/^[a-z0-9-]+$/.test(slug)) return res.status(400).json({ error: 'Slug invalide.' });
+  if (!Array.isArray(codes)) return res.status(400).json({ error: 'Modules : liste attendue.' });
   try {
-    // UNE seule transaction : client + rubriques + journaux + plan comptable.
+    // UNE seule transaction : client + modules choisis (et leur préparation).
     // La moindre erreur annule tout — plus de client « à moitié créé ».
-    const tenant = await sequelize.transaction(async (transaction) => {
+    const { tenant, actives } = await sequelize.transaction(async (transaction) => {
       const t = await Tenant.create({
         slug,
         nom,
@@ -39,31 +45,19 @@ const createTenant = async (req, res) => {
         directeur_nom: directeur_nom || '',
         devise: devise || 'FCFA',
       }, { transaction });
-      await seedRubriquesDefaut(t.id, { transaction });
-      await seedJournauxDefaut(t.id, { transaction });
-
-      // Plan comptable propre au client, copié de la version publiée du
-      // modèle (migration 019). Ignoré si la 019 n'est pas encore appliquée.
-      const [fn] = await sequelize.query(
-        "SELECT 1 AS ok FROM pg_proc WHERE proname = 'plan_client_initialiser'",
-        { transaction, type: sequelize.QueryTypes.SELECT }
-      );
-      if (fn) {
-        await sequelize.query('SELECT plan_client_initialiser(:id, NULL, :userId)', {
-          replacements: { id: t.id, userId: req.user.id },
-          transaction, type: sequelize.QueryTypes.SELECT,
-        });
-      }
+      const client = modules.clientSequelize(sequelize, transaction);
+      const faits = await modules.activerALaCreation(client, { tenantId: t.id, codes, userId: req.user.id });
       await sequelize.query(
         `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
          VALUES (:id, :userId, 'CREATION_CLIENT', 'plateforme', :id, CAST(:v AS jsonb))`,
-        { replacements: { id: t.id, userId: req.user.id, v: JSON.stringify({ nom, slug }) },
+        { replacements: { id: t.id, userId: req.user.id, v: JSON.stringify({ nom, slug, modules: faits }) },
           transaction, type: sequelize.QueryTypes.INSERT });
-      return t;
+      return { tenant: t, actives: faits };
     });
-    res.status(201).json(tenant);
+    res.status(201).json({ ...tenant.toJSON(), modules: actives });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') return res.status(409).json({ error: 'Slug déjà utilisé.' });
+    if (err instanceof modules.ErreurMetier) return res.status(err.status).json({ error: `Client non créé : ${err.message}` });
     console.error('[Tenants] createTenant :', err.message);
     // Erreur levée par plan_client_initialiser (modèle absent ou non publié) :
     // la transaction a tout annulé, on l'explique à l'administrateur.
@@ -76,7 +70,6 @@ const createTenant = async (req, res) => {
   }
 };
 
-// ── PATCH /api/tenants/:id/actif ───────────────────────────────────────────
 const toggleActif = async (req, res) => {
   const { actif } = req.body;
   try {

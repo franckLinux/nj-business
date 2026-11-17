@@ -113,7 +113,7 @@ const getCompteEmploi = async (req, res) => {
         order: [['rubrique_code', 'ASC']],
         raw: true,
       }),
-      Tenant.findOne({ where: { id: tenantId }, attributes: ['nom', 'devise', 'directeur_nom', 'caissier_nom'] }),
+      Tenant.findOne({ where: { id: tenantId }, attributes: ['nom', 'devise', 'directeur_nom', 'caissier_nom', 'dirigeant_nom'] }),
       Rubrique.findAll({ where: { tenant_id: tenantId }, attributes: ['code', 'intitule', 'code_comptable'], raw: true }),
     ]);
     const libRubrique = Object.fromEntries(rubriquesRows.map((r) => [r.code, r.intitule]));
@@ -227,7 +227,8 @@ const getCompteEmploi = async (req, res) => {
       meta: {
         mois, annee: yr,
         tenant_nom:    tenant?.nom           || '',
-        directeur_nom: tenant?.directeur_nom || '',
+        // 065 : directeur signataire de la caisse, à défaut le représentant légal.
+        directeur_nom: tenant?.directeur_nom || tenant?.dirigeant_nom || '',
         caissier_nom:  tenant?.caissier_nom  || '',
         devise:        tenant?.devise        || 'FCFA',
       },

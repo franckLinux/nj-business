@@ -181,14 +181,15 @@ const deleteJournal = async (req, res) => {
 // ── Seed journaux par défaut pour un nouveau tenant ──────────────────────
 // Utilise la nouvelle convention de codes (CS1, OM1, MM1, BQ1, CP1).
 // `transaction` (facultative) : voir seedRubriquesDefaut.
+const JOURNAUX_DEFAUT = [
+  { code:'CS1', nom:'Caisse Principale',  type:'caisse',         ordre:1 },
+  { code:'OM1', nom:'Orange Money',        type:'om',             ordre:2 },
+  { code:'MM1', nom:'MTN Mobile Money',    type:'momo',           ordre:3 },
+  { code:'BQ1', nom:'Compte Banque',       type:'banque',         ordre:4 },
+  { code:'CP1', nom:'Carte Prépayée',      type:'carte_prepayee', ordre:5 },
+];
 const seedJournauxDefaut = async (tenantId, { transaction } = {}) => {
-  const defauts = [
-    { code:'CS1', nom:'Caisse Principale',  type:'caisse',         ordre:1 },
-    { code:'OM1', nom:'Orange Money',        type:'om',             ordre:2 },
-    { code:'MM1', nom:'MTN Mobile Money',    type:'momo',           ordre:3 },
-    { code:'BQ1', nom:'Compte Banque',       type:'banque',         ordre:4 },
-    { code:'CP1', nom:'Carte Prépayée',      type:'carte_prepayee', ordre:5 },
-  ];
+  const defauts = JOURNAUX_DEFAUT;
   for (const j of defauts) {
     await Journal.findOrCreate({
       transaction,
@@ -200,6 +201,6 @@ const seedJournauxDefaut = async (tenantId, { transaction } = {}) => {
 
 module.exports = {
   getJournaux, createJournal, updateJournal, deleteJournal,
-  getNextCode, seedJournauxDefaut,
+  getNextCode, seedJournauxDefaut, JOURNAUX_DEFAUT,
   TYPES_JOURNAUX, PREFIX_BY_TYPE,
 };

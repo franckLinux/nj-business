@@ -134,6 +134,7 @@ test('Scénario 1 — entreprise sans module : la configuration est accessible e
   const i = r.data.identite;
   assert.deepEqual([i.sigle, i.nui, i.email, i.region, i.nom_commercial], ['KD', 'M0123456789X', 'contact@kamga.cm', 'Littoral', 'Kamga']);
   assert.equal(r.data.references.length, 1);
+  assert.equal(i.date_creation, '2015-03-01', 'date restituée telle quelle (sans décalage de fuseau)');
   const [audit] = await sql("SELECT nouvelle_valeur FROM audit_log WHERE tenant_id = $1 AND action = 'ENTREPRISE_IDENTITE'", [A]);
   assert.equal(audit.nouvelle_valeur.ville, 'Douala', 'modification tracée');
   // Un champ absent n'est pas effacé.
@@ -212,7 +213,8 @@ test('Représentant légal : déclaration, correction, changement avec historiqu
   assert.equal(r.data.historique_representants[0].fin, '2026-05-31', 'clos la veille');
   const t = (await sql('SELECT nom, sigle, nui, ville, dirigeant_nom, directeur_nom FROM tenants WHERE id = $1', [A]))[0];
   assert.deepEqual([t.nom, t.sigle, t.nui, t.ville], [identiteAvant.nom, identiteAvant.sigle, identiteAvant.nui, identiteAvant.ville], 'identité inchangée');
-  assert.deepEqual([t.dirigeant_nom, t.directeur_nom], ['Marie NGO', 'Marie NGO'], 'nom recopié pour la caisse');
+  assert.equal(t.dirigeant_nom, 'Marie NGO', 'nom recopié (compatibilité)');
+  assert.notEqual(t.directeur_nom, 'Marie NGO', '065 : le directeur signataire de la caisse n\'est pas écrasé');
   const [{ n }] = await sql('SELECT COUNT(*)::int AS n FROM entreprise_representants WHERE tenant_id = $1 AND fin IS NULL', [A]);
   assert.equal(n, 1, 'un seul représentant en fonction');
 });

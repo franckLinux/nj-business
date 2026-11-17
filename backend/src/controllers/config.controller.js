@@ -180,24 +180,13 @@ const updateConfig = async (req, res) => {
   const logo = verifierLogo(logo_url);
   if (logo.erreur) return res.status(400).json({ error: logo.erreur });
 
-  // 060 : la forme juridique décide du plan comptable. Association / ONG →
-  // SYCEBNL, autre forme → SYSCOHADA. Le plan bascule automatiquement à
-  // l'enregistrement, dans la même transaction (non destructif, réversible) ;
-  // l'écran Entité affiche l'aperçu avant l'enregistrement.
-  let bascule = null;
-  try {
-    const e = await planRef.etat(req.tenantId);
-    const cible = planRef.referentielDeForme(forme_juridique);
-    if (cible !== e.actuel) bascule = cible;
-  } catch (err) {
-    if (err instanceof planRef.ErreurReferentiel) return res.status(err.status).json({ error: err.message });
-    console.error('[Config] contrôle du référentiel :', err.message);
-    return res.status(500).json({ error: `Erreur serveur : ${err.message}` });
-  }
-
+  // 065 : la forme juridique ne change plus le plan comptable. Le plan se
+  // choisit dans les paramètres de la caisse (/api/caisse/parametres/plan) ;
+  // la forme ne fait que le suggérer. Route conservée pour compatibilité :
+  // l'écran utilise désormais la configuration de l'entreprise (064).
   try {
     const transaction = await sequelize.transaction();
-    let count; let rows; let resultatBascule = null;
+    let count; let rows;
     try {
     [count, rows] = await Tenant.update(
       {
@@ -209,9 +198,9 @@ const updateConfig = async (req, res) => {
         boite_postale: (boite_postale || '').trim(),
         nui: (nui || '').trim().toUpperCase(),
         activite: (activite || '').trim(),
-        // Synchroniser directeur_nom pour rétrocompatibilité (rapport, etc.)
+        // 065 : directeur_nom est le signataire de la caisse (paramètres de la
+        // caisse) ; il n'est plus écrasé par le nom du dirigeant.
         dirigeant_nom: (dirigeant_nom || '').trim(),
-        directeur_nom: (dirigeant_nom || '').trim(),
         devise: devise || 'FCFA',
         exercice_debut: exercice_debut || null,
         exercice_fin: exercice_fin || null,
@@ -223,19 +212,13 @@ const updateConfig = async (req, res) => {
       },
       { where: { id: req.tenantId }, returning: true, transaction }
     );
-    if (count > 0 && bascule) {
-      resultatBascule = await planRef.basculer(req.tenantId, bascule, req.user.id, { transaction });
-      rows = [await Tenant.findByPk(req.tenantId, { transaction })];
-    }
     await transaction.commit();
     } catch (e) { await transaction.rollback().catch(() => {}); throw e; }
     if (count === 0) return res.status(404).json({ error: 'Entité introuvable.' });
     res.json({
-      message: resultatBascule
-        ? `Configuration enregistrée. Plan comptable basculé vers le ${planRef.REFERENTIELS[bascule].libelle} (${resultatBascule.ajoutes} compte(s) ajouté(s), ${resultatBascule.archives} archivé(s)).`
-        : 'Configuration mise à jour avec succès.',
+      message: 'Configuration mise à jour avec succès.',
       config: toConfigPayload(rows[0]),
-      bascule_plan: resultatBascule,
+      bascule_plan: null,
     });
   } catch (err) {
     console.error('[Config] updateConfig :', err.message);

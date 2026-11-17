@@ -50,7 +50,9 @@ const nomComplet = (r) => (r ? [r.prenoms, r.nom].filter(Boolean).join(' ').trim
 // ── Lecture ────────────────────────────────────────────────────────────────
 const lireIdentite = async (tenantId, db = { query }) => {
   const { rows } = await db.query(
-    `SELECT id, slug, ${COLONNES_IDENTITE.join(', ')}, updated_at FROM tenants WHERE id = $1`, [tenantId]);
+    // Date lue en texte (to_char) : aucun décalage de fuseau horaire à l'affichage.
+    `SELECT id, slug, ${COLONNES_IDENTITE.map((c) => (c === 'date_creation' ? "to_char(date_creation, 'YYYY-MM-DD') AS date_creation" : c)).join(', ')},
+            updated_at FROM tenants WHERE id = $1`, [tenantId]);
   if (!rows[0]) throw new ErreurEntreprise(404, 'Entreprise introuvable.');
   const t = rows[0];
   for (const k of Object.keys(CHAMPS)) t[k] = t[k] || '';
@@ -233,10 +235,11 @@ const validerRepresentant = (body, { partiel = false } = {}) => {
   return n;
 };
 
-// Le nom du dirigeant reste recopié dans tenants (dirigeant_nom, directeur_nom)
-// pour les écrans et documents de la caisse qui le lisent encore (compatibilité).
+// Le nom du représentant reste recopié dans tenants.dirigeant_nom (compatibilité).
+// 065 : il n'écrase plus directeur_nom, le directeur SIGNATAIRE des documents de
+// caisse, qui se règle dans les paramètres de la caisse (repli : ce représentant).
 const refleterDirigeant = (db, tenantId, rep) => db.query(
-  'UPDATE tenants SET dirigeant_nom = $2, directeur_nom = $2, updated_at = NOW() WHERE id = $1', [tenantId, nomComplet(rep)]);
+  'UPDATE tenants SET dirigeant_nom = $2, updated_at = NOW() WHERE id = $1', [tenantId, nomComplet(rep)]);
 
 /** Corrige le représentant en fonction (coordonnées, faute de frappe…) sans créer d'historique. */
 const modifierRepresentant = async ({ tenantId, userId, body }) => {

@@ -261,6 +261,14 @@ router.delete('/entreprise/logo',           authGuard, tenantGuard, requirePermi
 router.put   ('/entreprise/representant',   authGuard, tenantGuard, requirePermission('entreprise.edit'), entCtrl.modifierRepresentant);
 router.post  ('/entreprise/representants',  authGuard, tenantGuard, requirePermission('entreprise.edit'), entCtrl.changerRepresentant);
 
+// ── Paramètres propres à NJ CAISSE PRO (065) : plan comptable, signataires, exercice ──
+// Préfixe /caisse : routes du module caisse (bloquées s'il n'est pas activé).
+const cpCtrl = require('../controllers/caisse_parametres.controller');
+router.get ('/caisse/parametres',      authGuard, tenantGuard, requireAnyPermission('config.view', 'plan_comptable.view'), cpCtrl.lire);
+router.put ('/caisse/parametres',      authGuard, tenantGuard, requirePermission('config.edit'), cpCtrl.modifier);
+router.get ('/caisse/parametres/plan', authGuard, tenantGuard, requirePermission('config.edit'), cpCtrl.apercuPlan);
+router.post('/caisse/parametres/plan', authGuard, tenantGuard, requirePermission('config.edit'), cpCtrl.choisirPlan);
+
 // ── Banque (module de permission "banque") ────────────────────────────────
 const banqueCtrl = require('../controllers/banque.controller');
 const { updateBanqueRules } = require('../validators/banque.validator');

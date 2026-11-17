@@ -131,6 +131,62 @@ const configurationClient = async (tenantId) => {
   return { client: t[0], modules: rows };
 };
 
+// Adaptateur : une transaction Sequelize exposée comme un client pg
+// ({ query(sql, params) → { rows } }), pour activer des modules dans la
+// transaction qui crée le client (création manuelle, démonstration, conversion).
+const clientSequelize = (sequelize, transaction) => ({
+  query: async (sql, params = []) => {
+    const [rows] = await sequelize.query(sql, { bind: params, transaction });
+    return { rows: Array.isArray(rows) ? rows : [] };
+  },
+});
+
+/** Module activable : présent au catalogue et opérationnel. */
+const verifierActivable = async (client, code) => {
+  const { rows: m } = await client.query('SELECT code, nom, statut FROM modules WHERE code = $1', [code]);
+  if (!m[0] || m[0].statut === 'retire') throw new ErreurMetier(404, `Module « ${code} » introuvable.`);
+  if (m[0].statut !== 'operationnel') {
+    throw new ErreurMetier(400, `Le module ${m[0].nom} est en préparation : il ne peut pas encore être activé.`);
+  }
+  return m[0];
+};
+
+/**
+ * Écrit l'activation (ou la désactivation) dans la transaction `client` :
+ * ligne tenant_modules, préparation du module à l'activation, journal d'audit.
+ * Les contrôles d'entrée sont faits par l'appelant.
+ */
+const ecrireActivation = async (client, { tenantId, code, actif, motif, userId, avant = null }) => {
+  await client.query(
+    `INSERT INTO tenant_modules (tenant_id, module_code, actif, modifie_par, modifie_le, motif)
+     VALUES ($1, $2, $3, $4, NOW(), $5)
+     ON CONFLICT (tenant_id, module_code)
+     DO UPDATE SET actif = EXCLUDED.actif, modifie_par = EXCLUDED.modifie_par,
+                   modifie_le = NOW(), motif = EXCLUDED.motif`,
+    [tenantId, code, actif, userId, motif]);
+  if (actif && PREPARATIONS[code]) await PREPARATIONS[code](client, tenantId, userId);
+  await client.query(
+    `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur, nouvelle_valeur)
+     VALUES ($1, $2, $3, 'tenant_modules', $4, $5, $6)`,
+    [tenantId, userId, actif ? 'MODULE_ACTIVATION' : 'MODULE_DESACTIVATION', code,
+      JSON.stringify({ actif: avant }), JSON.stringify({ actif, motif })]);
+};
+
+/**
+ * Lot B (065) : modules choisis à la création d'un client, activés dans la
+ * transaction de création. Aucun module n'est imposé : un client peut exister
+ * sans module. `codes` vide = aucun module.
+ */
+const activerALaCreation = async (client, { tenantId, codes = [], userId, motif = 'Activation à la création du client' }) => {
+  if (!Array.isArray(codes)) throw new ErreurMetier(400, 'Modules : liste attendue.');
+  const uniques = [...new Set(codes.map((c) => String(c)))];
+  for (const code of uniques) {
+    await verifierActivable(client, code);
+    await ecrireActivation(client, { tenantId, code, actif: true, motif, userId });
+  }
+  return uniques;
+};
+
 /**
  * Active ou désactive un module pour un client. Jamais de suppression de ligne :
  * désactiver = actif false, les données du module restent intactes.
@@ -147,9 +203,7 @@ const definir = async ({ tenantId, code, actif, motif, userId }) => {
     await client.query('BEGIN');
     const { rows: m } = await client.query('SELECT code, nom, statut FROM modules WHERE code = $1', [code]);
     if (!m[0] || m[0].statut === 'retire') throw new ErreurMetier(404, 'Module introuvable.');
-    if (actif && m[0].statut !== 'operationnel') {
-      throw new ErreurMetier(400, `Le module ${m[0].nom} est en préparation : il ne peut pas encore être activé.`);
-    }
+    if (actif) await verifierActivable(client, code);
     const { rows: t } = await client.query('SELECT id FROM tenants WHERE id = $1', [tenantId]);
     if (!t[0]) throw new ErreurMetier(404, 'Client introuvable.');
 
@@ -160,19 +214,7 @@ const definir = async ({ tenantId, code, actif, motif, userId }) => {
       await client.query('ROLLBACK');
       return { inchange: true, code, actif };
     }
-    await client.query(
-      `INSERT INTO tenant_modules (tenant_id, module_code, actif, modifie_par, modifie_le, motif)
-       VALUES ($1, $2, $3, $4, NOW(), $5)
-       ON CONFLICT (tenant_id, module_code)
-       DO UPDATE SET actif = EXCLUDED.actif, modifie_par = EXCLUDED.modifie_par,
-                     modifie_le = NOW(), motif = EXCLUDED.motif`,
-      [tenantId, code, actif, userId, raison]);
-    if (actif && PREPARATIONS[code]) await PREPARATIONS[code](client, tenantId);
-    await client.query(
-      `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur, nouvelle_valeur)
-       VALUES ($1, $2, $3, 'tenant_modules', $4, $5, $6)`,
-      [tenantId, userId, actif ? 'MODULE_ACTIVATION' : 'MODULE_DESACTIVATION', code,
-        JSON.stringify({ actif: avant[0] ? etaitActif : null }), JSON.stringify({ actif, motif: raison })]);
+    await ecrireActivation(client, { tenantId, code, actif, motif: raison, userId, avant: avant[0] ? etaitActif : null });
     await client.query('COMMIT');
     console.log(`[Modules] ${actif ? 'activation' : 'désactivation'} ${code} pour ${tenantId} par ${userId}`);
     return { inchange: false, code, actif };
@@ -225,7 +267,52 @@ const PROFILS_COMMERCIAL = [
     ['com.articles.voir', 'com.tiers.voir', 'com.stock.voir', 'com.ventes.voir', 'com.ventes.devis', 'com.ventes.valider',
       'com.ventes.commandes', 'com.ventes.livrer', 'com.ventes.annuler', 'com.tableau_bord.voir']],
 ];
+// NJ CAISSE PRO (065) : rubriques, journaux et plan comptable de départ, créés
+// à l'ACTIVATION de la caisse et non plus à la création du client.
+//   • rubriques et journaux par défaut : seulement si le client n'en a aucun
+//     (une réactivation retrouve les siens tels qu'il les avait laissés) ;
+//   • plan comptable : référentiel suggéré par la forme juridique s'il n'est pas
+//     encore initialisé, puis initialisation (sans effet s'il existe déjà).
+const preparerCaisse = async (client, tenantId, userId) => {
+  const { rows: [t] } = await client.query(
+    'SELECT forme_juridique, plan_initialise_le FROM tenants WHERE id = $1 FOR UPDATE', [tenantId]);
+  if (!t) throw new ErreurMetier(404, 'Client introuvable.');
+  const { RUBRIQUES_DEFAUT } = require('../controllers/rubriques.controller');
+  const { JOURNAUX_DEFAUT } = require('../controllers/journaux.controller');
+  const { rows: [r] } = await client.query('SELECT COUNT(*)::int AS n FROM rubriques WHERE tenant_id = $1', [tenantId]);
+  if (r.n === 0) {
+    for (const x of RUBRIQUES_DEFAUT) {
+      await client.query(
+        `INSERT INTO rubriques (tenant_id, code, intitule, type, est_virement_interne, code_comptable, ordre)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (tenant_id, code) DO NOTHING`,
+        [tenantId, x.code, x.intitule, x.type, Boolean(x.est_virement_interne), x.code_comptable || '', x.ordre || 0]);
+    }
+  }
+  const { rows: [j] } = await client.query('SELECT COUNT(*)::int AS n FROM journaux WHERE tenant_id = $1', [tenantId]);
+  if (j.n === 0) {
+    for (const x of JOURNAUX_DEFAUT) {
+      await client.query(
+        `INSERT INTO journaux (tenant_id, code, nom, type, ordre) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (tenant_id, code) DO NOTHING`, [tenantId, x.code, x.nom, x.type, x.ordre]);
+    }
+  }
+  const { rows: [fn] } = await client.query(
+    "SELECT to_regprocedure('plan_client_initialiser(uuid,integer,uuid)') IS NOT NULL AS ok");
+  if (fn.ok) {
+    const { rows: [plan] } = await client.query('SELECT EXISTS (SELECT 1 FROM plan_comptable_client WHERE tenant_id = $1) AS ok', [tenantId]);
+    if (!t.plan_initialise_le && !plan.ok) {
+      const { rows: [ref] } = await client.query(
+        "SELECT to_regprocedure('plan_referentiel_de_forme(text)') IS NOT NULL AS ok");
+      if (ref.ok) {
+        await client.query('UPDATE tenants SET plan_referentiel = plan_referentiel_de_forme(forme_juridique) WHERE id = $1', [tenantId]);
+      }
+    }
+    await client.query('SELECT plan_client_initialiser($1::uuid, NULL::integer, $2::uuid)', [tenantId, userId || null]);
+  }
+};
+
 const PREPARATIONS = {
+  caisse: preparerCaisse,
   commercial: async (client, tenantId) => {
     const { rows: cat } = await client.query("SELECT code FROM permissions WHERE module = 'commercial'");
     const connus = new Set(cat.map((r) => r.code));
@@ -250,5 +337,5 @@ const PREPARATIONS = {
 
 module.exports = {
   ErreurMetier, modeControle, estInstalle, catalogue, moduleDeRoute, modulesActifs,
-  modulesPourSession, matrice, configurationClient, definir,
+  modulesPourSession, matrice, configurationClient, definir, activerALaCreation, clientSequelize, preparerCaisse,
 };

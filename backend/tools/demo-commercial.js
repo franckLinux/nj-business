@@ -80,8 +80,9 @@ async function creerDemo({ motDePasse = process.env.DEMO_MOT_DE_PASSE, auto = fa
   { s: SLUG, n: 'DÉMO — Ets Nkolo Distribution (fictif)' });
   const tenantId = t.id;
   etape('Client fictif créé');
+  // 065 : aucun module n'est plus activé d'office ; la démonstration active la caisse et le commercial.
+  await modules.definir({ tenantId, code: 'caisse', actif: true, motif: 'Compte de démonstration NJ COMMERCIAL', userId: null });
   await modules.definir({ tenantId, code: 'commercial', actif: true, motif: 'Compte de démonstration NJ COMMERCIAL', userId: null });
-  // NJ CAISSE PRO reste actif, comme pour tout client de la plateforme (module socle).
   etape('NJ COMMERCIAL activé (profils métier créés)');
   const hash = await bcrypt.hash(mdp, 10);
   const U = {};

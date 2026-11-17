@@ -5,6 +5,7 @@ const createTenantRules = [
     .matches(/^[a-z0-9-]+$/).withMessage('Slug invalide.'),
   body('nom').trim().notEmpty().withMessage('Nom et slug obligatoires.'),
   body('caissier_nom').optional({ checkFalsy: true }).isString(),
+  body('modules').optional().isArray().withMessage('Modules : liste attendue.'),
   body('directeur_nom').optional({ checkFalsy: true }).isString(),
   body('devise').optional({ checkFalsy: true }).isString(),
 ];

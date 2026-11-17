@@ -15,8 +15,8 @@ const bcrypt = require('bcryptjs');
 const { sequelize } = require('../models');
 const { ErreurMetier } = require('./plateforme.service');
 const email = require('./email.service');
-const { seedRubriquesDefaut } = require('../controllers/rubriques.controller');
-const { seedJournauxDefaut } = require('../controllers/journaux.controller');
+// 065 : les données de caisse sont préparées à l'activation du module.
+const modules = () => require('./modules.service');
 
 const SELECT = sequelize.QueryTypes.SELECT;
 const STATUTS = ['PROSPECT', 'CONTACTE', 'INTERESSE', 'INVITATION_ENVOYEE', 'DEMO_ACTIVE', 'DEMO_EXPIREE',
@@ -272,10 +272,9 @@ const creerEspaceDemo = async (t, p, userId) => {
      VALUES (:slug, :nom, 'FCFA', 'demo', :fin, :cnom, :cmail, :ctel, :pays, :ville) RETURNING id`,
     { slug, nom, fin: p.demo_fin, cnom: p.nom_complet, cmail: p.email, ctel: p.telephone, pays: p.pays, ville: p.ville },
     { transaction: t });
-  await seedRubriquesDefaut(tenant.id, { transaction: t });
-  await seedJournauxDefaut(tenant.id, { transaction: t });
-  const [fn] = await q("SELECT 1 AS ok FROM pg_proc WHERE proname = 'plan_client_initialiser'", {}, { transaction: t });
-  if (fn) await q('SELECT plan_client_initialiser(:id, NULL, :userId)', { id: tenant.id, userId }, { transaction: t });
+  // 065 : la démonstration porte sur NJ CAISSE PRO, activé (et préparé) explicitement.
+  await modules().activerALaCreation(modules().clientSequelize(sequelize, t),
+    { tenantId: tenant.id, codes: ['caisse'], userId, motif: 'Espace de démonstration' });
 
   // Plafond de l'espace : permissions du directeur, sans la gestion des profils.
   await ex(

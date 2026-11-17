@@ -67,7 +67,7 @@ before(async () => {
     await new Promise((r) => setTimeout(r, 250));
   }
   // Client « ajouté manuellement » par le vrai écran : rubriques, caisses, plan comptable.
-  const r = await appel('POST', '/tenants', 'adm', { slug: SLUG_VIDE, nom: `Client manuel ${sfx}` });
+  const r = await appel('POST', '/tenants', 'adm', { slug: SLUG_VIDE, nom: `Client manuel ${sfx}`, modules: ['caisse'] });   // 065 : caisse choisie
   assert.equal(r.status, 201, r.message);
   VIDE = r.data.id;
   await creerUtilisateur('dirVide', 'directeur', VIDE);
