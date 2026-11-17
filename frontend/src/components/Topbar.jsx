@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { MOIS, anneeCourante } from '@/lib/format';
 import NotifBell from './NotifBell';
@@ -9,7 +10,10 @@ import InstallPwaButton from './InstallPwaButton';
 // notifications, badges tenant/devise. Le sélecteur d'années couvre l'année
 // en cours et les 5 précédentes, comme initPeriod() dans l'app vanilla.
 export default function Topbar({ title, onMenu, sansPeriode = false }) {
-  const { mois, setMois, annee, setAnnee, tenantLabel, devise, isAdmin, openTenantSelector } = useApp();
+  const { user, can, activeTenantId, mois, setMois, annee, setAnnee, tenantLabel, devise, isAdmin, openTenantSelector } = useApp();
+  const navigate = useNavigate();
+  // 064 : accès à la configuration de l'entreprise (socle NJ BUSINESS), commun à tous les modules.
+  const voitEntreprise = can('entreprise.view') && Boolean(user?.tenantId || activeTenantId);
 
   const yr = anneeCourante();
   const annees = Array.from({ length: 6 }, (_, i) => yr - i);
@@ -33,6 +37,14 @@ export default function Topbar({ title, onMenu, sansPeriode = false }) {
 
       <div className="topbar-right">
         <RafraichirBouton />
+        {voitEntreprise && (
+          <button type="button" className="btn-icon" onClick={() => navigate('/entreprise')}
+            title="Configuration de l'entreprise" aria-label="Configuration de l'entreprise">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 21h18" /><path d="M5 21V7l7-4 7 4v14" /><path d="M9 21v-6h6v6" /><path d="M9 10h.01M15 10h.01" />
+            </svg>
+          </button>
+        )}
         <NotifBell />
         <span
           className="tenant-badge"

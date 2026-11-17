@@ -7,7 +7,7 @@
 
 - Un nouvel espace, **« Configuration de l'entreprise »**, appartient au socle NJ BUSINESS. On l'ouvre :
   - depuis l'accueil (carte en tête de page) ;
-  - depuis le menu de la caisse (« Entreprise ») ;
+  - depuis l'icône « immeuble » de la barre du haut, à côté de la cloche des notifications, dans la caisse comme dans le Commercial (v63 : retirée du menu latéral) ;
   - depuis la page Société du Commercial.
 
   **Il fonctionne même quand aucun module n'est activé.**
