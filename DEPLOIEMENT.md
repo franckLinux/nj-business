@@ -393,7 +393,7 @@ Si l'endpoint reste inaccessible (module cPanel capricieux, `.env` non relu) :
 
 ## 5. Rotation des secrets
 
-Le fichier `.env` complet — mot de passe Supabase `#DBCaisse2026`, `JWT_SECRET`,
+Le fichier `.env` complet — mot de passe Supabase, `JWT_SECRET`,
 clé Supabase — se trouve en clair dans les documents attachés au projet Claude
 (`docs/.env.md`). À traiter comme compromis :
 
