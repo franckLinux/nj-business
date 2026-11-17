@@ -1,0 +1,101 @@
+/* NJ BUSINESS — Configuration de l'entreprise (064). Préfixe nje-. */
+.nje { max-width: 980px; }
+.nje-info {
+  background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; border-radius: 12px;
+  padding: 11px 15px; font-size: 13.5px; margin-bottom: 16px; line-height: 1.5;
+}
+.nje-onglets {
+  display: flex; gap: 4px; border-bottom: 1.5px solid var(--border); margin: 6px 0 20px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.nje-onglets::-webkit-scrollbar { display: none; }
+.nje-onglet {
+  background: none; border: 0; border-bottom: 3px solid transparent; margin-bottom: -1.5px;
+  padding: 11px 16px; font: inherit; font-size: 14px; font-weight: 600; color: var(--text-muted);
+  cursor: pointer; white-space: nowrap; border-radius: 8px 8px 0 0;
+}
+.nje-onglet:hover { color: var(--brand); background: #f8fafc; }
+.nje-onglet:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nje-onglet.actif { color: var(--brand); border-bottom-color: var(--accent); }
+
+.nje-panneau { display: flex; flex-direction: column; gap: 16px; }
+.nje-carte {
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px;
+}
+.nje-carte h2 { font-size: 13px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 16px; }
+.nje-carte h3 { font-size: 13px; font-weight: 700; color: var(--text); margin: 18px 0 10px; }
+.nje-encadre { border: 1.5px solid var(--accent); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.1); }
+.nje-titre-ligne { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.nje-titre-ligne h2 { margin: 0; }
+.nje-pastille { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: #dcfce7; color: #166534; }
+.nje-note { font-size: 13px; color: var(--text-muted); margin: -6px 0 14px; line-height: 1.5; }
+.nje-vide { font-size: 13.5px; color: var(--text-muted); margin: 0 0 14px; }
+
+.nje-grille { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+.nje-champ { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.nje-large { grid-column: 1 / -1; }
+.nje-champ label { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.02em; }
+.nje-requis { color: var(--accent-red); }
+.nje-champ input, .nje-champ select {
+  height: 40px; padding: 0 12px; border: 1.5px solid var(--border); border-radius: 9px; font: inherit; font-size: 14px;
+  background: #fff; color: var(--text); width: 100%; box-sizing: border-box;
+}
+.nje-champ input:focus, .nje-champ select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+.nje-champ input[readonly], .nje-champ select:disabled { background: #f8fafc; color: var(--text); cursor: default; }
+.nje-aide { font-size: 12px; color: var(--text-light); line-height: 1.4; }
+
+.nje-image { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.nje-image-cadre {
+  width: 200px; height: 100px; border: 1.5px dashed var(--border); border-radius: 12px; background: #fff;
+  display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;
+}
+.nje-image-cadre img { max-width: 90%; max-height: 90%; object-fit: contain; }
+.nje-image-cadre span { font-size: 12px; color: var(--text-light); }
+.nje-image-texte { flex: 1 1 240px; min-width: 0; }
+.nje-image-texte p { font-size: 13px; color: var(--text-muted); margin: 0 0 12px; line-height: 1.5; }
+
+.nje-actions-ligne { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.nje-fin { justify-content: flex-end; margin-top: 18px; }
+.nje-btn {
+  height: 40px; padding: 0 16px; border-radius: 9px; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1.5px solid transparent;
+}
+.nje-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nje-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.nje-primaire { background: var(--accent); color: #fff; }
+.nje-primaire:hover:not(:disabled) { background: #2563eb; }
+.nje-secondaire { background: #fff; color: var(--text); border-color: var(--border); }
+.nje-secondaire:hover:not(:disabled) { border-color: #94a3b8; }
+.nje-danger { background: #fff; color: #b91c1c; border-color: #fecaca; }
+.nje-lien-danger { background: none; color: #b91c1c; padding: 0 8px; height: 40px; align-self: end; }
+
+.nje-pied {
+  position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: rgba(244, 246, 251, 0.96); backdrop-filter: blur(4px); padding: 12px 0; border-top: 1px solid var(--border);
+}
+.nje-pied span { font-size: 13px; color: var(--text-muted); }
+
+.nje-ref { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 12px; margin-bottom: 12px; align-items: end; }
+
+.nje-apercu { background: #f8fafc; }
+.nje-entete { display: flex; align-items: center; gap: 14px; background: #fff; border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.nje-entete img { max-height: 50px; max-width: 130px; object-fit: contain; flex-shrink: 0; }
+.nje-entete-nom { font-weight: 800; font-size: 16px; color: #1e293b; }
+.nje-entete-nom small { font-weight: 600; color: #64748b; }
+.nje-entete-slogan { font-size: 12px; font-style: italic; color: #475569; margin-top: 1px; }
+.nje-entete-l { font-size: 11.5px; color: #64748b; margin-top: 2px; line-height: 1.4; overflow-wrap: anywhere; }
+
+.nje-table-defil { overflow-x: auto; }
+.nje-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.nje-table th { text-align: left; font-size: 12px; color: var(--text-muted); font-weight: 700; padding: 8px 10px; border-bottom: 1.5px solid var(--border); white-space: nowrap; }
+.nje-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+
+@media (max-width: 620px) {
+  .nje-grille { grid-template-columns: minmax(0, 1fr); }
+  .nje-carte { padding: 18px 16px; }
+  .nje-ref { grid-template-columns: minmax(0, 1fr); gap: 8px; padding-bottom: 12px; border-bottom: 1px dashed var(--border); }
+  .nje-lien-danger { justify-self: start; height: 32px; }
+  .nje-pied { flex-direction: column; align-items: stretch; }
+  .nje-pied .nje-btn { width: 100%; }
+  .nje-image-cadre { width: 100%; }
+}

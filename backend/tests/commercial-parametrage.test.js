@@ -116,44 +116,39 @@ test('Droits : caissier refusé, collaborateur en lecture seule', async () => {
   assert.equal((await appel('GET', '/commercial/magasins', 'colA')).status, 200);
   assert.equal((await appel('POST', '/commercial/magasins', 'colA', { code: 'X', nom: 'X' })).status, 403);
   assert.equal((await appel('GET', '/commercial/societe', 'colA')).status, 200);
-  assert.equal((await appel('PUT', '/commercial/societe', 'colA', { nom_commercial: 'X' })).status, 403);
+  assert.equal((await appel('PUT', '/commercial/societe', 'colA', { prefixe_bc: 'X' })).status, 403);
 });
 
-test('Société : identité reprise de l\'Entité, paramètres du module enregistrés', async () => {
+test('Société : identité reprise de la configuration centrale, paramètres du module enregistrés', async () => {
   let r = await appel('GET', '/commercial/societe', 'dirA');
   assert.equal(r.data.identite.raison_sociale, `Commercial A ${sfx}`);
+  assert.equal(r.data.mode_identite, 'centrale');
   assert.equal(r.data.parametres.seuil_direction, 500000);
-  r = await appel('PUT', '/commercial/societe', 'dirA', { nom_commercial: 'Kamga Distribution', prefixe_bc: 'bck', seuil_direction: '' });
+  assert.equal(r.data.parametres.nom_commercial, undefined, '064 : le nom commercial appartient à l\'identité centrale');
+  r = await appel('PUT', '/commercial/societe', 'dirA', { prefixe_bc: 'bck', seuil_direction: '' });
   assert.equal(r.status, 200, r.message);
   assert.equal(r.data.parametres.prefixe_bc, 'BCK');
   assert.equal(r.data.parametres.seuil_direction, null, 'pas d\'étape direction');
   assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { prefixe_da: 'trop-long!' })).status, 400);
 });
 
-test('Société : identité de l\'Entité ; remplissage seulement pour un client sans NJ CAISSE PRO', async () => {
+test('Société : l\'identité ne se modifie plus dans le module (064), avec ou sans NJ CAISSE PRO', async () => {
   const caisse = (actif) => sql(`INSERT INTO tenant_modules (tenant_id, module_code, actif) VALUES ($1, 'caisse', $2)
                                  ON CONFLICT (tenant_id, module_code) DO UPDATE SET actif = $2`, [A, actif]);
-  // Sans la caisse : l'écran Société remplit l'Entité.
-  await caisse(false);
-  let r = await appel('GET', '/commercial/societe', 'dirA');
-  assert.equal(r.data.mode_identite, 'remplissage');
-  assert.ok(r.data.formes_juridiques.some((f) => f.code === 'SARL'));
-  r = await appel('PUT', '/commercial/societe', 'dirA', { identite: { nom: 'Kamga Distribution', forme_juridique: 'sarl', nui: 'm0123456789x', ville: 'Douala' } });
-  assert.equal(r.status, 200, r.message);
-  const [t] = await sql('SELECT nom, forme_juridique, nui, ville FROM tenants WHERE id = $1', [A]);
-  assert.deepEqual([t.nom, t.forme_juridique, t.nui, t.ville], ['Kamga Distribution', 'SARL', 'M0123456789X', 'Douala'], 'Entité renseignée');
-  assert.equal(r.data.identite.nui, 'M0123456789X');
-  assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { identite: { forme_juridique: 'XYZ' } })).status, 400);
-  assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { identite: { nom: ' ' } })).status, 400);
-  assert.equal((await appel('PUT', '/commercial/societe', 'colA', { identite: { ville: 'X' } })).status, 403);
-  // Avec la caisse : lecture seule, l'identité se modifie dans la caisse.
-  await caisse(true);
-  r = await appel('GET', '/commercial/societe', 'dirA');
-  assert.equal(r.data.mode_identite, 'caisse');
-  assert.equal(r.data.identite.ville, 'Douala', 'même Entité, reprise par la caisse');
-  const refus = await appel('PUT', '/commercial/societe', 'dirA', { identite: { ville: 'Yaoundé' } });
-  assert.equal(refus.status, 409);
-  assert.equal((await sql('SELECT ville FROM tenants WHERE id = $1', [A]))[0].ville, 'Douala');
+  for (const actif of [false, true]) {
+    await caisse(actif);
+    const avant = (await sql('SELECT nom, ville, nom_commercial FROM tenants WHERE id = $1', [A]))[0];
+    const r = await appel('PUT', '/commercial/societe', 'dirA', { identite: { nom: 'Kamga Distribution', ville: 'Douala' } });
+    assert.equal(r.status, 409);
+    assert.match(r.message, /Configuration de l'entreprise/);
+    assert.equal((await appel('PUT', '/commercial/societe', 'dirA', { nom_commercial: 'X' })).status, 409);
+    assert.deepEqual((await sql('SELECT nom, ville, nom_commercial FROM tenants WHERE id = $1', [A]))[0], avant, 'identité inchangée');
+  }
+  // L'identité modifiée dans la configuration centrale est celle que le module affiche.
+  await sql("UPDATE tenants SET nom_commercial = 'Kamga Distribution', ville = 'Douala' WHERE id = $1", [A]);
+  const r = await appel('GET', '/commercial/societe', 'dirA');
+  assert.equal(r.data.identite.nom_affiche, 'Kamga Distribution');
+  assert.equal(r.data.identite.ville, 'Douala');
 });
 
 test('Magasins : création, code unique sans tenir compte de la casse, désactivation', async () => {

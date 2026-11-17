@@ -251,6 +251,16 @@ router.post('/config/plan-referentiel/bascule', authGuard, tenantGuard, requireP
 // accès à l'écran de configuration.
 router.get('/config/entete',      authGuard, tenantGuard,           cfgCtrl.getEntete);
 
+// ── Configuration centrale de l'entreprise (064) — SOCLE NJ BUSINESS ──────
+// Indépendante des modules : accessible même sans aucun module activé.
+const entCtrl = require('../controllers/entreprise.controller');
+router.get   ('/entreprise',                authGuard, tenantGuard, requirePermission('entreprise.view'), entCtrl.lire);
+router.put   ('/entreprise',                authGuard, tenantGuard, requirePermission('entreprise.edit'), entCtrl.modifier);
+router.put   ('/entreprise/logo',           authGuard, tenantGuard, requirePermission('entreprise.edit'), entCtrl.definirLogo);
+router.delete('/entreprise/logo',           authGuard, tenantGuard, requirePermission('entreprise.edit'), entCtrl.supprimerLogo);
+router.put   ('/entreprise/representant',   authGuard, tenantGuard, requirePermission('entreprise.edit'), entCtrl.modifierRepresentant);
+router.post  ('/entreprise/representants',  authGuard, tenantGuard, requirePermission('entreprise.edit'), entCtrl.changerRepresentant);
+
 // ── Banque (module de permission "banque") ────────────────────────────────
 const banqueCtrl = require('../controllers/banque.controller');
 const { updateBanqueRules } = require('../validators/banque.validator');

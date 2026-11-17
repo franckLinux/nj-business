@@ -71,7 +71,8 @@ const SQL = `
     JOIN com_magasins m ON m.id = d.magasin_id
     LEFT JOIN users uc ON uc.id = c.cree_par LEFT JOIN users ul ON ul.id = c.lancee_par LEFT JOIN users ua ON ua.id = c.attribuee_par`;
 const formater = (c) => ({ ...c, id: Number(c.id), demande_id: Number(c.demande_id), magasin_id: Number(c.magasin_id),
-  date_limite: dateIso(c.date_limite), statut_libelle: STATUTS[c.statut], expiree: dateIso(c.date_limite) < aujourdhui() });
+  date_limite: dateIso(c.date_limite), statut_libelle: STATUTS[c.statut], expiree: dateIso(c.date_limite) < aujourdhui(),
+  identite_figee: Boolean(c.identite_emetteur), identite_emetteur: undefined });   // 064 : réservée aux PDF
 
 const charger = async (ctx, id, tr, verrou = false) => {
   const [c] = await Q(`${SQL} WHERE c.tenant_id = :t AND c.id = :id${verrou ? ' FOR UPDATE OF c' : ''}`, { t: ctx.tenantId, id: entier(id, 'Consultation') }, tr);
@@ -251,11 +252,13 @@ const modifier = async (ctx, id, body = {}) => {
 };
 
 // ── Données des documents ────────────────────────────────────────────────
-const societe = async (tenantId, tr) => {
-  const [s] = await Q(`SELECT t.nom AS raison_sociale, t.sigle, t.logo_url, t.adresse, t.boite_postale, t.ville, t.pays, t.telephone, t.email, t.nui,
-                              t.registre_commerce, COALESCE(p.nom_commercial, '') AS nom_commercial
-                         FROM tenants t LEFT JOIN com_parametres p ON p.tenant_id = t.id WHERE t.id = :t`, { t: tenantId }, tr);
-  return { ...s, nom_affiche: s.nom_commercial || s.raison_sociale };
+// 064 : identité de la configuration centrale ; une consultation lancée garde
+// celle figée au lancement (identite_emetteur).
+const entreprise = () => require('../entreprise.service');
+const societe = async (tenantId, _tr, figee = null) => entreprise().identitePour(tenantId, figee);
+const identiteConsultation = async (consultationId) => {
+  const [c] = await Q('SELECT identite_emetteur FROM com_consultations WHERE id = :c', { c: consultationId });
+  return c?.identite_emetteur || null;
 };
 const rendrePdf = async (tenantId, cf, tr) => {
   const [c] = await Q(`SELECT c.*, d.numero AS demande_numero, m.nom AS magasin_nom, m.localisation FROM com_consultations c JOIN com_demandes d ON d.id = c.demande_id
@@ -263,13 +266,13 @@ const rendrePdf = async (tenantId, cf, tr) => {
   const [f] = await Q(`SELECT rt.nom, rt.telephone, rt.email, COALESCE(t.contact_nom, '') AS contact_nom, COALESCE(t.contact_telephone, '') AS contact_telephone
                          FROM registre_tiers rt LEFT JOIN com_tiers t ON t.tiers_id = rt.id WHERE rt.id = :f`, { f: cf.fournisseur_id }, tr);
   const lignes = await Q('SELECT * FROM com_consultation_lignes WHERE consultation_id = :c ORDER BY ordre, id', { c: c.id }, tr);
-  return pdf.rendre({ societe: await societe(tenantId, tr), fournisseur: f, consultation: c, demande: { numero: c.demande_numero },
+  return pdf.rendre({ societe: await societe(tenantId, tr, c.identite_emetteur), fournisseur: f, consultation: c, demande: { numero: c.demande_numero },
     magasin: { nom: c.magasin_nom, localisation: c.localisation }, lignes, lien: lien(cf.jeton) });
 };
 
 const envoyerEmail = async (tenantId, cf, destinataire) => {
   const { envoyer: mail } = require('../email.service');
-  const s = await societe(tenantId);
+  const s = await societe(tenantId, null, await identiteConsultation(cf.consultation_id));
   const [c] = await Q('SELECT numero, date_limite FROM com_consultations WHERE id = :c', { c: cf.consultation_id });
   const url = lien(cf.jeton);
   const contenu = await rendrePdf(tenantId, cf);
@@ -294,7 +297,8 @@ const lancer = async (ctx, id, body = {}) => {
     const [d] = await Q('SELECT statut FROM com_demandes WHERE id = :d', { d: c.demande_id }, tr);
     if (d.statut !== 'approuvee') throw new ErreurConsultation(409, 'La demande n\'est plus validée.');
     if (!bons().baseVerification()) throw new ErreurConsultation(409, 'Adresse publique du serveur non configurée (APP_URL) : les liens de réponse ne peuvent pas être créés.');
-    await X("UPDATE com_consultations SET statut = 'lancee', lancee_par = :u, lancee_le = NOW(), modifie_le = NOW() WHERE id = :id", { u: ctx.userId, id: c.id }, tr);
+    await X(`UPDATE com_consultations SET statut = 'lancee', lancee_par = :u, lancee_le = NOW(), identite_emetteur = CAST(:ie AS jsonb), modifie_le = NOW()
+              WHERE id = :id`, { u: ctx.userId, id: c.id, ie: JSON.stringify(await entreprise().identiteDocuments(ctx.tenantId)) }, tr);
     await auditer(tr, ctx, 'COM_CONSULTATION_LANCEMENT', c.id, { numero: c.numero, fournisseurs: fs.length, derogation: fs.length < MINIMUM ? c.derogation_motif : '' });
     return body.envoyer_emails === false ? [] : fs.filter((f) => EMAIL_RE.test(f.email));
   });
@@ -524,7 +528,7 @@ const publicLire = async (jeton) => {
   await X(`UPDATE com_consultation_fournisseurs SET nb_consultations = nb_consultations + 1,
              statut = CASE WHEN statut IN ('a_envoyer', 'envoyee') AND :o THEN 'consultee' ELSE statut END,
              consulte_le = COALESCE(consulte_le, NOW()) WHERE id = :id`, { id: cf.id, o: e.ouverte });
-  const s = await societe(cf.c_tenant);
+  const s = await societe(cf.c_tenant, null, await identiteConsultation(cf.consultation_id));
   const lignes = (await Q('SELECT id, reference, designation, quantite, unite FROM com_consultation_lignes WHERE consultation_id = :c ORDER BY ordre, id', { c: cf.consultation_id }))
     .map((l) => ({ ...l, id: Number(l.id), quantite: Number(l.quantite) }));
   // Uniquement SA dernière offre : jamais celles des autres fournisseurs.

@@ -87,6 +87,13 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         </NavLink>
         )}
 
+        {can('entreprise.view') && !sansClient && (
+        <NavLink to="/entreprise" className={navClass}>
+          <svg viewBox="0 0 24 24"><path d="M3 21h18" /><path d="M5 21V7l7-4 7 4v14" /><path d="M9 21v-6h6v6" /></svg>
+          Entreprise
+        </NavLink>
+        )}
+
         {peutVoirAttente && !sansClient && (
           <NavLink to="/attente" className={navClass}>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg>

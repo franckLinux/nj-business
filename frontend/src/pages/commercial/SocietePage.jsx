@@ -1,22 +1,20 @@
-// NJ COMMERCIAL — Société : identité de l'Entité (comme dans la caisse) + règles du stock.
-//   • client qui a NJ CAISSE PRO : identité en lecture seule (elle se modifie dans la caisse) ;
-//   • client sans la caisse : « mode remplissage », l'identité se saisit ici et alimente
-//     l'Entité, que la caisse reprendra si elle est activée plus tard.
+// NJ COMMERCIAL — Société : identité de l'entreprise (lecture seule) et règles du stock.
+// 064 : l'identité vient de la configuration centrale NJ BUSINESS, commune à tous
+// les modules ; elle s'y modifie, que la caisse soit activée ou non.
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { Entete, Section, Champ, Bascule } from '@/components/commercial/ui';
+import { Entete, Section, Bascule } from '@/components/commercial/ui';
 
-// [clé, libellé, longueur max, pleine largeur]
+// [clé, libellé]
 const LIGNES = [
-  ['raison_sociale', 'Raison sociale', 200, true], ['sigle', 'Sigle', 30], ['forme_juridique', 'Forme juridique', 20],
-  ['nui', 'NUI (identifiant fiscal)', 20], ['registre_commerce', 'Registre de commerce', 80],
-  ['adresse', 'Adresse du siège', 300, true], ['boite_postale', 'Boîte postale', 60], ['ville', 'Ville', 100], ['pays', 'Pays', 100],
-  ['telephone', 'Téléphone', 60], ['email', 'E-mail', 150], ['site_web', 'Site web', 200],
+  ['raison_sociale', 'Raison sociale'], ['nom_commercial', 'Nom commercial'], ['sigle', 'Sigle'], ['forme_juridique', 'Forme juridique'],
+  ['nui', 'NIU (identifiant fiscal)'], ['registre_commerce', 'Registre de commerce'],
+  ['adresse', 'Adresse du siège'], ['boite_postale', 'Boîte postale'], ['ville', 'Ville'], ['pays', 'Pays'],
+  ['telephone', 'Téléphone'], ['email', 'E-mail'], ['site_web', 'Site web'], ['devise', 'Devise principale'],
 ];
-const champEntite = (k) => (k === 'raison_sociale' ? 'nom' : k);
 
 export default function SocietePage() {
   const { can } = useApp();
@@ -24,7 +22,6 @@ export default function SocietePage() {
   const modifiable = can('com.parametrage.modifier');
   const [d, setD] = useState(null);
   const [f, setF] = useState(null);
-  const [ident, setIdent] = useState(null);
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
 
@@ -32,23 +29,19 @@ export default function SocietePage() {
     const r = await api.get('/commercial/societe');
     if (r?.error) { setErreur(r.error); return; }
     setD(r);
-    setIdent(Object.fromEntries(LIGNES.map(([k]) => [k, r.identite[k] || ''])));
     const p = r.parametres;
     setF({ ...p, seuil_direction: p.seuil_direction === null ? '' : String(p.seuil_direction), tolerance_ecart_pct: String(p.tolerance_ecart_pct) });
   };
   useEffect(() => { charger(); }, []);
 
-  const remplissage = d?.mode_identite === 'remplissage';
-  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
   const enregistrer = async (e) => {
     e.preventDefault();
     setEnCours(true);
-    const corps = { ...f };
-    if (remplissage) corps.identite = Object.fromEntries(LIGNES.map(([k]) => [champEntite(k), ident[k]]));
+    const { nom_commercial: _n, ...corps } = f;
     const r = await api.put('/commercial/societe', corps);
     setEnCours(false);
     if (r?.error) { setErreur(r.error); return; }
-    setErreur(''); toast('Société enregistrée.', 'success'); charger();
+    setErreur(''); toast('Paramètres enregistrés.', 'success'); charger();
   };
 
   if (!d || !f) return <div className="cm-page">{erreur ? <div className="cm-erreur">{erreur}</div> : <div className="loading-msg">Chargement…</div>}</div>;
@@ -57,9 +50,7 @@ export default function SocietePage() {
   return (
     <form className="cm-page" onSubmit={enregistrer}>
       <Entete titre="Société"
-        description={remplissage
-          ? 'Ce client n\'utilise pas NJ CAISSE PRO : renseignez ici l\'identité de l\'entreprise. Elle sera reprise par la caisse si elle est activée plus tard.'
-          : 'L\'identité vient de la caisse (Configuration → Entité) : elle n\'est saisie qu\'une fois et sert à la caisse comme au module commercial.'}>
+        description="L'identité de l'entreprise est commune à tous les modules : elle se modifie dans la configuration de l'entreprise. Ici, seules les règles propres au module commercial se règlent.">
         {modifiable && <button type="submit" className="cm-btn cm-primaire" disabled={enCours}>{enCours ? 'Enregistrement…' : 'Enregistrer'}</button>}
       </Entete>
       {erreur && <div className="cm-erreur" role="alert">{erreur}</div>}
@@ -68,42 +59,19 @@ export default function SocietePage() {
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
             {id.logo_url ? <img src={id.logo_url} alt="Logo" style={{ maxHeight: 56, maxWidth: 140, objectFit: 'contain' }} />
               : <span className="cm-pastille cm-off">Pas de logo</span>}
-            <span className={`cm-pastille ${remplissage ? 'cm-info' : 'cm-ok'}`}>{remplissage ? 'À renseigner ici (sans caisse)' : 'Reprise de la caisse'}</span>
+            <span className="cm-pastille cm-ok">Configuration de l'entreprise</span>
           </div>
-          {remplissage && modifiable ? (
-            <div className="cm-grille">
-              {LIGNES.map(([k, l, max, pleine]) => (
-                <Champ key={k} label={l} id={`id-${k}`} requis={k === 'raison_sociale'} pleine={pleine}>
-                  {k === 'forme_juridique' ? (
-                    <select id={`id-${k}`} value={ident[k]} onChange={(e) => setIdent((x) => ({ ...x, [k]: e.target.value }))}>
-                      <option value="">— Choisir —</option>
-                      {d.formes_juridiques.map((x) => <option key={x.code} value={x.code}>{x.label}</option>)}
-                    </select>
-                  ) : (
-                    <input id={`id-${k}`} value={ident[k]} maxLength={max} type={k === 'email' ? 'email' : 'text'}
-                      style={['sigle', 'nui'].includes(k) ? { textTransform: 'uppercase' } : undefined}
-                      onChange={(e) => setIdent((x) => ({ ...x, [k]: e.target.value }))} />
-                  )}
-                </Champ>
-              ))}
-              <Champ label="Devise principale" id="id-devise" aide="Réglée à la création du client.">
-                <input id="id-devise" value={id.devise || 'FCFA'} disabled />
-              </Champ>
-            </div>
-          ) : (
-            <>
-              <dl className="cm-identite">
-                {[...LIGNES, ['devise', 'Devise principale']].map(([k, l]) => (
-                  <div key={k} className="cm-identite-ligne">
-                    <dt>{l}</dt>
-                    <dd>{id[k] ? <span className="cm-identite-val">{k === 'forme_juridique' ? forme(id[k]) : id[k]}</span> : <span className="cm-identite-vide">non renseigné</span>}</dd>
-                  </div>
-                ))}
-              </dl>
-              {!remplissage && can('config.edit') && <p className="cm-aide" style={{ marginTop: 12 }}><Link to="/config">Modifier dans Configuration → Entité</Link></p>}
-              {!remplissage && !can('config.edit') && <p className="cm-aide" style={{ marginTop: 12 }}>Elle se modifie dans la caisse, par une personne habilitée (Configuration → Entité).</p>}
-            </>
-          )}
+          <dl className="cm-identite">
+            {LIGNES.map(([k, l]) => (
+              <div key={k} className="cm-identite-ligne">
+                <dt>{l}</dt>
+                <dd>{id[k] ? <span className="cm-identite-val">{k === 'forme_juridique' ? forme(id[k]) : id[k]}</span> : <span className="cm-identite-vide">non renseigné</span>}</dd>
+              </div>
+            ))}
+          </dl>
+          {can('entreprise.view')
+            ? <p className="cm-aide" style={{ marginTop: 12 }}><Link to="/entreprise">{can('entreprise.edit') ? 'Modifier dans la configuration de l\'entreprise' : 'Voir la configuration de l\'entreprise'}</Link></p>
+            : <p className="cm-aide" style={{ marginTop: 12 }}>Elle se modifie dans la configuration de l'entreprise, par une personne habilitée.</p>}
         </Section>
         <div>
           <Section titre="Règles du stock">

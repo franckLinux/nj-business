@@ -32,6 +32,7 @@ import PwaBootstrap from '@/components/PwaBootstrap';
 import OfflineIndicator from '@/components/OfflineIndicator';
 import { PAGE_PERMS, peut, peutGererProspects, voitConfiguration } from '@/lib/acces';
 import AccueilPage from '@/pages/AccueilPage';
+import EntreprisePage from '@/pages/EntreprisePage';
 import CommercialLayout, { peutUn, DROITS_DEMANDES, DROITS_AUTORISATIONS, DROITS_BONS, DROITS_HISTORIQUE, DROITS_CONSULTATIONS, DROITS_FRAIS } from '@/components/commercial/CommercialLayout';
 import DemandesPage from '@/pages/commercial/DemandesPage';
 import DemandeFormPage from '@/pages/commercial/DemandeFormPage';
@@ -113,6 +114,15 @@ function GardeCaisse({ children }) {
   return children;
 }
 
+// 064 — configuration de l'entreprise : aucun module requis, seulement le droit
+// de la consulter (le serveur contrôle de toute façon chaque appel).
+function GardeEntreprise({ children }) {
+  const { user, can } = useApp();
+  if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
+  if (!can('entreprise.view')) return <Navigate to={utiliseAccueil(user) ? '/accueil' : '/'} replace />;
+  return children;
+}
+
 // NJ COMMERCIAL (050) — même principe que GardeCaisse ; le cabinet passe (le
 // serveur répond 403 MODULE_INACTIF si le module n'est pas activé chez le client).
 function GardeCommercial({ children }) {
@@ -183,6 +193,8 @@ function AuthenticatedApp() {
     <Routes>
       {/* Accueil NJ BUSINESS : hors du menu de la caisse, réservé aux utilisateurs d'un client. */}
       <Route path="accueil" element={utiliseAccueil(user) ? <AccueilPage /> : <Navigate to="/" replace />} />
+      {/* 064 : configuration centrale de l'entreprise, hors de tout module (socle NJ BUSINESS). */}
+      <Route path="entreprise" element={<GardeEntreprise><EntreprisePage /></GardeEntreprise>} />
       <Route path="commercial" element={<GardeCommercial><CommercialLayout /></GardeCommercial>}>
         <Route index element={<EntreeCommercial />} />
         {/* Configuration : une page à onglets ; les anciennes adresses y mènent. */}

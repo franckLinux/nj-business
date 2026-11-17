@@ -2,7 +2,7 @@
 
 **ERP de gestion d'entreprises pour la zone CEMAC / OHADA**, conçu par le Cabinet NGAN JEAN (expertise comptable, Yaoundé).
 
-NJ BUSINESS est une plateforme **multi-clients** (multi-tenant), avec une connexion unique et une page d'accueil qui présente un module par carte. Le cabinet active pour chaque client entreprise les modules dont il a besoin, et le serveur contrôle les droits de chaque utilisateur, module par module.
+NJ BUSINESS est une plateforme **multi-clients** (multi-tenant), avec une connexion unique et une page d'accueil qui présente un module par carte. L'identité de chaque entreprise (raison sociale, logo, références légales, représentant légal) se configure une seule fois, dans le socle, indépendamment des modules activés. Le cabinet active pour chaque client entreprise les modules dont il a besoin, et le serveur contrôle les droits de chaque utilisateur, module par module.
 
 En production : [nj-business.net](https://nj-business.net)
 
@@ -99,7 +99,7 @@ cd backend
 TEST_DATABASE_URL=postgres://…/base_de_test node --test tests/
 ```
 
-Il y a 22 suites, 205 tests, qui couvrent la caisse, la passerelle comptable, le contrôle, les budgets, les permissions et tout NJ COMMERCIAL.
+Il y a 23 suites et 193 tests, qui couvrent la caisse, la passerelle comptable, le contrôle, les budgets, les permissions, la configuration de l'entreprise et tout NJ COMMERCIAL.
 
 ## Déploiement
 

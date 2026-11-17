@@ -243,4 +243,4 @@ const updateConfig = async (req, res) => {
   }
 };
 
-module.exports = { getConfig, getEntete, updateConfig, getReferentiel, getPlanReferentiel, postBasculePlan, FORMES_JURIDIQUES };
+module.exports = { getConfig, getEntete, updateConfig, getReferentiel, getPlanReferentiel, postBasculePlan, FORMES_JURIDIQUES, verifierLogo };

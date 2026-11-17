@@ -81,7 +81,6 @@ const unicite = (err, message) => {
 
 // ── Société ───────────────────────────────────────────────────────────────
 const PARAMS = {
-  nom_commercial: (v) => longueur(v, 150, 'Nom commercial'),
   mentions_documents: (v) => longueur(v, 1000, 'Mentions des documents'),
   prefixe_da: (v) => { const s = txt(v).toUpperCase(); if (!/^[A-Z0-9]{1,6}$/.test(s)) throw new ErreurCom(400, 'Préfixe des demandes : 1 à 6 lettres ou chiffres.'); return s; },
   prefixe_bc: (v) => { const s = txt(v).toUpperCase(); if (!/^[A-Z0-9]{1,6}$/.test(s)) throw new ErreurCom(400, 'Préfixe des bons de commande : 1 à 6 lettres ou chiffres.'); return s; },
@@ -94,31 +93,19 @@ const PARAMS = {
   autovalidation_stock: (v) => Boolean(v),
 };
 
-// Identité : toujours celle de l'Entité (table tenants), comme dans la caisse.
-//   • client qui a NJ CAISSE PRO : lecture seule ici (elle se modifie dans la caisse) ;
-//   • client sans la caisse : « mode remplissage », l'écran Société écrit l'Entité,
-//     que la caisse reprendra telle quelle si elle est activée plus tard.
-const CHAMPS_ENTITE = {
-  nom: 200, sigle: 30, forme_juridique: 20, adresse: 300, boite_postale: 60, ville: 100, pays: 100,
-  telephone: 60, email: 150, site_web: 200, nui: 20, registre_commerce: 80,
-};
-const caisseActive = async (tenantId, tr) => {
-  const [t] = await Q("SELECT to_regclass('public.tenant_modules') IS NOT NULL AS ok", {}, tr);
-  if (!t.ok) return true;                                   // système de modules absent : la caisse est là
-  const [m] = await Q(`SELECT 1 AS ok FROM tenant_modules tm JOIN modules m ON m.code = tm.module_code
-                        WHERE tm.tenant_id = :t AND tm.module_code = 'caisse' AND tm.actif AND m.statut = 'operationnel'`, { t: tenantId }, tr);
-  return Boolean(m);
-};
+// Identité : celle de la configuration centrale de l'entreprise (064), en
+// lecture seule ici. Elle se modifie dans « Configuration de l'entreprise »,
+// accessible que la caisse soit activée ou non. Le module ne garde que ses
+// propres paramètres (com_parametres).
+const MSG_IDENTITE = 'L\'identité de l\'entreprise (nom commercial compris) se modifie dans « Configuration de l\'entreprise », accessible depuis l\'accueil NJ BUSINESS.';
 
 const lireSociete = async (tenantId) => {
   exigerClient(tenantId);
-  const [t] = await Q(
-    `SELECT nom AS raison_sociale, sigle, forme_juridique, logo_url, adresse, boite_postale, ville, pays,
-            telephone, email, site_web, nui, registre_commerce, devise
-       FROM tenants WHERE id = :t`, { t: tenantId });
+  const [t] = await Q('SELECT 1 AS ok FROM tenants WHERE id = :t', { t: tenantId });
   if (!t) throw new ErreurCom(404, 'Client introuvable.');
+  const identite = await require('../entreprise.service').identiteDocuments(tenantId);
   const [p] = await Q('SELECT * FROM com_parametres WHERE tenant_id = :t', { t: tenantId });
-  const defaut = { nom_commercial: '', mentions_documents: '', prefixe_da: 'DA', prefixe_bc: 'BC',
+  const defaut = { mentions_documents: '', prefixe_da: 'DA', prefixe_bc: 'BC',
     bloquer_si_stock_suffisant: false, proforma_obligatoire: false, seuil_direction: 500000, tolerance_ecart_pct: 10,
     stock_negatif_autorise: false, autovalidation_stock: false };
   const parametres = { ...defaut, ...(p || {}) };
@@ -126,13 +113,14 @@ const lireSociete = async (tenantId) => {
     parametres[k] = parametres[k] === null ? null : Number(parametres[k]);
   }
   delete parametres.tenant_id;
+  delete parametres.nom_commercial;   // 064 : il appartient à l'identité centrale
   const { FORMES_JURIDIQUES } = require('../../controllers/config.controller');
-  return { identite: t, mode_identite: (await caisseActive(tenantId)) ? 'caisse' : 'remplissage',
-    formes_juridiques: FORMES_JURIDIQUES, parametres, parametres_enregistres: Boolean(p) };
+  return { identite, mode_identite: 'centrale', formes_juridiques: FORMES_JURIDIQUES, parametres, parametres_enregistres: Boolean(p) };
 };
 
 const modifierSociete = async ({ tenantId, userId, body }) => {
   exigerClient(tenantId);
+  if (body.identite !== undefined || body.nom_commercial !== undefined) throw new ErreurCom(409, MSG_IDENTITE);
   await sequelize.transaction(async (tr) => {
     const [avant] = await Q('SELECT * FROM com_parametres WHERE tenant_id = :t FOR UPDATE', { t: tenantId }, tr);
     const actuel = (await lireSociete(tenantId)).parametres;
@@ -147,36 +135,6 @@ const modifierSociete = async ({ tenantId, userId, body }) => {
     }
     const d = differences(actuel, n);
     if (d) await auditer(tr, { tenantId, userId, action: 'COM_PARAMETRES', id: tenantId, ...d });
-    // Identité de l'Entité : modifiable ici seulement pour un client sans NJ CAISSE PRO.
-    if (body.identite && typeof body.identite === 'object') {
-      if (await caisseActive(tenantId, tr)) throw new ErreurCom(409, 'Ce client utilise NJ CAISSE PRO : son identité se modifie dans la caisse (Configuration → Entité).');
-      const { FORMES_JURIDIQUES } = require('../../controllers/config.controller');
-      const [avantT] = await Q(`SELECT ${Object.keys(CHAMPS_ENTITE).join(', ')} FROM tenants WHERE id = :t FOR UPDATE`, { t: tenantId }, tr);
-      const n = {};
-      for (const [k, max] of Object.entries(CHAMPS_ENTITE)) {
-        if (body.identite[k] === undefined) continue;          // champ absent : inchangé
-        let v = txt(body.identite[k]);
-        if (v.length > max) throw new ErreurCom(400, `${k.replace('_', ' ')} : ${max} caractères au plus.`);
-        if (k === 'sigle' || k === 'nui' || k === 'forme_juridique') v = v.toUpperCase();
-        if (k === 'email') v = v.toLowerCase();
-        n[k] = v;
-      }
-      if (n.nom !== undefined && !n.nom) throw new ErreurCom(400, 'La raison sociale est obligatoire.');
-      if (n.forme_juridique && !FORMES_JURIDIQUES.some((f) => f.code === n.forme_juridique)) throw new ErreurCom(400, 'Forme juridique inconnue.');
-      if (n.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(n.email)) throw new ErreurCom(400, 'E-mail invalide.');
-      const d = differences(avantT, n);
-      if (d) {
-        await X(`UPDATE tenants SET ${Object.keys(n).map((k) => `${k} = :${k}`).join(', ')} WHERE id = :t`, { ...n, t: tenantId }, tr);
-        await auditer(tr, { tenantId, userId, action: 'COM_IDENTITE_ENTITE', id: tenantId, ...d });
-        // 060 : une forme juridique Association / ONG charge le plan SYCEBNL
-        // (et inversement). Bascule non destructive, dans la même transaction.
-        if (n.forme_juridique !== undefined) {
-          const planRef = require('../plan_referentiel.service');
-          const e = await planRef.etat(tenantId, { transaction: tr });
-          if (e.a_basculer) await planRef.basculer(tenantId, e.attendu, userId, { transaction: tr });
-        }
-      }
-    }
   });
   return lireSociete(tenantId);
 };

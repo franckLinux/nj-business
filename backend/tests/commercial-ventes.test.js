@@ -150,6 +150,10 @@ test('Devis : prix par défaut converti, remise, taxe de vente, totaux ; validat
   const v = await appel('POST', `/commercial/devis/${d.id}/validation`, 'resp');
   assert.equal(v.status, 200, v.message);
   assert.equal(v.data.statut, 'valide');
+  // 064 : identité de l'émetteur figée à la validation, absente des réponses.
+  assert.ok((await sql('SELECT identite_emetteur FROM com_devis WHERE id = $1', [d.id]))[0].identite_emetteur?.raison_sociale);
+  assert.equal(v.data.identite_emetteur, undefined);
+  assert.equal(v.data.identite_figee, true);
   const p = await binaire(`/commercial/devis/${d.id}/pdf`, 'com');
   assert.equal(p.status, 200);
   assert.equal(p.buffer.subarray(0, 4).toString(), '%PDF');
@@ -232,6 +236,7 @@ test('Livraison partielle : préparée, validée par un autre ; sortie au CMUP ;
   const v = await appel('POST', `/commercial/livraisons/${c.data.id}/validation`, 'ges');
   assert.equal(v.status, 200, v.message);
   assert.equal(v.data.statut, 'livree');
+  assert.ok((await sql('SELECT identite_emetteur FROM com_livraisons WHERE id = $1', [c.data.id]))[0].identite_emetteur?.raison_sociale, '064 : identité figée');
   assert.equal(v.data.mouvements.length, 1, 'le transport ne bouge pas le stock');
   assert.equal(v.data.mouvements[0].type, 'livraison');
   assert.equal(v.data.mouvements[0].quantite, 36);

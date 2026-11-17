@@ -183,6 +183,7 @@ test('4. Consultation : trois fournisseurs (sinon dérogation motivée), demande
   const l = await appel('POST', `/commercial/consultations/${c.data.id}/lancement`, 'resp', { envoyer_emails: false });
   assert.equal(l.status, 200, l.message);
   assert.equal(l.data.statut, 'lancee');
+  assert.ok((await sql('SELECT identite_emetteur FROM com_consultations WHERE id = $1', [c.data.id]))[0].identite_emetteur?.raison_sociale, '064 : identité figée au lancement');
   assert.ok(l.data.fournisseurs.every((f) => f.statut === 'a_envoyer' && /^https:\/\/app\.nj-business\.test\/offre\/[A-Za-z0-9_-]{43}$/.test(f.lien)));
   assert.equal(new Set(l.data.fournisseurs.map((f) => f.lien)).size, 3, 'un lien par fournisseur');
   const pdf = await fetch(`${BASE}/commercial/consultations/${c.data.id}/fournisseurs/${l.data.fournisseurs[0].id}/pdf`, { headers: { Authorization: `Bearer ${U.resp.token}` } });

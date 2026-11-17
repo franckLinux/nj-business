@@ -15,7 +15,7 @@ const LIBELLE_ROLE = {
 const INITIALES = { commercial: 'CM', comptabilite: 'CT', cg: 'CG', dsf: 'DSF', revis: 'RV', rh: 'RH' };
 
 export default function AccueilPage() {
-  const { user, logout } = useApp();
+  const { user, logout, can } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const [monCompte, setMonCompte] = useState(false);
@@ -63,6 +63,16 @@ export default function AccueilPage() {
         <p className="njb-espace">
           {user?.tenantNom || 'Votre entreprise'} · {actifs.length === 0 ? 'aucun module activé' : `${actifs.length} module${actifs.length > 1 ? 's' : ''} activé${actifs.length > 1 ? 's' : ''}`}
         </p>
+
+        {can('entreprise.view') && (
+          <button type="button" className="njb-raccourci" onClick={() => navigate('/entreprise')}>
+            <span className="njb-raccourci-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M3 21h18" /><path d="M5 21V7l7-4 7 4v14" /><path d="M9 21v-6h6v6" /><path d="M9 10h.01M15 10h.01" /></svg>
+            </span>
+            <span><b>Configuration de l'entreprise</b><span>Identité, informations légales, logo et représentant légal, communs à tous les modules</span></span>
+            <span className="njb-raccourci-fleche" aria-hidden="true">›</span>
+          </button>
+        )}
 
         {(raison === 'module-inactif' || actifs.length === 0) && (
           <div className="njb-alerte" role="status">

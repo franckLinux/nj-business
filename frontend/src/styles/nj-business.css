@@ -149,6 +149,20 @@
   .njb-contenu h1 { font-size: 21px; }
 }
 
+/* ── Accueil : accès à la configuration de l'entreprise (064) ───────── */
+.njb-raccourci {
+  display: flex; align-items: center; gap: 14px; background: var(--card); border: 1.5px solid var(--border); border-radius: 14px;
+  padding: 14px 18px; margin: 0 0 28px; text-decoration: none; color: inherit; cursor: pointer; width: 100%; font: inherit; text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.njb-raccourci:hover, .njb-raccourci:focus-visible { border-color: var(--accent); box-shadow: 0 6px 18px rgba(59, 130, 246, 0.12); outline: none; }
+.njb-raccourci-ico { width: 40px; height: 40px; border-radius: 10px; background: #eef2ff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.njb-raccourci-ico svg { width: 20px; height: 20px; stroke: var(--brand); fill: none; stroke-width: 2; }
+.njb-raccourci b { display: block; font-size: 15px; color: var(--brand); }
+.njb-raccourci span { font-size: 13px; color: var(--text-muted); }
+.njb-raccourci-fleche { margin-left: auto; font-size: 20px; color: var(--text-light); }
+
+
 /* ── En-tête du menu latéral de la caisse ──────────────────────────── */
 .njb-sidebar-marque { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; color: #fff; text-decoration: none; border-radius: 8px; }
 .njb-sidebar-marque:hover .njb-sidebar-retour, .njb-sidebar-marque:focus-visible .njb-sidebar-retour { color: #fff; }

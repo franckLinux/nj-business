@@ -91,7 +91,8 @@ before(async () => {
   await creerUtilisateur('gas', 'collaborateur', A, 'achats_gestionnaire');
   await creerUtilisateur('dem', 'collaborateur', A);
   await creerUtilisateur('dirB', 'directeur', B);
-  await appel('PUT', '/commercial/societe', 'dir', { nom_commercial: 'Test Distribution', mentions_documents: 'Livraison aux heures ouvrables.', seuil_direction: '' });
+  await sql("UPDATE tenants SET nom_commercial = 'Test Distribution' WHERE id = $1", [A]);   // 064 : identité centrale
+  await appel('PUT', '/commercial/societe', 'dir', { mentions_documents: 'Livraison aux heures ouvrables.', seuil_direction: '' });
   R.mag = (await appel('POST', '/commercial/magasins', 'dir', { code: 'MAG', nom: 'Magasin central', localisation: 'Zone industrielle' })).data.id;
   R.fou = (await appel('POST', '/commercial/tiers', 'dir', { type: 'fournisseur', nom: 'Bureau Plus SARL', ville: 'Douala', conditions_paiement: '30 jours fin de mois' })).data.id;
   R.fou2 = (await appel('POST', '/commercial/tiers', 'dir', { type: 'fournisseur', nom: 'Papeterie Centrale' })).data.id;
@@ -209,6 +210,15 @@ test('Vérification publique : authentique, sans prix ; référence inconnue', a
   assert.equal(r.data.etat, 'inconnu');
   r = await appel('GET', '/verification/bc/abc');
   assert.equal(r.data.etat, 'inconnu');
+  // 064 : le bon émis garde l'identité figée à son émission, même après un changement de nom.
+  const [{ identite_emetteur: ie }] = await sql('SELECT identite_emetteur FROM com_bons_commande WHERE jeton_verification = $1', [R.jeton]);
+  assert.equal(ie.nom_affiche, 'Test Distribution');
+  await sql("UPDATE tenants SET nom_commercial = 'Nouveau nom' WHERE id = $1", [A]);
+  r = await appel('GET', `/verification/bc/${R.jeton}`);
+  assert.equal(r.data.societe, 'Test Distribution', 'identité d\'origine conservée');
+  const liste = await appel('GET', '/commercial/bons-commande', 'dir');
+  assert.ok(liste.data.length > 0 && liste.data.every((b) => b.identite_emetteur === undefined), 'l\'identité figée ne circule pas dans les listes');
+  await sql("UPDATE tenants SET nom_commercial = 'Test Distribution' WHERE id = $1", [A]);
 });
 
 test('Revalidation : fournisseur ou prix hors autorisation, puis nouvelle approbation', async () => {

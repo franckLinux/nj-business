@@ -140,11 +140,13 @@ const SUIVI = { brouillon: 'Brouillon', valide: 'Validé', envoye: 'Envoyé au f
   annule: 'Annulé', remplace: 'Remplacé' };
 const suivi = (b) => (b.statut !== 'emis' ? b.statut : b.etat_livraison || (b.envoye_le ? 'envoye' : 'valide'));
 const formater = (b) => ({
+  // 064 : l'identité figée (logo compris) ne circule pas dans les listes ; seul le PDF l'utilise.
+  identite_figee: Boolean(b.identite_emetteur),
   ...b, id: Number(b.id), suivi: suivi(b), suivi_libelle: SUIVI[suivi(b)], consultation_id: b.consultation_id ? Number(b.consultation_id) : null, demande_id: Number(b.demande_id), fournisseur_id: Number(b.fournisseur_id), magasin_id: Number(b.magasin_id),
   remplace_id: b.remplace_id ? Number(b.remplace_id) : null, remplace_par_id: b.remplace_par_id ? Number(b.remplace_par_id) : null,
   total_ht: Number(b.total_ht), total_taxes: Number(b.total_taxes), total_ttc: Number(b.total_ttc), statut_libelle: STATUTS[b.statut],
   // Le jeton et le chemin du PDF ne sortent jamais par les listes.
-  jeton_verification: undefined, pdf_chemin: undefined,
+  jeton_verification: undefined, pdf_chemin: undefined, identite_emetteur: undefined,
 });
 
 const charger = async (ctx, id, tr, verrou = false) => {
@@ -497,17 +499,18 @@ const revalider = async (ctx, id, body = {}, notifier) => {
 };
 
 // ── Émission ─────────────────────────────────────────────────────────────
+// 064 : l'identité vient de la configuration centrale de l'entreprise ; un bon
+// émis garde celle figée à son émission (identite_emetteur).
+const entreprise = () => require('../entreprise.service');
 const donneesPdf = async (ctx, b, lignes, tr) => {
-  const [s] = await Q(`SELECT t.nom AS raison_sociale, t.sigle, t.forme_juridique, t.logo_url, t.adresse, t.boite_postale, t.ville, t.pays,
-                              t.telephone, t.email, t.nui, t.registre_commerce, COALESCE(p.nom_commercial, '') AS nom_commercial,
-                              COALESCE(p.mentions_documents, '') AS mentions_documents
-                         FROM tenants t LEFT JOIN com_parametres p ON p.tenant_id = t.id WHERE t.id = :t`, { t: ctx.tenantId }, tr);
+  const [p] = await Q('SELECT mentions_documents FROM com_parametres WHERE tenant_id = :t', { t: ctx.tenantId }, tr);
+  const s = { ...(await entreprise().identitePour(ctx.tenantId, b.identite_emetteur)), mentions_documents: p?.mentions_documents || '' };
   const [f] = await Q(`SELECT r.nom, r.nui, r.telephone, r.email, r.adresse, COALESCE(c.nom_commercial, '') AS nom_commercial, COALESCE(c.ville, '') AS ville,
                               COALESCE(c.pays, '') AS pays, COALESCE(c.contact_nom, '') AS contact_nom, COALESCE(c.contact_telephone, '') AS contact_telephone
                          FROM registre_tiers r LEFT JOIN com_tiers c ON c.tiers_id = r.id WHERE r.id = :f`, { f: b.fournisseur_id }, tr);
   const [m] = await Q('SELECT code, nom, localisation FROM com_magasins WHERE id = :m', { m: b.magasin_id }, tr);
   return {
-    societe: { ...s, nom_affiche: s.nom_commercial || s.raison_sociale }, fournisseur: f, magasin: m, lignes,
+    societe: s, fournisseur: f, magasin: m, lignes,
     demande: { numero: b.demande_numero },
   };
 };
@@ -550,17 +553,20 @@ const emettre = async (ctx, id, notifier) => {
     const emisLe = new Date();
     const autorisation = await resumeAutorisation(b.demande_id, tr);
     const lignes = await Q('SELECT * FROM com_bc_lignes WHERE bc_id = :b ORDER BY ordre, id', { b: b.id }, tr);
+    const donnees = await donneesPdf(ctx, { ...b, identite_emetteur: null }, lignes, tr);
     const contenu = await pdf.rendre({
-      ...(await donneesPdf(ctx, b, lignes, tr)),
+      ...donnees,
       bc: { ...b, numero_complet: numeroComplet, revision, emis_le: emisLe, emis_par_nom: ctx.username, autorisation },
       verificationUrl: urlVerification(jeton), apercu: false,
     });
     const sha = crypto.createHash('sha256').update(contenu).digest('hex');
     const chemin = await docs.ecrireBrut(ctx.tenantId, 'bon_commande', b.id, contenu, 'pdf');
     await X(`UPDATE com_bons_commande SET statut = 'emis', numero = :n, revision = :r, numero_complet = :nc, jeton_verification = :j,
-               pdf_chemin = :ch, pdf_sha256 = :sha, emis_par = :u, emis_par_nom = :un, emis_le = :le, autorisation = :au, modifie_le = NOW()
+               pdf_chemin = :ch, pdf_sha256 = :sha, emis_par = :u, emis_par_nom = :un, emis_le = :le, autorisation = :au,
+               identite_emetteur = CAST(:ie AS jsonb), modifie_le = NOW()
              WHERE id = :id`,
-    { n: numero, r: revision, nc: numeroComplet, j: jeton, ch: chemin, sha, u: ctx.userId, un: ctx.username, le: emisLe, au: autorisation, id: b.id }, tr);
+    { n: numero, r: revision, nc: numeroComplet, j: jeton, ch: chemin, sha, u: ctx.userId, un: ctx.username, le: emisLe, au: autorisation,
+      ie: JSON.stringify(donnees.societe), id: b.id }, tr);
     if (ancien) {
       await X(`UPDATE com_bons_commande SET statut = 'remplace', motif_annulation = :m, annule_par = :u, annule_le = NOW() WHERE id = :id`,
         { m: `Remplacé par la révision ${numeroComplet}`, u: ctx.userId, id: ancien.id }, tr);
@@ -678,8 +684,11 @@ const lirePiece = async (ctx, id, docId) => {
 const verifier = async (jeton) => {
   if (!/^[A-Za-z0-9_-]{43}$/.test(String(jeton || ''))) return { etat: 'inconnu' };
   const [b] = await Q(
-    `SELECT b.numero_complet, b.statut, b.emis_le, b.annule_le, b.pdf_sha256, b.revision, t.nom AS societe, t.nui AS societe_nui,
-            COALESCE(p.nom_commercial, '') AS nom_commercial, f.nom AS fournisseur,
+    // 064 : identité figée à l'émission, sinon identité centrale (bons émis avant la 064).
+    `SELECT b.numero_complet, b.statut, b.emis_le, b.annule_le, b.pdf_sha256, b.revision,
+            COALESCE(b.identite_emetteur->>'raison_sociale', t.nom) AS societe,
+            COALESCE(b.identite_emetteur->>'nui', t.nui) AS societe_nui,
+            COALESCE(b.identite_emetteur->>'nom_commercial', NULLIF(t.nom_commercial, ''), p.nom_commercial, '') AS nom_commercial, f.nom AS fournisseur,
             (SELECT numero_complet FROM com_bons_commande x WHERE x.remplace_id = b.id AND x.statut = 'emis' LIMIT 1) AS remplace_par
        FROM com_bons_commande b JOIN tenants t ON t.id = b.tenant_id JOIN registre_tiers f ON f.id = b.fournisseur_id
        LEFT JOIN com_parametres p ON p.tenant_id = b.tenant_id

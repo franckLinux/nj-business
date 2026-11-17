@@ -28,7 +28,9 @@ const { sequelize, Permission, TenantPermission } = require('../models');
 
 // Groupe d'une permission = module NJ BUSINESS auquel elle appartient. Toutes
 // les permissions historiques (journal, budget, contrôle…) forment « caisse ».
-const GROUPE = `CASE WHEN p.module IN ('commercial', 'dsf', 'revis', 'cg') THEN p.module ELSE 'caisse' END`;
+// 064 : les permissions « entreprise » forment le SOCLE, indépendant des modules.
+const GROUPE = `CASE WHEN p.module IN ('commercial', 'dsf', 'revis', 'cg') THEN p.module
+                     WHEN p.module = 'entreprise' THEN 'socle' ELSE 'caisse' END`;
 const SQL_BASE = `
   WITH u AS (
     SELECT id, role, custom_role_id FROM users WHERE id = :userId

@@ -132,13 +132,14 @@ const chargerClient = async (ctx, clientId, tr, { actif = true } = {}) => {
   return c;
 };
 
-const societe = async (tenantId, tr) => {
-  const [s] = await Q(`SELECT t.nom AS raison_sociale, t.sigle, t.forme_juridique, t.logo_url, t.adresse, t.boite_postale, t.ville, t.pays,
-                              t.telephone, t.email, t.nui, t.registre_commerce, COALESCE(p.nom_commercial, '') AS nom_commercial,
-                              COALESCE(p.mentions_documents, '') AS mentions_documents
-                         FROM tenants t LEFT JOIN com_parametres p ON p.tenant_id = t.id WHERE t.id = :t`, { t: tenantId }, tr);
-  return { ...s, nom_affiche: s.nom_commercial || s.raison_sociale };
+// 064 : identité de la configuration centrale ; un devis validé ou une livraison
+// faite garde celle figée à ce moment (identite_emetteur).
+const entreprise = () => require('../entreprise.service');
+const societe = async (tenantId, tr, figee = null) => {
+  const [p] = await Q('SELECT mentions_documents FROM com_parametres WHERE tenant_id = :t', { t: tenantId }, tr);
+  return { ...(await entreprise().identitePour(tenantId, figee)), mentions_documents: p?.mentions_documents || '' };
 };
+const figerIdentite = async (tenantId) => JSON.stringify(await entreprise().identiteDocuments(tenantId));
 
 // ══ DEVIS ═══════════════════════════════════════════════════════════════
 const SQL_DEVIS = `
@@ -156,7 +157,8 @@ const formaterDevis = (d, prix = true) => {
   const expire = d.statut === 'valide' && jour(d.date_validite) < aujourdhui();
   const out = { ...d, id: Number(d.id), client_id: Number(d.client_id), date_devis: jour(d.date_devis), date_validite: jour(d.date_validite),
     statut_libelle: expire ? 'Expiré' : STATUTS_DEVIS[d.statut], expire,
-    commande_id: d.commande_id ? Number(d.commande_id) : null, remise_max: d.remise_max === null || d.remise_max === undefined ? 0 : Number(d.remise_max) };
+    commande_id: d.commande_id ? Number(d.commande_id) : null, remise_max: d.remise_max === null || d.remise_max === undefined ? 0 : Number(d.remise_max),
+    identite_figee: Boolean(d.identite_emetteur), identite_emetteur: undefined };   // 064 : réservée aux PDF
   for (const k of ['total_brut', 'total_ht', 'total_taxes', 'total_ttc']) out[k] = prix ? Number(d[k]) : null;
   return out;
 };
@@ -383,14 +385,15 @@ const validerDevis = async (ctx, id) => {
         await auditer(tr, ctx, 'devis', 'COM_DEVIS_VALIDATION_RESPONSABLE', d.id, { numero: d.numero, suite: 'direction', motif: d.motif_direction });
         return;
       }
-      await X(`UPDATE com_devis SET statut = 'valide', valide_resp_par = :u, valide_resp_le = NOW(),
+      await X(`UPDATE com_devis SET statut = 'valide', valide_resp_par = :u, valide_resp_le = NOW(), identite_emetteur = CAST(:ie AS jsonb),
                  valide_dir_par = CASE WHEN niveau = 'direction' THEN CAST(:u AS uuid) END, valide_dir_le = CASE WHEN niveau = 'direction' THEN NOW() END WHERE id = :id`,
-      { u: ctx.userId, id: d.id }, tr);
+      { u: ctx.userId, id: d.id, ie: await figerIdentite(ctx.tenantId) }, tr);
       await auditer(tr, ctx, 'devis', 'COM_DEVIS_VALIDATION', d.id, { numero: d.numero, niveaux: d.niveau === 'direction' ? 'responsable et direction' : 'responsable' });
       return;
     }
     exiger(ctx, 'com.ventes.valider_direction', 'valider les devis (direction)');
-    await X("UPDATE com_devis SET statut = 'valide', valide_dir_par = :u, valide_dir_le = NOW() WHERE id = :id", { u: ctx.userId, id: d.id }, tr);
+    await X("UPDATE com_devis SET statut = 'valide', valide_dir_par = :u, valide_dir_le = NOW(), identite_emetteur = CAST(:ie AS jsonb) WHERE id = :id",
+      { u: ctx.userId, id: d.id, ie: await figerIdentite(ctx.tenantId) }, tr);
     await auditer(tr, ctx, 'devis', 'COM_DEVIS_VALIDATION_DIRECTION', d.id, { numero: d.numero, motif: d.motif_direction });
   });
   return lireDevis(ctx, id);
@@ -452,10 +455,11 @@ const dupliquerDevis = async (ctx, id) => {
 
 const pdfDevis = async (ctx, id) => {
   exigerUn(ctx, PRIX, 'consulter les prix des ventes');
-  const d = formaterDevis(await chargerDevis(ctx, id));
+  const brut = await chargerDevis(ctx, id);
+  const d = formaterDevis(brut);
   const lignes = await Q('SELECT * FROM com_devis_lignes WHERE devis_id = :d ORDER BY ordre, id', { d: d.id });
   const valable = ['valide', 'accepte'].includes(d.statut);
-  const contenu = await pdf.rendreDevis({ societe: await societe(ctx.tenantId), client: await chargerClient(ctx, d.client_id, null, { actif: false }),
+  const contenu = await pdf.rendreDevis({ societe: await societe(ctx.tenantId, null, valable ? brut.identite_emetteur : null), client: await chargerClient(ctx, d.client_id, null, { actif: false }),
     devis: { ...d, valide_nom: d.valide_dir_nom || d.valide_resp_nom }, lignes, valable });
   return { contenu, nom: `${d.numero}${valable ? '' : '-projet'}.pdf` };
 };
@@ -607,7 +611,8 @@ const SQL_LIVRAISON = `
     LEFT JOIN users ul ON ul.id = lv.livre_par LEFT JOIN users ua ON ua.id = lv.annule_par`;
 
 const formaterLivraison = (x) => ({ ...x, id: Number(x.id), commande_id: Number(x.commande_id), client_id: Number(x.client_id), magasin_id: Number(x.magasin_id),
-  date_livraison: jour(x.date_livraison), statut_libelle: STATUTS_LIVRAISON[x.statut] });
+  date_livraison: jour(x.date_livraison), statut_libelle: STATUTS_LIVRAISON[x.statut],
+  identite_figee: Boolean(x.identite_emetteur), identite_emetteur: undefined });   // 064 : réservée aux PDF
 
 const chargerLivraison = async (ctx, id, tr, verrou = false) => {
   const [x] = await Q(`${SQL_LIVRAISON} WHERE lv.tenant_id = :t AND lv.id = :id${verrou ? ' FOR UPDATE OF lv' : ''}`, { t: ctx.tenantId, id: entier(id, 'Livraison') }, tr);
@@ -853,7 +858,8 @@ const validerLivraison = async (ctx, id) => {
         observation: `${x.client_nom} — ${x.commande_numero}`, documentType: 'livraison', documentId: Number(x.id), ligneId: Number(l.id), userId: ctx.userId });
     }
     for (const a of articles) await moteur.rejouer(tr, ctx.tenantId, a);
-    await X("UPDATE com_livraisons SET statut = 'livree', livre_par = :u, livre_le = NOW() WHERE id = :id", { u: ctx.userId, id: x.id }, tr);
+    await X("UPDATE com_livraisons SET statut = 'livree', livre_par = :u, livre_le = NOW(), identite_emetteur = CAST(:ie AS jsonb) WHERE id = :id",
+      { u: ctx.userId, id: x.id, ie: await figerIdentite(ctx.tenantId) }, tr);
     await auditer(tr, ctx, 'livraison', 'COM_LIVRAISON_VALIDATION', x.id, { numero: x.numero, nb_lignes: lignes.length });
   });
   return lireLivraison(ctx, id);
@@ -878,13 +884,14 @@ const annulerLivraison = async (ctx, id, body = {}) => {
 
 const pdfLivraison = async (ctx, id) => {
   exigerUn(ctx, VOIR, 'consulter les ventes');
-  const x = formaterLivraison(await chargerLivraison(ctx, id));
+  const brutLv = await chargerLivraison(ctx, id);
+  const x = formaterLivraison(brutLv);
   const restes = new Map((await restesCommande(null, x.commande_id, x.id)).map((l) => [l.id, l]));
   const lignes = await Q(`SELECT l.*, cl.reference, cl.designation, cl.quantite AS commande FROM com_livraison_lignes l
                             JOIN com_commande_client_lignes cl ON cl.id = l.commande_ligne_id WHERE l.livraison_id = :l ORDER BY l.ordre, l.id`, { l: x.id });
   const [m] = await Q('SELECT code, nom FROM com_magasins WHERE id = :m', { m: x.magasin_id });
   const valable = x.statut === 'livree';
-  const contenu = await pdf.rendreLivraison({ societe: await societe(ctx.tenantId), client: await chargerClient(ctx, x.client_id, null, { actif: false }),
+  const contenu = await pdf.rendreLivraison({ societe: await societe(ctx.tenantId, null, valable ? brutLv.identite_emetteur : null), client: await chargerClient(ctx, x.client_id, null, { actif: false }),
     livraison: { ...x, livre_nom: x.livre_par_nom }, commande: { numero: x.commande_numero, reference_client: x.reference_client, devis_numero: x.devis_numero }, magasin: m,
     lignes: lignes.map((l) => {
       const r = restes.get(Number(l.commande_ligne_id)) || {};

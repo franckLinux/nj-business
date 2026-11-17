@@ -2,6 +2,7 @@
 // de legacy/js/app.js (l. 5332-5640) — réécrit de façon déclarative (state React
 // à la place des attributs `data-*` + mutation directe du DOM du legacy).
 export const MODULE_META = {
+  entreprise: { label: 'Entreprise (socle NJ BUSINESS)', color: '#f1f5f9', text: '#0f172a' },
   journal: { label: 'Journal de caisse', color: '#dbeafe', text: '#1d4ed8' },
   budget: { label: 'Suivi budgétaire', color: '#dcfce7', text: '#15803d' },
   previsions: { label: 'Prévisions', color: '#fef9c3', text: '#a16207' },
