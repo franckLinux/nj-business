@@ -73,7 +73,7 @@ const limiter = rateLimit({
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: parseInt(process.env.LOGIN_RATE_MAX, 10) || 10,   // réglable pour les tests automatiques
   message: { error: 'Trop de tentatives de connexion. Veuillez patienter 15 minutes.' },
 });
 

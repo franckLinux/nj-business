@@ -4,6 +4,7 @@ import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import PermissionsAssignModal from '@/components/PermissionsAssignModal';
 import AffectationsModal from '@/components/AffectationsModal';
+import { SessionsOuvertes } from '@/components/SessionsOuvertes';
 import { useUtilisateursModule, BandeauModule, ComptesHorsModule, ProfilModule, RetraitModule, nomModule } from '@/components/UtilisateursModule';
 
 // Reprend loadTabUsers()/openModalUser()/saveUser()/openModalResetPwd()/toggleUser()/deleteUser()
@@ -451,6 +452,7 @@ export default function UsersTab() {
       </div>
 
       {parModule && <ComptesHorsModule data={mod.data} code="caisse" peutGerer={canEdit} onChange={(r) => { mod.setData(r); charger(); }} />}
+      {canEdit && <SessionsOuvertes />}
       {retrait && (
         <RetraitModule cible={retrait} code="caisse" onFermer={() => setRetrait(null)}
           onFait={(r) => { setRetrait(null); mod.setData(r); charger(); }} />

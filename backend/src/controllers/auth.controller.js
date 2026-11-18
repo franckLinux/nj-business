@@ -5,6 +5,7 @@ const { query } = require('../config/database');
 const { demoExpiree, messageDemoExpiree } = require('../middleware/auth');
 const { getEffectivePermissions, getPermissionsAccordees } = require('../services/permission.service');
 const { modulesPourSession } = require('../services/modules.service');
+const sessions = require('../services/sessions.service');
 
 /**
  * POST /api/auth/login
@@ -46,16 +47,32 @@ const login = async (req, res) => {
     const finDemo = await demoExpiree(user.tenant_id);
     if (finDemo) return res.status(403).json(messageDemoExpiree(finDemo));
 
-    // Génération JWT
+    // 067 (lot D) : une seule session active par compte. Une deuxième
+    // connexion est refusée (409 SESSION_ACTIVE) sauf remplacement explicite
+    // (`remplacer: true`, mot de passe redonné ci-dessus).
+    let ouverte;
+    try {
+      ouverte = await sessions.ouvrir({ user, req, remplacer: req.body.remplacer === true });
+    } catch (e) {
+      if (e instanceof sessions.ErreurSession) {
+        return res.status(e.status).json({ error: e.message, code: e.code, session: e.details || null });
+      }
+      throw e;
+    }
+
+    // Génération JWT : le jeton porte l'identifiant de sa session (sid) et ne
+    // vit pas plus longtemps qu'elle. Le serveur contrôle la session à chaque
+    // requête : la fermer rend le jeton inutilisable immédiatement.
     const tokenPayload = {
       sub:      user.id,
       username: user.username,
       role:     user.role,
       tenantId: user.tenant_id,
+      ...(ouverte.session ? { sid: ouverte.session.id } : {}),
     };
 
     const accessToken = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
-      expiresIn: process.env.JWT_EXPIRES_IN || '8h',
+      expiresIn: ouverte.session ? `${ouverte.session.duree_max_min}m` : (process.env.JWT_EXPIRES_IN || '8h'),
     });
 
     // Mise à jour dernière connexion
@@ -83,6 +100,7 @@ const login = async (req, res) => {
         permissions, // null = pas de restriction configurée (rôle fixe seul) ; tableau = liste exclusive
         modules,     // 048 : [{ code, nom, statut, actif, … }] ; null = système de modules non installé
       },
+      session: ouverte.session ? { id: ouverte.session.id, expire_le: ouverte.session.expire_le, remplace: Boolean(ouverte.remplacee) } : null,
     });
   } catch (err) {
     console.error('[Auth] Erreur login :', err.message);
@@ -138,6 +156,9 @@ const changePassword = async (req, res) => {
 
     const hash = await bcrypt.hash(nouveauPassword, parseInt(process.env.BCRYPT_ROUNDS) || 12);
     await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, req.user.id]);
+    // 067 : les autres sessions du compte (s'il y en avait) sont fermées.
+    await sessions.terminer({ userId: req.user.id, sauf: req.user.sessionId || null, statut: 'revoquee', par: req.user.id,
+      motif: 'Mot de passe modifié', tenantId: req.user.tenantId, action: 'SESSION_REVOCATION' });
 
     res.json({ message: 'Mot de passe modifié avec succès.' });
   } catch (err) {
@@ -208,6 +229,8 @@ const reinitialiserMotDePasse = async (req, res) => {
     const hash = await bcrypt.hash(mdp, parseInt(process.env.BCRYPT_ROUNDS, 10) || 12);
     await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, r.user_id]);
     await query('UPDATE password_resets SET utilise_le = NOW() WHERE user_id = $1 AND utilise_le IS NULL', [r.user_id]);
+    // 067 : toute session ouverte avec l'ancien mot de passe est fermée.
+    await sessions.terminer({ userId: r.user_id, statut: 'revoquee', motif: 'Mot de passe réinitialisé', action: 'SESSION_REVOCATION' });
     res.json({ message: 'Mot de passe modifié. Vous pouvez vous connecter.', identifiant: r.username });
   } catch (err) {
     console.error('[Auth] reinitialiserMotDePasse :', err.message);
@@ -215,4 +238,39 @@ const reinitialiserMotDePasse = async (req, res) => {
   }
 };
 
-module.exports = { login, me, changePassword, motDePasseOublie, verifierReinitialisation, reinitialiserMotDePasse };
+// ── Sessions (067, lot D) ─────────────────────────────────────────────────
+const repondreErreur = (res, err, ctx) => {
+  if (err instanceof sessions.ErreurSession) return res.status(err.status).json({ error: err.message, code: err.code });
+  console.error(`[Auth] ${ctx} :`, err.message);
+  return res.status(500).json({ error: 'Erreur serveur.' });
+};
+
+/** POST /api/auth/deconnexion — ferme la session de ce jeton. */
+const deconnexion = async (req, res) => {
+  try {
+    if (req.user.sessionId) {
+      await sessions.terminer({ sessionId: req.user.sessionId, statut: 'fermee', par: req.user.id, motif: 'Déconnexion',
+        tenantId: req.user.tenantId, action: 'SESSION_FERMETURE' });
+    }
+    res.json({ message: 'Déconnecté.' });
+  } catch (err) { repondreErreur(res, err, 'deconnexion'); }
+};
+
+/** POST /api/auth/deconnexion-globale — ferme toutes les sessions du compte. */
+const deconnexionGlobale = async (req, res) => {
+  try {
+    const n = await sessions.terminer({ userId: req.user.id, statut: 'fermee', par: req.user.id,
+      motif: 'Déconnexion de tous les appareils', tenantId: req.user.tenantId, action: 'SESSION_FERMETURE' });
+    res.json({ message: 'Tous vos appareils sont déconnectés.', fermees: n });
+  } catch (err) { repondreErreur(res, err, 'deconnexionGlobale'); }
+};
+
+/** GET /api/auth/sessions — sessions du compte connecté (actives et récentes). */
+const mesSessions = async (req, res) => {
+  try {
+    const liste = await sessions.lister({ userId: req.user.id, actives: false, limite: 20 });
+    res.json({ sessions: liste.map((s) => ({ ...s, courante: s.id === req.user.sessionId })), reglages: await sessions.reglages() });
+  } catch (err) { repondreErreur(res, err, 'mesSessions'); }
+};
+
+module.exports = { login, me, changePassword, deconnexion, deconnexionGlobale, mesSessions, motDePasseOublie, verifierReinitialisation, reinitialiserMotDePasse };

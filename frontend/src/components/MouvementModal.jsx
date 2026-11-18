@@ -197,7 +197,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       });
       const tid = activeTenantId || user?.tenantId;
       await syncManager.enqueue({
-        method: 'POST', url: API_BASE + '/api/journal', body, local_id: localId,
+        method: 'POST', url: API_BASE + '/api/journal', body, local_id: localId, user_id: user?.id || null,
         headers: { Authorization: `Bearer ${token}`, ...(tid ? { 'X-Tenant-Id': tid } : {}) },
       });
       onClose();

@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { ModulesClient, ModulesMatrice } from '@/components/ModulesClients';
 import SuppressionClient from '@/components/SuppressionClient';
 import RepartitionUtilisateurs from '@/components/RepartitionUtilisateurs';
+import { SessionsOuvertes, ReglagesSessions } from '@/components/SessionsOuvertes';
 
 // Administration PLATEFORME (réforme, étape 8) — super_admin.
 // Vue administrative et technique des clients : aucune donnée de transaction.
@@ -327,6 +328,10 @@ export default function PlateformePage() {
       <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>👥 Utilisateurs par module</h3>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0 }}>Chaque module a ses utilisateurs. Les comptes existants ont été rattachés d'après leurs droits ; les directeurs gèrent ensuite leurs équipes depuis chaque module.</p>
       <div style={{ marginBottom: 24 }}><RepartitionUtilisateurs /></div>
+      <h3 style={{ fontSize: 15, margin: '0 0 4px' }}>🔐 Sessions</h3>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0 }}>Une seule session active par compte. Une deuxième connexion est refusée, sauf si la personne choisit de fermer l'autre session (mot de passe redonné, alerte par e-mail).</p>
+      <ReglagesSessions />
+      <div style={{ marginBottom: 24 }}><SessionsOuvertes plateforme /></div>
       <h3 style={{ fontSize: 15, margin: '0 0 8px' }}>Journal des actions administratives</h3>
       <AuditListe lignes={audit} />
       {detail && <DetailClient id={detail} onClose={() => setDetail(null)} onChange={charger} />}

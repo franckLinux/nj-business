@@ -77,6 +77,26 @@
   background: #f0fdf4; border: 1px solid #86efac; color: #15803d; border-radius: 10px;
   padding: 10px 12px; font-size: 13px; margin-bottom: 16px; line-height: 1.45;
 }
+/* 067 : compte déjà connecté sur un autre appareil */
+.njb-session { display: flex; flex-direction: column; }
+.njb-session-icone {
+  width: 52px; height: 52px; border-radius: 14px; background: #fff7ed; color: #c2410c; display: grid; place-items: center; margin-bottom: 14px;
+}
+.njb-session-icone svg { width: 28px; height: 28px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; }
+.njb-session-detail {
+  margin: 0 0 18px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: #f8fafc;
+  display: grid; gap: 8px; font-size: 13.5px;
+}
+.njb-session-detail div { display: flex; justify-content: space-between; gap: 12px; }
+.njb-session-detail dt { color: var(--text-muted); }
+.njb-session-detail dd { margin: 0; font-weight: 700; color: var(--text); text-align: right; }
+.njb-bouton-second {
+  height: 44px; width: 100%; margin-top: 10px; border: 1.5px solid var(--border); border-radius: 10px; background: #fff;
+  color: var(--text); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.njb-bouton-second:hover:not(:disabled) { background: #f8fafc; }
+.njb-bouton-second:focus-visible { outline: 3px solid rgba(59, 130, 246, 0.4); outline-offset: 2px; }
+.njb-session-note { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin: 14px 0 0; }
 .njb-demo { text-align: center; font-size: 13px; color: var(--text-muted); margin: 22px 0 0; }
 .njb-demo a { color: #1d4ed8; }
 

@@ -23,6 +23,10 @@ const { loginRules, changePasswordRules } = require('../validators/auth.validato
 router.post('/auth/login',           loginRules, validate, authCtrl.login);
 router.get ('/auth/me',              authGuard, authCtrl.me);
 router.post('/auth/change-password', authGuard, changePasswordRules, validate, authCtrl.changePassword);
+// 067 (lot D) : sessions — déconnexion, tous les appareils, mes sessions.
+router.post('/auth/deconnexion',          authGuard, authCtrl.deconnexion);
+router.post('/auth/deconnexion-globale',  authGuard, authCtrl.deconnexionGlobale);
+router.get ('/auth/sessions',             authGuard, authCtrl.mesSessions);
 // C9 : mot de passe oublié (public, limité en débit dans index.js).
 router.post('/auth/mot-de-passe-oublie', authCtrl.motDePasseOublie);
 router.get ('/auth/reinitialisation/:jeton', authCtrl.verifierReinitialisation);
@@ -225,6 +229,9 @@ router.get   ('/passerelle/simulation',                authGuard, tenantGuard, r
 // ── Utilisateurs (module de permission "users") ───────────────────────────
 const uCtrl = require('../controllers/users.controller');
 const { createUserRules, updateUserRules, userIdParamRule, resetPasswordRules } = require('../validators/users.validator');
+// 067 : sessions ouvertes du client (directeur) ou de la plateforme (super_admin).
+router.get   ('/sessions',     authGuard, tenantGuard, requirePermission('users.edit'), require('../controllers/sessions.controller').lister);
+router.delete('/sessions/:id', authGuard, tenantGuard, requirePermission('users.edit'), require('../controllers/sessions.controller').fermer);
 router.get   ('/users',               authGuard, tenantGuard, requirePermission('users.view'), uCtrl.getUsers);
 router.get   ('/users/roles-attribuables', authGuard, tenantGuard, requirePermission('users.view'), uCtrl.getRolesAttribuables);
 router.post  ('/users',               authGuard, tenantGuard, requirePermission('users.create'), createUserRules, validate, uCtrl.createUser);
@@ -411,6 +418,10 @@ router.put   ('/plateforme/clients/:id/roles',  ...admin, pfCtrl.putRoles);
 // 066 : utilisateurs par module — répartition, écarts, mode du contrôle.
 const umCtrl = require('../controllers/utilisateurs_modules.controller');
 router.get   ('/plateforme/utilisateurs-modules',          ...admin, umCtrl.rapport);
+// 067 : réglages d'expiration des sessions.
+const sessCtrl = require('../controllers/sessions.controller');
+router.get   ('/plateforme/sessions',  ...admin, sessCtrl.lireReglages);
+router.put   ('/plateforme/sessions',  ...admin, sessCtrl.ecrireReglages);
 router.put   ('/plateforme/utilisateurs-modules/mode',     ...admin, umCtrl.definirMode);
 router.post  ('/plateforme/utilisateurs-modules/reprise',  ...admin, umCtrl.reprendre);
 router.get   ('/plateforme/modules',                    ...admin, pfCtrl.getModules);

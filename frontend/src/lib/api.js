@@ -18,12 +18,25 @@ const API = API_BASE + '/api';
 // et à chaque changement, pour éviter de passer le state à chaque appel.
 let authToken = null;
 let tenantId = null;
+let userId = null;
 let onUnauthorized = null;
 
 export const configureApi = (opts = {}) => {
   if ('token' in opts) authToken = opts.token;
   if ('tenantId' in opts) tenantId = opts.tenantId;
+  if ('userId' in opts) userId = opts.userId;
   if ('onUnauthorized' in opts) onUnauthorized = opts.onUnauthorized;
+};
+
+// 067 (lot D) : jeton et compte ACTUELS, pour la file hors ligne (une saisie
+// en attente repart avec la session en cours, jamais avec un ancien jeton).
+export const sessionCourante = () => ({ token: authToken, userId, tenantId });
+
+// Fin de session constatée par le serveur : message affiché sur l'écran de connexion.
+const CODES_FIN_SESSION = ['SESSION_REMPLACEE', 'SESSION_REVOQUEE', 'SESSION_EXPIREE', 'SESSION_FERMEE', 'SESSION_INVALIDE'];
+export const noterFinSession = (corps) => {
+  if (!corps || !CODES_FIN_SESSION.includes(corps.code) || typeof window === 'undefined') return;
+  try { sessionStorage.setItem('login_message', corps.error || corps.message || 'Votre session est terminée. Reconnectez-vous.'); } catch { /* indisponible */ }
 };
 
 const headers = () => ({
@@ -45,16 +58,22 @@ const request = async (method, url, body) => {
     return { error: 'Connexion au serveur impossible.' };
   }
 
-  if (res.status === 401 && onUnauthorized) onUnauthorized();
-
   // Certaines routes (DELETE) peuvent répondre sans corps JSON.
   const text = await res.text();
-  if (!text) return res.ok ? {} : { error: `Erreur ${res.status}` };
+  if (!text) {
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
+    return res.ok ? {} : { error: `Erreur ${res.status}` };
+  }
   try {
     const parsed = JSON.parse(text);
     let out = parsed;
     if (parsed && typeof parsed.success === 'boolean') {
       out = parsed.data ?? (parsed.success ? {} : { error: parsed.message });
+    }
+    // Jeton refusé : session fermée, remplacée, révoquée ou expirée (067) → message puis écran de connexion.
+    if (res.status === 401 && onUnauthorized) {
+      if (authToken) noterFinSession(out);
+      onUnauthorized();
     }
     // Interface plus récente que le serveur : la route n'existe pas encore
     // côté backend. Message explicite plutôt que « Route API inconnue ».
@@ -79,6 +98,7 @@ const request = async (method, url, body) => {
     }
     return out;
   } catch {
+    if (res.status === 401 && onUnauthorized) onUnauthorized();
     return { error: `Réponse inattendue du serveur (${res.status}).` };
   }
 };

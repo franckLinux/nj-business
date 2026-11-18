@@ -31,6 +31,8 @@ export default function LoginPage() {
   // Mot de passe oublié (C9) : envoi d'un lien de réinitialisation par e-mail.
   const [oubli, setOubli] = useState(false);
   const [oubliMsg, setOubliMsg] = useState('');
+  // 067 (lot D) : compte déjà connecté ailleurs → choix explicite de remplacer.
+  const [autreSession, setAutreSession] = useState(null);
 
   const demanderLien = async (e) => {
     e?.preventDefault();
@@ -53,9 +55,22 @@ export default function LoginPage() {
     marquerEntree(); // la redirection « après connexion » ne jouera qu'une fois
     const res = await login(username.trim(), password);
     setEnCours(false);
+    if (res.code === 'SESSION_ACTIVE') { setAutreSession(res.session || {}); return; }
     if (res.error) setErreur(res.error);
     // En cas de succès, App bascule seul sur l'application : pas de navigation manuelle.
   };
+
+  // Remplacement : même identifiant et même mot de passe, vérifiés à nouveau
+  // par le serveur. L'autre appareil est déconnecté et le titulaire prévenu par e-mail.
+  const remplacer = async () => {
+    setEnCours(true);
+    setErreur('');
+    const res = await login(username.trim(), password, true);
+    setEnCours(false);
+    if (res.error) { setAutreSession(null); setErreur(res.error); }
+  };
+  const annulerRemplacement = () => { setAutreSession(null); setPassword(''); };
+  const quand = (d) => (d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null);
 
   const retourConnexion = () => { setOubli(false); setOubliMsg(''); setErreur(''); };
 
@@ -76,7 +91,27 @@ export default function LoginPage() {
         </aside>
 
         <main className="njb-login-form">
-          {oubli ? (
+          {autreSession ? (
+            <div className="njb-session" role="alertdialog" aria-labelledby="njb-session-titre" aria-describedby="njb-session-texte">
+              <div className="njb-session-icone" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="3" y="4" width="13" height="10" rx="1.5" /><path d="M7 18h5M9.5 14v4" /><rect x="17" y="9" width="5" height="10" rx="1.2" /></svg>
+              </div>
+              <h1 id="njb-session-titre">Compte déjà connecté</h1>
+              <p id="njb-session-texte" className="njb-sous-titre">Ce compte est déjà connecté sur un autre appareil. Veuillez fermer la session existante avant de vous connecter à nouveau.</p>
+              <dl className="njb-session-detail">
+                <div><dt>Appareil</dt><dd>{autreSession.appareil || 'Non identifié'}</dd></div>
+                {quand(autreSession.depuis) && <div><dt>Connecté depuis</dt><dd>{quand(autreSession.depuis)}</dd></div>}
+                {quand(autreSession.derniere_activite) && <div><dt>Dernière activité</dt><dd>{quand(autreSession.derniere_activite)}</dd></div>}
+              </dl>
+              {erreur && <div className="njb-erreur" role="alert">{erreur}</div>}
+              <button type="button" className="njb-bouton" onClick={remplacer} disabled={enCours} autoFocus>
+                {enCours && <span className="njb-spin" aria-hidden="true" />}
+                {enCours ? 'Connexion…' : 'Fermer l\'autre session et me connecter ici'}
+              </button>
+              <button type="button" className="njb-bouton-second" onClick={annulerRemplacement} disabled={enCours}>Annuler</button>
+              <p className="njb-session-note">L'autre appareil sera déconnecté immédiatement ; un e-mail vous confirmera ce changement. Si vous ne reconnaissez pas cette session, connectez-vous ici puis changez votre mot de passe.</p>
+            </div>
+          ) : oubli ? (
             <>
               <h1>Mot de passe oublié</h1>
               <p className="njb-sous-titre">Indiquez votre identifiant ou votre adresse e-mail : vous recevrez un lien pour choisir un nouveau mot de passe (valable 1 heure).</p>

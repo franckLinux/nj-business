@@ -4,6 +4,7 @@
 // #offline-indicator) — on notifie des abonnés à la place, branchés par les
 // composants React (voir components/PwaBootstrap.jsx).
 import { idb } from './idb';
+import { sessionCourante } from './api';
 
 const unwrapSyncResponse = (body) => (body && typeof body.success === 'boolean')
   ? (body.data ?? (body.success ? {} : { error: body.message }))
@@ -30,6 +31,7 @@ const enqueue = async (operation) => {
     url: operation.url,
     body: operation.body || null,
     headers: operation.headers || {},
+    user_id: operation.user_id || null,   // 067 : rejouée seulement pour ce compte
     statut: 'pending',
     tentatives: 0,
     local_id: operation.local_id || null,
@@ -46,7 +48,12 @@ const replayAll = async () => {
   if (isSyncing) return;
   isSyncing = true;
 
-  const pending = await idb.getAllByIndex('sync_queue', 'statut', 'pending');
+  // 067 (lot D) : on rejoue avec la session EN COURS (jeton actuel), et
+  // uniquement les saisies du compte connecté. Personne connecté : on attend.
+  const courante = sessionCourante();
+  if (!courante.token) { isSyncing = false; return; }
+  const pending = (await idb.getAllByIndex('sync_queue', 'statut', 'pending'))
+    .filter((op) => !op.user_id || !courante.userId || op.user_id === courante.userId);
   if (pending.length === 0) { isSyncing = false; return; }
 
   console.log(`[Sync] ${pending.length} opération(s) à synchroniser…`);
@@ -60,7 +67,7 @@ const replayAll = async () => {
     try {
       const res = await fetch(op.url, {
         method: op.method,
-        headers: { 'Content-Type': 'application/json', ...op.headers },
+        headers: { 'Content-Type': 'application/json', ...op.headers, Authorization: `Bearer ${courante.token}` },
         body: op.body ? JSON.stringify(op.body) : undefined,
       });
 
@@ -87,6 +94,12 @@ const replayAll = async () => {
           await idb.put('sync_queue', { ...op, statut: 'done', synced_at: new Date().toISOString() });
           success++;
         }
+      } else if (res.status === 401) {
+        // Session terminée (remplacée, expirée…) : la saisie n'est PAS perdue.
+        // Elle reste en file et repartira après la reconnexion du même compte.
+        await idb.put('sync_queue', { ...op, tentatives: op.tentatives + 1, last_error: 'Session terminée : reconnectez-vous pour envoyer cette saisie' });
+        errors++;
+        break;
       } else if (res.status >= 500) {
         await idb.put('sync_queue', { ...op, tentatives: op.tentatives + 1, last_error: `HTTP ${res.status}` });
         errors++;
@@ -290,6 +303,9 @@ const init = () => {
     console.log('[Sync] Retour en ligne → replay queue');
     setTimeout(replayAll, 1500);
   });
+
+  // 067 : après une (re)connexion, les saisies restées en file repartent.
+  window.addEventListener('session-ouverte', () => { if (navigator.onLine) setTimeout(replayAll, 1500); });
 
   window.addEventListener('offline', () => {
     notifyOffline(false);

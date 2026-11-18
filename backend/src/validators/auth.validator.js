@@ -4,6 +4,7 @@ const { body } = require('express-validator');
 const loginRules = [
   body('username').trim().notEmpty().withMessage('Identifiant et mot de passe requis.'),
   body('password').notEmpty().withMessage('Identifiant et mot de passe requis.'),
+  body('remplacer').optional().isBoolean({ strict: true }).withMessage('Paramètre « remplacer » invalide.'),
 ];
 
 const changePasswordRules = [

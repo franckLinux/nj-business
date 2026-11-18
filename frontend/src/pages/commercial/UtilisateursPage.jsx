@@ -4,6 +4,7 @@
 // distinct du rôle et du profil métier qui fixent le NIVEAU (les validations).
 import { useState } from 'react';
 import { UserModal } from '@/components/config/UsersTab';
+import { SessionsOuvertes } from '@/components/SessionsOuvertes';
 import { useUtilisateursModule, BandeauModule, ComptesHorsModule, ProfilModule, RetraitModule } from '@/components/UtilisateursModule';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
@@ -244,6 +245,7 @@ export default function UtilisateursPage() {
       </div>
       <p className="cm-aide" style={{ marginTop: 8 }}><span style={{ color: '#0369a1', fontWeight: 800 }}>✓</span> bleu : droit ouvert par un type de gestion ; <span style={{ color: '#16a34a', fontWeight: 800 }}>✓</span> vert : par le rôle, le profil ou une exception. Une personne voit ses nouveaux droits à sa prochaine connexion (ou en rechargeant la page).</p>
       {mod.data && <ComptesHorsModule data={mod.data} code="commercial" peutGerer={peutGerer} onChange={() => recharger()} />}
+      {peutGerer && <SessionsOuvertes />}
       {retrait && <RetraitModule cible={retrait} code="commercial" onFermer={() => setRetrait(null)} onFait={() => { setRetrait(null); recharger(); }} />}
       {nouveau && <UserModal module="commercial" onClose={() => setNouveau(false)} onSaved={(msg) => { setNouveau(false); toast(`${msg} Il fait partie de NJ COMMERCIAL.`, 'success'); recharger(); }} />}
       {perim && <Perimetre u={perim} agences={agences} onFermer={() => setPerim(null)} onEnregistre={() => { setPerim(null); toast('Périmètre enregistré.', 'success'); recharger(); }} />}

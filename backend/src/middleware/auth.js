@@ -76,6 +76,10 @@ const authGuard = async (req, res, next) => {
     if (!u || !u.actif) {
       return res.status(401).json({ error: 'Compte désactivé ou supprimé. Veuillez vous reconnecter.' });
     }
+    // 067 (lot D) : la session du jeton doit être active (ni fermée, ni
+    // remplacée, ni révoquée, ni expirée par inactivité).
+    const refus = await require('../services/sessions.service').controler({ sid: payload.sid || null, userId: u.id });
+    if (refus) return res.status(401).json({ error: refus.message, code: refus.code });
     const fin = await demoExpiree(u.tenant_id);
     if (fin) return res.status(403).json(messageDemoExpiree(fin));
     req.user = {
@@ -83,6 +87,7 @@ const authGuard = async (req, res, next) => {
       username: u.username,
       role:     u.role,
       tenantId: u.tenant_id || null,
+      sessionId: payload.sid || null,
     };
     next();
   } catch (err) {

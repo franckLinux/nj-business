@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
+import { MesAppareils } from '@/components/SessionsOuvertes';
 
 // « Mon compte » (C7) : accessible à TOUS les profils depuis le bas du menu
 // latéral — le changement de mot de passe ne dépend plus de l'onglet Entité.
@@ -21,7 +22,7 @@ export default function MonCompteModal({ onClose }) {
     const res = await api.post('/auth/change-password', { ancienPassword: pwd.ancien, nouveauPassword: pwd.nouveau });
     setSaving(false);
     if (res.error) { setErreur(res.error); return; }
-    toast('Mot de passe modifié ✓', 'success');
+    toast('Mot de passe modifié ✓ Vos autres appareils sont déconnectés.', 'success');
     onClose();
   };
 
@@ -46,6 +47,7 @@ export default function MonCompteModal({ onClose }) {
           <input type="password" autoComplete="new-password" value={pwd.confirm} onChange={set('confirm')}
             onKeyDown={(e) => { if (e.key === 'Enter') onSave(); }} />
           {erreur && <div className="alert-err" style={{ marginTop: 10 }}>{erreur}</div>}
+          <MesAppareils />
         </div>
         <div className="modal-foot">
           <button className="btn-ghost" onClick={onClose}>Fermer</button>

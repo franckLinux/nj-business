@@ -40,7 +40,8 @@ export function AppProvider({ children }) {
   const [journauxGrouped, setJournauxGrouped] = useState({});
   const [rubriques, setRubriques] = useState({ entrees: [], depenses: [] });
 
-  const logout = useCallback(() => {
+  // Fin de session locale (jeton déjà refusé par le serveur, ou après déconnexion).
+  const finSession = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     setToken(null);
@@ -50,6 +51,14 @@ export function AppProvider({ children }) {
     setJournaux([]);
     setJournauxGrouped({});
   }, []);
+
+  // Déconnexion volontaire (067) : la session est fermée côté serveur, le
+  // compte peut aussitôt se connecter ailleurs. L'appel part avec le jeton
+  // courant avant l'effacement local ; hors ligne, la session expirera seule.
+  const logout = useCallback(() => {
+    if (localStorage.getItem(TOKEN_KEY)) api.post('/auth/deconnexion', {}).catch(() => {});
+    finSession();
+  }, [finSession]);
 
   // Démonstration terminée en cours de session : déconnexion + message.
   useEffect(() => {
@@ -70,25 +79,30 @@ export function AppProvider({ children }) {
   configureApi({
     token,
     tenantId: activeTenantId || user?.tenantId || null,
-    onUnauthorized: logout,
+    userId: user?.id || null,
+    onUnauthorized: finSession,
   });
   useEffect(() => {
     configureApi({
       token,
       tenantId: activeTenantId || user?.tenantId || null,
-      onUnauthorized: logout,
+      userId: user?.id || null,
+      onUnauthorized: finSession,
     });
-  }, [token, activeTenantId, user, logout]);
+  }, [token, activeTenantId, user, finSession]);
 
-  const login = useCallback(async (username, password) => {
-    const res = await api.post('/auth/login', { username, password });
+  // 067 : `remplacer` ferme la session ouverte sur un autre appareil (après
+  // refus SESSION_ACTIVE et confirmation de la personne, mot de passe redonné).
+  const login = useCallback(async (username, password, remplacer = false) => {
+    const res = await api.post('/auth/login', { username, password, ...(remplacer ? { remplacer: true } : {}) });
     if (res.error) return res;
     localStorage.setItem(TOKEN_KEY, res.accessToken);
     localStorage.setItem(USER_KEY, JSON.stringify(res.user));
-    configureApi({ token: res.accessToken, tenantId: res.user?.tenantId || null });
+    configureApi({ token: res.accessToken, tenantId: res.user?.tenantId || null, userId: res.user?.id || null });
     setToken(res.accessToken);
     setUser(res.user);
     setDevise(res.user?.devise || 'FCFA');
+    try { window.dispatchEvent(new CustomEvent('session-ouverte')); } catch { /* sans effet */ }
     return res;
   }, []);
 

@@ -212,6 +212,11 @@ const toggleActif = async (req, res) => {
     );
     if (count === 0) return res.status(404).json({ error: 'Utilisateur introuvable.' });
     const u = rows[0];
+    // 067 : un compte désactivé perd ses sessions (aucune ne survit à une réactivation).
+    if (!u.actif) {
+      await require('../services/sessions.service').terminer({ userId: u.id, statut: 'revoquee', par: req.user.id,
+        motif: 'Compte désactivé', tenantId: req.tenantId, action: 'SESSION_REVOCATION' });
+    }
     const statut = u.actif ? 'activé' : 'désactivé';
     res.json({ message: `Compte ${statut} avec succès.`, user: { id: u.id, username: u.username, role: u.role, actif: u.actif } });
   } catch (err) {
@@ -248,6 +253,9 @@ const resetPassword = async (req, res) => {
       { where: { id: req.params.id, tenant_id: req.tenantId } }
     );
     if (count === 0) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+    // 067 : la personne devra se reconnecter avec le nouveau mot de passe.
+    await require('../services/sessions.service').terminer({ userId: req.params.id, statut: 'revoquee', par: req.user.id,
+      motif: 'Mot de passe réinitialisé par un administrateur', tenantId: req.tenantId, action: 'SESSION_REVOCATION' });
     res.json({ message: 'Mot de passe réinitialisé.' });
   } catch (err) {
     console.error('[Users] resetPassword :', err.message);
