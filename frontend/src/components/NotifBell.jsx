@@ -73,6 +73,10 @@ export default function NotifBell() {
     if (n.type === 'attente_creee' && peutVoirAttente) {
       setOpen(false);
       navigate('/attente');
+    } else if (n.type === 'projet_budget' && n.ref_id) {
+      // Projets des ONG (069) : budget soumis, validé ou rejeté → fiche du projet.
+      setOpen(false);
+      navigate(`/projets/${n.ref_id}?onglet=budget`);
     } else if (n.type === 'com_demande' && n.ref_id) {
       // NJ COMMERCIAL (051) : la notification ouvre directement la demande d'achat.
       setOpen(false);

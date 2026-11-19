@@ -7,6 +7,7 @@ import NavGroup from './NavGroup';
 import { useState } from 'react';
 import MonCompteModal from './MonCompteModal';
 import { PAGE_PERMS, peut, voitConfiguration } from '@/lib/acces';
+import { useAccesProjets } from '@/lib/projets';
 
 // Ordre d'affichage des journaux dans la sidebar — identique à app.js
 const TYPE_ORDER = ['caisse', 'banque', 'om', 'momo', 'carte_prepayee', 'autre'];
@@ -38,6 +39,9 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
     }
   };
 
+  // Projets (069) : ONG / associations, pour la direction, le comptable et les
+  // personnes désignées (chef de projet, responsable d'activité).
+  const accesProjets = useAccesProjets(`${activeTenantId || ''}:${location.pathname}:${location.search}`);
   const initiales = (user?.username || '').substring(0, 2).toUpperCase();
   const [monCompte, setMonCompte] = useState(false);
 
@@ -118,6 +122,16 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             ))}
           </div>
         </NavGroup>
+
+        {accesProjets?.visible && (
+          <NavLink to="/projets" className={navClass}>
+            <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><line x1="8" y1="13" x2="16" y2="13" /></svg>
+            <span style={{ flex: 1 }}>Projets</span>
+            {accesProjets.a_valider > 0 && (
+              <span className="j-badge" style={{ background: '#d97706', color: '#fff' }} title="Budgets à valider">{accesProjets.a_valider}</span>
+            )}
+          </NavLink>
+        )}
 
         {(voit('/journaux-recap') || voit('/budget') || voit('/compte-emploi')) && (
         <NavGroup

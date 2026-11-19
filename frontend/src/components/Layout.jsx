@@ -21,6 +21,7 @@ const TITLES = {
   '/appel-fonds': 'Demande de fonds',
   '/compte-emploi': "Compte d'emploi",
   '/activites': 'Suivi par activité',
+  '/projets': 'Projets',
   '/config': 'Configuration',
   '/tenants': 'Clients (Tenants)',
   '/permissions': 'Gestion des permissions',
@@ -83,7 +84,7 @@ export default function Layout() {
   }, [user, activeTenantId, openTenantSelector, pageSansClient]);
 
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
-  let title = TITLES[location.pathname] || 'Tableau de bord';
+  let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? 'Projets' : 'Tableau de bord');
   if (location.pathname.startsWith('/journal/')) {
     const j = journaux.find((x) => String(x.id) === String(params.id));
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';

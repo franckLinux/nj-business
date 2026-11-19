@@ -306,6 +306,24 @@ router.delete('/activites/:id',    authGuard, tenantGuard, requirePermission('ac
 // Suivi de la caisse des projets — ONG / associations (069, lot P1)
 const projCtrl = require('../controllers/projets.controller');
 router.get   ('/projets/saisie',   authGuard, tenantGuard, requireAnyPermission('journal.create', 'journal.view', 'projets.voir', 'rubriques.edit'), projCtrl.contexteSaisie);
+// Lot P2 — menu « Projets ». Pas de permission exigée ici : un chef de projet
+// ou un responsable d'activité peut n'avoir aucun droit propre au module ;
+// sa DÉSIGNATION fixe son périmètre, contrôlé par le service à chaque appel.
+router.get   ('/projets/acces',        authGuard, tenantGuard, projCtrl.acces);
+router.get   ('/projets/utilisateurs', authGuard, tenantGuard, projCtrl.utilisateurs);
+router.get   ('/projets',              authGuard, tenantGuard, projCtrl.lister);
+router.post  ('/projets',              authGuard, tenantGuard, projCtrl.creerProjet);
+router.get   ('/projets/:id',          authGuard, tenantGuard, projCtrl.detail);
+router.put   ('/projets/:id',          authGuard, tenantGuard, projCtrl.modifierProjet);
+router.post  ('/projets/:id/activites',      authGuard, tenantGuard, projCtrl.creerActivite);
+router.put   ('/projets/:id/activites/:aid', authGuard, tenantGuard, projCtrl.modifierActivite);
+router.post  ('/projets/:id/budgets',                 authGuard, tenantGuard, projCtrl.creerBudget);
+router.put   ('/projets/:id/budgets/:bid',            authGuard, tenantGuard, projCtrl.enregistrerBudget);
+router.delete('/projets/:id/budgets/:bid',            authGuard, tenantGuard, projCtrl.supprimerBudget);
+router.post  ('/projets/:id/budgets/:bid/soumettre',  authGuard, tenantGuard, projCtrl.soumettreBudget);
+router.post  ('/projets/:id/budgets/:bid/retirer',    authGuard, tenantGuard, projCtrl.retirerBudget);
+router.post  ('/projets/:id/budgets/:bid/valider',    authGuard, tenantGuard, projCtrl.validerBudget);
+router.post  ('/projets/:id/budgets/:bid/rejeter',    authGuard, tenantGuard, projCtrl.rejeterBudget);
 
 // ── Rapports (module de permission "rapport") ─────────────────────────────
 const rapportCtrl = require('../controllers/rapport.controller');

@@ -36,3 +36,33 @@ export function useContexteProjets() {
   }, []);
   return ctx;
 }
+
+/** Accès au menu « Projets » (ONG / associations) : { ong, visible, a_valider, … }. */
+export function useAccesProjets(cle) {
+  const [acces, setAcces] = useState(null);
+  useEffect(() => {
+    let annule = false;
+    api.get('/projets/acces').then((r) => {
+      if (!annule && r && !r.error) setAcces(r);
+    });
+    return () => { annule = true; };
+  }, [cle]);
+  return acces;
+}
+
+export const STATUTS_BUDGET = {
+  brouillon: { lib: 'En préparation', cls: 'pj-b-gris' },
+  soumis:    { lib: 'À valider',      cls: 'pj-b-ambre' },
+  valide:    { lib: 'Validé',         cls: 'pj-b-vert' },
+  rejete:    { lib: 'Rejeté',         cls: 'pj-b-rouge' },
+  remplace:  { lib: 'Remplacé',       cls: 'pj-b-ardoise' },
+};
+
+/** Statut affiché d'un projet d'après ses budgets (liste). */
+export const statutProjet = (p) => {
+  if (!p.actif) return { lib: 'Clôturé', cls: 'pj-b-ardoise', cle: 'cloture' };
+  if (p.budget_ouvert?.statut === 'soumis') return { lib: 'Budget à valider', cls: 'pj-b-ambre', cle: 'a_valider' };
+  if (p.budget_valide) return { lib: 'Budget validé', cls: 'pj-b-vert', cle: 'valide' };
+  if (p.dernier_rejet && !p.budget_ouvert) return { lib: 'Budget rejeté', cls: 'pj-b-rouge', cle: 'sans_budget' };
+  return { lib: 'Sans budget validé', cls: 'pj-b-gris', cle: 'sans_budget' };
+};
