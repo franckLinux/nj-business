@@ -89,7 +89,7 @@ const request = async (method, url, body) => {
     // modules et App ramène l'utilisateur à l'accueil NJ BUSINESS.
     // 066 : personne non rattachée au module (MODULE_NON_AUTORISE) : même retour à l'accueil.
     if (res.status === 403 && ['MODULE_INACTIF', 'MODULE_NON_AUTORISE'].includes(out?.code) && authToken && typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('module-inactif', { detail: { module: out.module } }));
+      window.dispatchEvent(new CustomEvent('module-inactif', { detail: { module: out.module, code: out.code } }));
     }
     // Démonstration expirée (contrôle serveur) : AppContext ferme la session
     // et la page de connexion affiche le message.

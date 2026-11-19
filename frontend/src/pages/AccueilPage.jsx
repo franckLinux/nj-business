@@ -34,7 +34,13 @@ export default function AccueilPage() {
   // Modules opérationnels que la personne ne peut pas ouvrir : on dit pourquoi au lieu de les cacher.
   //   • activé pour l'espace, mais aucun droit attribué à cette personne ;
   //   • pas encore activé pour l'espace (l'activation se fait par le cabinet).
-  const sansDroits = systemeInstalle(user) ? tous.filter((m) => m.code !== 'caisse' && m.statut === 'operationnel' && m.actif && !accesModule(user, m.code)) : [];
+  // 066 / lot E : la caisse aussi, quand la personne n'y est pas rattachée (contrôle appliqué).
+  const sansDroits = systemeInstalle(user)
+    ? tous.filter((m) => m.statut === 'operationnel' && m.actif && !accesModule(user, m.code) && (m.code !== 'caisse' || m.membre === false))
+    : [];
+  const activesEspace = systemeInstalle(user) ? tous.filter((m) => m.statut === 'operationnel' && m.actif).length : 1;
+  const directeur = user?.role === 'directeur';
+  const nomRaison = location.state?.module ? (tous.find((m) => m.code === location.state.module)?.nom || 'Ce module') : 'Ce module';
   const nonActives = systemeInstalle(user) ? tous.filter((m) => m.statut === 'operationnel' && !m.actif) : [];
 
   const deconnexion = () => {
@@ -61,7 +67,9 @@ export default function AccueilPage() {
       <main className="njb-contenu">
         <h1>Bonjour, bienvenue dans votre espace</h1>
         <p className="njb-espace">
-          {user?.tenantNom || 'Votre entreprise'} · {actifs.length === 0 ? 'aucun module activé' : `${actifs.length} module${actifs.length > 1 ? 's' : ''} activé${actifs.length > 1 ? 's' : ''}`}
+          {user?.tenantNom || 'Votre entreprise'} · {actifs.length === 0
+            ? (activesEspace === 0 ? 'aucun module activé' : 'aucun module attribué')
+            : `${actifs.length} module${actifs.length > 1 ? 's' : ''} à votre disposition`}
         </p>
 
         {can('entreprise.view') && (
@@ -74,11 +82,20 @@ export default function AccueilPage() {
           </button>
         )}
 
-        {(raison === 'module-inactif' || actifs.length === 0) && (
+        {/* Lot E : chaque situation a son message et la bonne personne à contacter. */}
+        {raison === 'module-inactif' && (
+          <div className="njb-alerte" role="status">{nomRaison} a été désactivé pour votre espace. Pour le réactiver, contactez le cabinet : <a href={`mailto:${CONTACT_CABINET}`}>{CONTACT_CABINET}</a></div>
+        )}
+        {raison === 'module-non-autorise' && (
+          <div className="njb-alerte" role="status">Votre accès à {nomRaison === 'Ce module' ? 'ce module' : nomRaison} a été retiré. {directeur ? 'Si c\'est une erreur, contactez le cabinet.' : 'Si c\'est une erreur, demandez à votre directeur de vous y rattacher à nouveau.'}</div>
+        )}
+        {!raison && actifs.length === 0 && activesEspace === 0 && (
+          <div className="njb-alerte" role="status">Aucun module n'est encore activé pour votre espace. Contactez le cabinet : <a href={`mailto:${CONTACT_CABINET}`}>{CONTACT_CABINET}</a></div>
+        )}
+        {!raison && actifs.length === 0 && activesEspace > 0 && (
           <div className="njb-alerte" role="status">
-            {raison === 'module-inactif' ? 'Ce module a été désactivé pour votre espace. ' : ''}
-            {actifs.length === 0 ? 'Aucun module n\'est activé pour votre espace. ' : ''}
-            Contactez le cabinet : <a href={`mailto:${CONTACT_CABINET}`}>{CONTACT_CABINET}</a>
+            Aucun module ne vous est encore attribué.{' '}
+            {directeur ? <>Contactez le cabinet : <a href={`mailto:${CONTACT_CABINET}`}>{CONTACT_CABINET}</a></> : 'Demandez à votre directeur de vous rattacher au module où vous travaillez.'}
           </div>
         )}
 
@@ -109,8 +126,9 @@ export default function AccueilPage() {
                   <h2>{m.nom}</h2>
                   <p>{m.description}</p>
                   <span className="njb-badge bientot">Activé · accès non attribué</span>
-                  <span className="njb-contact">Le module est activé pour votre espace, mais aucun droit ne vous y est encore attribué.
-                    {user?.role === 'directeur' ? ' Contactez le cabinet.' : ' Demandez à votre directeur de vous attribuer un profil achats.'}</span>
+                  <span className="njb-contact">{m.membre === false
+                    ? `Vous n'êtes pas rattaché(e) à ce module.${directeur ? ' Contactez le cabinet pour y être rattaché(e).' : ' Demandez à votre directeur de vous y ajouter.'}`
+                    : `Le module est activé pour votre espace, mais aucun droit ne vous y est encore attribué.${directeur ? ' Contactez le cabinet.' : ' Demandez à votre directeur de vous attribuer un profil.'}`}</span>
                 </article>
               ))}
               {nonActives.map((m) => (

@@ -172,8 +172,8 @@ function AuthenticatedApp() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Juste après la connexion (une seule fois) : un module → entrée directe
-  // (comportement actuel) ; plusieurs ou aucun → accueil NJ BUSINESS (D1).
+  // Juste après la connexion (une seule fois) : accueil NJ BUSINESS pour toute
+  // personne d'un client, même avec un seul module (lot E, décision n° 4).
   useEffect(() => {
     if (!consommerEntree()) return;
     const dest = routeApresConnexion(user);
@@ -182,8 +182,11 @@ function AuthenticatedApp() {
 
   // Module désactivé pendant la session : retour à l'accueil avec un message.
   useEffect(() => {
-    const surModuleInactif = () => {
-      if (utiliseAccueil(user)) navigate('/accueil', { replace: true, state: { raison: 'module-inactif' } });
+    // 066 / lot E : module désactivé (MODULE_INACTIF) ou accès retiré à la personne (MODULE_NON_AUTORISE).
+    const surModuleInactif = (e) => {
+      if (!utiliseAccueil(user)) return;
+      const raison = e?.detail?.code === 'MODULE_NON_AUTORISE' ? 'module-non-autorise' : 'module-inactif';
+      navigate('/accueil', { replace: true, state: { raison, module: e?.detail?.module || null } });
     };
     window.addEventListener('module-inactif', surModuleInactif);
     return () => window.removeEventListener('module-inactif', surModuleInactif);

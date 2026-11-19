@@ -26,7 +26,7 @@ const nomPropose = (type, i, existants) => {
   return i === 0 ? NOM_DEFAUT[type] : `${NOM_DEFAUT[type]} ${i + 1}`;
 };
 
-export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine, onLogout }) {
+export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine, onLogout, onAccueil = null }) {
   const existants = etat.journaux || [];
   const [etape, setEtape] = useState(0);
   const [mois, setMois] = useState(etat.mois_defaut);
@@ -99,7 +99,11 @@ export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine,
           <h1>Compte en cours de préparation</h1>
           <p>Le directeur de l'espace <b>{etat.tenant_nom}</b> doit d'abord définir les caisses et leurs soldes d'ouverture.
             Vous pourrez travailler dès que ce sera fait.</p>
-          <button className="init-btn ghost" onClick={onLogout}>Se déconnecter</button>
+          {/* Lot E : retour à l'accueil NJ BUSINESS (autres modules) plutôt que la seule déconnexion. */}
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+            {onAccueil && <button className="init-btn" onClick={onAccueil}>‹ Accueil NJ BUSINESS</button>}
+            <button className="init-btn ghost" onClick={onLogout}>Se déconnecter</button>
+          </div>
         </div>
       </div>
     );
@@ -227,8 +231,8 @@ export default function InitialisationCompte({ etat, devise = 'FCFA', onTermine,
         </div>
 
         <footer className="init-foot">
-          <button className="init-btn ghost" onClick={etape === 0 ? onLogout : () => { setErreur(''); setEtape((x) => x - 1); }}>
-            {etape === 0 ? 'Se déconnecter' : '← Retour'}
+          <button className="init-btn ghost" onClick={etape === 0 ? (onAccueil || onLogout) : () => { setErreur(''); setEtape((x) => x - 1); }}>
+            {etape === 0 ? (onAccueil ? '‹ Accueil NJ BUSINESS' : 'Se déconnecter') : '← Retour'}
           </button>
           {etape < 2
             ? <button className="init-btn" onClick={suivant}>Continuer →</button>

@@ -39,20 +39,14 @@ export const moduleActif = (user, code) => (systemeInstalle(user)
 export const utiliseAccueil = (user) => Boolean(user?.tenantId) && !['super_admin', 'commercial'].includes(user?.role);
 
 /**
- * Où aller juste après la connexion (décision D1) :
- *   • un seul module activé → entrée directe dans ce module (comportement actuel) ;
- *   • plusieurs, ou aucun → accueil NJ BUSINESS.
+ * Où aller juste après la connexion — lot E, décision n° 4 de Franck (17/11/2026) :
+ * TOUJOURS l'accueil NJ BUSINESS pour une personne d'un client, même avec un
+ * seul module (remplace l'entrée directe de la décision D1). L'accueil ne
+ * montre que ses modules et dit pourquoi les autres sont fermés.
  * null = laisser la route par défaut décider (cabinet, super_admin, système absent).
  */
 export const routeApresConnexion = (user) => {
   if (!utiliseAccueil(user) || !systemeInstalle(user)) return null;
-  const actifs = modulesActifs(user);
-  // Directeur : un module activé pour l'espace mais sans droit pour lui passe par
-  // l'accueil, qui explique la situation (sinon le module resterait invisible).
-  // Les autres personnes gardent l'entrée directe ; l'accueil (logo du menu) le leur explique aussi.
-  const sansDroits = user.role === 'directeur'
-    && user.modules.some((m) => m.code !== 'caisse' && m.actif && m.statut === 'operationnel' && !accesModule(user, m.code));
-  if (actifs.length === 1 && !sansDroits) return actifs[0].route_accueil || '/';
   return '/accueil';
 };
 

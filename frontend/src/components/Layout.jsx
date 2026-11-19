@@ -8,6 +8,7 @@ import InitialisationCompte from './InitialisationCompte';
 import BottomNav from './BottomNav';
 import { useApp } from '@/context/AppContext';
 import { api } from '@/lib/api';
+import { utiliseAccueil } from '@/lib/modules';
 
 // Titres de page — repris tels quels de la table `titles` de showPage().
 const TITLES = {
@@ -121,6 +122,7 @@ export default function Layout() {
         etat={init}
         devise={devise}
         onLogout={logout}
+        onAccueil={utiliseAccueil(user) ? () => navigate('/accueil') : null}
         onTermine={(r) => { if (r?.mois) { setMois(r.mois); setAnnee(r.annee); } setInit(null); loadJournaux(); navigate('/config', { state: { bienvenue: true } }); }}
       />
     );

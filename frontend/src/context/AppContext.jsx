@@ -205,7 +205,9 @@ export function AppProvider({ children }) {
         if (!me || me.error) return;
         setUser((precedent) => {
           if (!precedent) return precedent;
-          const suivant = { ...precedent, modules: Array.isArray(me.modules) ? me.modules : null };
+          // Lot E : droits relus aussi (un accès retiré au module change les permissions).
+          const suivant = { ...precedent, modules: Array.isArray(me.modules) ? me.modules : null,
+            ...(me.permissions ? { role: me.role, permissions: me.permissions, permissionsAccordees: me.permissionsAccordees || [] } : {}) };
           try { localStorage.setItem(USER_KEY, JSON.stringify(suivant)); } catch { /* stockage indisponible */ }
           return suivant;
         });
