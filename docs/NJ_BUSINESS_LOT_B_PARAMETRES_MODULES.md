@@ -28,7 +28,8 @@
     - Elles indiquent le plan « En place » et le plan « Suggéré » par la forme juridique.
     - « Choisir ce plan… » ouvre l'aperçu chiffré et demande une confirmation.
     - Si le plan diffère de la suggestion, un écart est signalé, sans blocage.
-  - **Signataires et exercice :** caissier(ère), directeur / visa, début et fin d'exercice.
+  - ~~**Signataires et exercice**~~ : **section retirée le 19/11/2026** à la demande de Franck, qui ne l'avait pas demandée. Les noms déjà enregistrés restent imprimés sur les documents de caisse ; à défaut de directeur, c'est le représentant légal de l'entreprise. L'API `/caisse/parametres` est conservée, mais plus aucun écran ne l'utilise pour cela.
+  - *(ancien contenu)* caissier(ère), directeur / visa, début et fin d'exercice.
     - Ce sont les noms imprimés sur les bons et états de caisse.
     - Sans directeur saisi, les documents portent le nom du représentant légal.
   - **Périodicité du budget :** inchangée.
@@ -152,7 +153,7 @@ Le script de démonstration NJ COMMERCIAL a été exécuté en entier.
 1. **Sauvegarder la base**, comme pour le lot A.
 2. Mettre le code à jour, puis redémarrer : la migration 065 est jouée au démarrage.
 3. Ctrl+Maj+R (cache v64).
-4. Vérifier, dans Caisse → Configuration → Entité, le plan en place et les signataires.
+4. Vérifier, dans Caisse → Configuration → Entité, le plan en place.
 
 ## 9. Points restant à traiter
 

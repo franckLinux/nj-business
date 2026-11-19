@@ -11,11 +11,10 @@ import BasculePlanModal, { PastilleReferentiel } from '@/components/config/Bascu
 //   • 064 : l'identité de l'entreprise se saisit dans la configuration centrale
 //     NJ BUSINESS, commune à tous les modules ; elle est seulement présentée ici ;
 //   • 065 : la caisse règle ce qui lui est propre — plan comptable (CHOISI ici,
-//     la forme juridique ne fait que le suggérer), signataires des documents de
-//     caisse, exercice comptable, périodicité du budget.
-const labelStyle = { display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: .4, color: 'var(--text-muted)', marginBottom: 5 };
-const inputStyle = { width: '100%', padding: '9px 12px', border: '1.5px solid var(--border)', borderRadius: 7, fontSize: 13 };
-const roStyle = { ...inputStyle, background: '#f8fafc' };
+//     la forme juridique ne fait que le suggérer), périodicité du budget.
+//   • 19/11/2026 : section « Signataires et exercice » retirée (non demandée).
+//     Les noms déjà enregistrés restent utilisés sur les impressions ; à défaut
+//     de directeur, c'est le représentant légal de l'entreprise.
 const cardStyle = { background: 'white', border: '1px solid var(--border)', borderRadius: 12, padding: 24, marginBottom: 16 };
 const cardTitleStyle = { fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 16 };
 const nomRef = (c) => (c === 'SYCEBNL' ? 'SYCEBNL' : 'SYSCOHADA révisé');
@@ -28,16 +27,10 @@ export default function EntiteTab() {
   const [erreur, setErreur] = useState('');
   const [ent, setEnt] = useState(null);
   const [p, setP] = useState(null);             // paramètres de la caisse
-  const [f, setF] = useState(null);             // signataires + exercice en cours de saisie
-  const [enCours, setEnCours] = useState(false);
   const [bascule, setBascule] = useState(null); // { de, vers, versInfo, apercu, contexte }
   const [basculeEnCours, setBasculeEnCours] = useState(false);
 
-  const appliquer = (x) => {
-    setP(x);
-    setF({ caissier_nom: x.signataires.caissier_nom, directeur_nom: x.signataires.directeur_nom,
-      exercice_debut: x.exercice.debut || '', exercice_fin: x.exercice.fin || '' });
-  };
+  const appliquer = (x) => setP(x);
 
   useEffect(() => {
     let annule = false;
@@ -67,23 +60,10 @@ export default function EntiteTab() {
     toast(r.message, 'success', 7000);
   };
 
-  const enregistrer = async (e) => {
-    e.preventDefault();
-    setEnCours(true);
-    const r = await api.put('/caisse/parametres', f);
-    setEnCours(false);
-    if (r.error) { toast(r.error, 'error', 7000); return; }
-    appliquer(r);
-    toast('Paramètres de la caisse enregistrés.', 'success');
-  };
 
   if (erreur) return <div className="alert-err">{erreur}</div>;
-  if (!ent || !p || !f) return <div className="loading-msg">Chargement…</div>;
+  if (!ent || !p) return <div className="loading-msg">Chargement…</div>;
   const l = lignesEntite(ent);
-  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
-  const champ = canEdit ? { style: inputStyle } : { style: roStyle, readOnly: true };
-  const modifie = f.caissier_nom !== p.signataires.caissier_nom || f.directeur_nom !== p.signataires.directeur_nom
-    || f.exercice_debut !== (p.exercice.debut || '') || f.exercice_fin !== (p.exercice.fin || '');
 
   return (
     <div style={{ maxWidth: 760 }}>
@@ -145,33 +125,6 @@ export default function EntiteTab() {
         </p>
       </div>
 
-      <form style={cardStyle} onSubmit={enregistrer}>
-        <h4 style={cardTitleStyle}>✍️ Signataires et exercice</h4>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>Noms imprimés sur les bons de caisse et les états de la caisse.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginBottom: 12 }}>
-          <div>
-            <label style={labelStyle} htmlFor="cp-caissier">Caissier(ère)</label>
-            <input id="cp-caissier" maxLength={120} value={f.caissier_nom} onChange={set('caissier_nom')} {...champ} />
-          </div>
-          <div>
-            <label style={labelStyle} htmlFor="cp-directeur">Directeur / visa</label>
-            <input id="cp-directeur" maxLength={120} value={f.directeur_nom} onChange={set('directeur_nom')}
-              placeholder={p.signataires.representant_legal ? `À défaut : ${p.signataires.representant_legal}` : ''} {...champ} />
-          </div>
-          <div>
-            <label style={labelStyle} htmlFor="cp-debut">Début de l'exercice</label>
-            <input id="cp-debut" type="date" value={f.exercice_debut} onChange={set('exercice_debut')} {...champ} />
-          </div>
-          <div>
-            <label style={labelStyle} htmlFor="cp-fin">Fin de l'exercice</label>
-            <input id="cp-fin" type="date" value={f.exercice_fin} onChange={set('exercice_fin')} {...champ} />
-          </div>
-        </div>
-        {!f.directeur_nom && p.signataires.representant_legal && (
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 12px' }}>Sans directeur saisi, les documents portent le nom du représentant légal ({p.signataires.representant_legal}).</p>
-        )}
-        {canEdit && <button type="submit" className="btn-add" disabled={enCours || !modifie}>{enCours ? 'Enregistrement…' : '💾 Enregistrer'}</button>}
-      </form>
 
       <PeriodiciteBudget />
 
