@@ -28,6 +28,37 @@ const RUBRIQUES_DEFAUT = [
   { code:'SOMC', intitule:'SORTIE OM VERS CAISSE',      type:'depense', est_virement_interne:true,  code_comptable:'',     ordre:15 },
 ];
 
+// ── Nature des recettes (069, ONG / associations seulement) ───────────────
+// Lue et écrite en SQL direct (colonne absente du modèle) : le code reste
+// sûr même si la migration 069 n'est pas encore jouée.
+const projetsSvc = require('../services/projets.service');
+const lireNatures = async (tenantId) => {
+  if (!(await projetsSvc.estInstalle())) return new Map();
+  const rows = await Rubrique.sequelize.query(
+    `SELECT id, nature_recette FROM rubriques WHERE tenant_id = :t AND nature_recette IS NOT NULL`,
+    { replacements: { t: tenantId }, type: Rubrique.sequelize.QueryTypes.SELECT });
+  return new Map(rows.map((r) => [r.id, r.nature_recette]));
+};
+// undefined = ne pas toucher ; null = effacer ; sinon code contrôlé.
+// Réservée aux ONG / associations, aux rubriques d'entrée, et à qui gère les
+// rubriques (rubriques.edit) : c'est un choix de paramétrage comptable.
+const lireNature = async (req, valeur, type) => {
+  if (valeur === undefined) return undefined;
+  if (valeur === null || valeur === '') return null;
+  const err = (m) => Object.assign(new Error(m), { status: 400 });
+  if (!projetsSvc.CODES_NATURES.includes(valeur)) throw err('Nature de recette inconnue.');
+  if (type !== 'entree') throw err('La nature de recette ne concerne que les rubriques d\'entrée.');
+  if (!(await projetsSvc.estOng(req.tenantId))) throw err('La nature de recette est réservée aux ONG et associations.');
+  if (!(await userHasPermission({ tenantId: req.tenantId, userId: req.user.id, role: req.user.role }, 'rubriques.edit'))) {
+    throw Object.assign(new Error('Permission requise : gérer les rubriques.'), { status: 403 });
+  }
+  return valeur;
+};
+const ecrireNature = async (tenantId, id, nature) => {
+  await Rubrique.sequelize.query('UPDATE rubriques SET nature_recette = :n WHERE id = :id AND tenant_id = :t',
+    { replacements: { n: nature, id, t: tenantId } });
+};
+
 // GET /api/rubriques
 const getRubriques = async (req, res) => {
   try {
@@ -38,8 +69,10 @@ const getRubriques = async (req, res) => {
       where: { tenant_id: req.tenantId, actif: true, ...(req.query.ecarts === '1' ? {} : { est_ecart_caisse: false }) },
       order: [['type', 'ASC'], ['ordre', 'ASC'], ['code', 'ASC']],
     });
+    const natures = await lireNatures(req.tenantId);
+    const avecNature = (r) => (natures.size ? { ...r.toJSON(), nature_recette: natures.get(r.id) || null } : r);
     res.json({
-      entrees: rows.filter((r) => r.type === 'entree'),
+      entrees: rows.filter((r) => r.type === 'entree').map(avecNature),
       depenses: rows.filter((r) => r.type === 'depense'),
     });
   } catch (err) {
@@ -53,6 +86,12 @@ const createRubrique = async (req, res) => {
   const { code, intitule, type, est_virement_interne, code_comptable, ordre } = req.body;
   if (!code || !intitule || !type) {
     return res.status(400).json({ error: 'Code, intitulé et type requis.' });
+  }
+  let nature;
+  try {
+    nature = await lireNature(req, req.body.nature_recette, type);
+  } catch (e) {
+    return res.status(e.status || 500).json({ error: e.message });
   }
   try {
     // Sans « Gérer les rubriques » (rubriques.create seul, 044) : la rubrique
@@ -68,7 +107,8 @@ const createRubrique = async (req, res) => {
       code_comptable: complet ? (code_comptable || '') : '',
       ordre: ordre || 0,
     });
-    res.status(201).json({ ...rubrique.toJSON(),
+    if (nature) await ecrireNature(req.tenantId, rubrique.id, nature);
+    res.status(201).json({ ...rubrique.toJSON(), ...(nature ? { nature_recette: nature } : {}),
       ...(!complet && (code_comptable || est_virement_interne)
         ? { message: 'Rubrique créée. Le code comptable et le virement interne seront définis par le comptable.' } : {}) });
   } catch (err) {
@@ -85,8 +125,15 @@ const updateRubrique = async (req, res) => {
     // le cabinet garde ce compte ; un nouveau code devient une proposition.
     let codeRetenu = code_comptable || '';
     let passerelleMessage = null;
-    const existe = await Rubrique.findOne({ where: { id: req.params.id, tenant_id: req.tenantId }, attributes: ['id'] });
+    const existe = await Rubrique.findOne({ where: { id: req.params.id, tenant_id: req.tenantId }, attributes: ['id', 'type'] });
     if (!existe) return res.status(404).json({ error: 'Rubrique introuvable.' });
+    let nature;
+    try {
+      nature = await lireNature(req, req.body.nature_recette, existe.type);
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
     const interception = await passerelle.interceptionModificationRubrique({
       tenantId: req.tenantId, userId: req.user.id, rubriqueId: existe.id, nouveauCode: codeRetenu,
     });
@@ -106,7 +153,9 @@ const updateRubrique = async (req, res) => {
       { where: { id: req.params.id, tenant_id: req.tenantId }, returning: true }
     );
     if (count === 0) return res.status(404).json({ error: 'Rubrique introuvable.' });
-    res.json(passerelleMessage ? { ...rows[0].toJSON(), passerelle_message: passerelleMessage } : rows[0]);
+    if (nature !== undefined) await ecrireNature(req.tenantId, existe.id, nature);
+    const sortie = { ...rows[0].toJSON(), ...(nature !== undefined ? { nature_recette: nature } : {}) };
+    res.json(passerelleMessage ? { ...sortie, passerelle_message: passerelleMessage } : sortie);
   } catch (err) {
     if (err instanceof passerelle.ErreurMetier) return res.status(err.status).json({ error: err.message });
     console.error('[Rubriques] updateRubrique :', err.message);

@@ -11,6 +11,7 @@ import '@/styles/boncaisse.css';
 import '@/styles/initialisation.css';
 import '@/styles/responsive.css';
 import '@/styles/nj-business.css';
+import '@/styles/projets.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

@@ -3,6 +3,7 @@ import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import PlanComptableAutocomplete from '@/components/PlanComptableAutocomplete';
+import { useContexteProjets, NATURES_RECETTE, natureAffectee, libelleNature } from '@/lib/projets';
 
 // Reprend loadTabRubriques()/openModalRubrique()/saveRubrique()/deleteRubrique()
 // de legacy/js/app.js (l. 4546-4771).
@@ -23,6 +24,10 @@ export function RubriqueModal({ rubrique, defaultType, onClose, onSaved, simple 
   const [intitule, setIntitule] = useState(rubrique?.intitule || '');
   const [codeComptable, setCodeComptable] = useState(rubrique?.code_comptable || '');
   const [virement, setVirement] = useState(!!rubrique?.est_virement_interne);
+  // Nature de la recette (069) : ONG / associations, rubriques d'entrée.
+  const ong = Boolean(useContexteProjets()?.ong);
+  const [nature, setNature] = useState(rubrique?.nature_recette || '');
+  const avecNature = ong && !simple && type === 'entree';
   const [erreur, setErreur] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -32,11 +37,12 @@ export function RubriqueModal({ rubrique, defaultType, onClose, onSaved, simple 
     if (!intituleMaj) { setErreur('Intitulé obligatoire.'); return; }
     if (!isEdit && !codeMaj) { setErreur('Code obligatoire.'); return; }
 
-    const body = isEdit
+    const base = isEdit
       ? { intitule: intituleMaj, code_comptable: codeComptable.trim() || null, est_virement_interne: virement, ordre: 0, actif: true }
       : simple
         ? { code: codeMaj, intitule: intituleMaj, type, ordre: 0 }
         : { code: codeMaj, intitule: intituleMaj, type, code_comptable: codeComptable.trim() || null, est_virement_interne: virement, ordre: 0 };
+    const body = avecNature ? { ...base, nature_recette: nature || null } : base;
 
     setSaving(true);
     const res = isEdit ? await api.put(`/rubriques/${rubrique.id}`, body) : await api.post('/rubriques', body);
@@ -84,6 +90,26 @@ export function RubriqueModal({ rubrique, defaultType, onClose, onSaved, simple 
           </label>
           <PlanComptableAutocomplete value={codeComptable} onChange={setCodeComptable} placeholder="Ex: 6251, transport, salaire…" />
 
+          {avecNature && (
+            <>
+              <label style={{ marginTop: 14, display: 'block' }}>Nature de la recette</label>
+              <select value={nature} onChange={(e) => setNature(e.target.value)}>
+                <option value="">— Non précisée —</option>
+                <optgroup label="Affectée à un projet (projet obligatoire à la saisie)">
+                  {NATURES_RECETTE.filter((n) => n.affectee).map((n) => <option key={n.code} value={n.code}>{n.libelle}</option>)}
+                </optgroup>
+                <optgroup label="Non affectée">
+                  {NATURES_RECETTE.filter((n) => !n.affectee).map((n) => <option key={n.code} value={n.code}>{n.libelle}</option>)}
+                </optgroup>
+              </select>
+              {natureAffectee(nature) && (
+                <div className="field-hint" style={{ color: '#065f46' }}>
+                  À chaque entrée sur cette rubrique, le projet bénéficiaire sera demandé : le montant ira au financement reçu du projet.
+                </div>
+              )}
+            </>
+          )}
+
           <label style={{ marginTop: 14, display: 'block' }}>Virement interne</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
             <label className="toggle-switch">
@@ -109,7 +135,12 @@ export function RubriqueModal({ rubrique, defaultType, onClose, onSaved, simple 
   );
 }
 
-function Section({ titre, liste, type, canEdit, canAdd = canEdit, onAdd, onEdit, onDelete }) {
+function NatureBadge({ code }) {
+  if (!code) return <span style={{ color: 'var(--text-light)' }}>—</span>;
+  return <span className={`badge-nature${natureAffectee(code) ? '' : ' badge-nature-libre'}`}>{libelleNature(code)}</span>;
+}
+
+function Section({ titre, liste, type, canEdit, canAdd = canEdit, onAdd, onEdit, onDelete, avecNature = false }) {
   return (
     <div style={{ marginBottom: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -120,7 +151,7 @@ function Section({ titre, liste, type, canEdit, canAdd = canEdit, onAdd, onEdit,
         <table>
           <thead>
             <tr>
-              <th>Code</th><th>Intitulé</th><th>Code comptable</th><th style={{ textAlign: 'center' }}>Virement interne</th>
+              <th>Code</th><th>Intitulé</th><th>Code comptable</th>{avecNature && <th>Nature</th>}<th style={{ textAlign: 'center' }}>Virement interne</th>
               {canEdit && <th>Actions</th>}
             </tr>
           </thead>
@@ -132,6 +163,7 @@ function Section({ titre, liste, type, canEdit, canAdd = canEdit, onAdd, onEdit,
                 <td style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
                   {r.code_comptable || <span style={{ color: 'var(--text-light)' }}>—</span>}
                 </td>
+                {avecNature && <td><NatureBadge code={r.nature_recette} /></td>}
                 <td style={{ textAlign: 'center' }}><VirementBadge oui={r.est_virement_interne} /></td>
                 {canEdit && (
                   <td>
@@ -144,7 +176,7 @@ function Section({ titre, liste, type, canEdit, canAdd = canEdit, onAdd, onEdit,
               </tr>
             ))}
             {liste.length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Aucune rubrique.</td></tr>
+              <tr><td colSpan={avecNature ? 6 : 5} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>Aucune rubrique.</td></tr>
             )}
           </tbody>
         </table>
@@ -156,6 +188,7 @@ function Section({ titre, liste, type, canEdit, canAdd = canEdit, onAdd, onEdit,
 export default function RubriquesTab() {
   const { can, rubriques, loadRubriques } = useApp();
   const toast = useToast();
+  const ong = Boolean(useContexteProjets()?.ong);
   const [modal, setModal] = useState(null); // null | { type } | rubrique
 
   const peutGerer = can('rubriques.edit');
@@ -177,7 +210,7 @@ export default function RubriquesTab() {
           ? 'Le code comptable est facultatif. Une fois validé par le cabinet (menu Contrôle comptable → Contrôle de régularité formelle), il ne change plus qu\'après une nouvelle validation.'
           : 'Vous pouvez ajouter les rubriques utiles à votre saisie. Leur code comptable est défini par le comptable.'}
       </p>
-      <Section titre="Entrées" liste={rubriques.entrees || []} type="entree" canEdit={peutGerer} canAdd={peutAjouter} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />
+      <Section titre="Entrées" avecNature={ong} liste={rubriques.entrees || []} type="entree" canEdit={peutGerer} canAdd={peutAjouter} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />
       <Section titre="Dépenses" liste={rubriques.depenses || []} type="depense" canEdit={peutGerer} canAdd={peutAjouter} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />
 
       {modal && (

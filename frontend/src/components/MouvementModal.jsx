@@ -4,6 +4,7 @@ import { useToast } from '@/context/ToastContext';
 import { api, API_BASE } from '@/lib/api';
 import { syncManager } from '@/lib/syncManager';
 import { RubriqueModal } from '@/components/config/RubriquesTab';
+import { useContexteProjets, natureAffectee, libelleNature } from '@/lib/projets';
 
 // Reprend #modal-mouvement de legacy/index.html + openModalMouvement/saveMouvement
 // de legacy/js/app.js (l. 1239-1467), y compris les pièces jointes
@@ -47,6 +48,14 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
     });
     return () => { annule = true; };
   }, [mouvement?.activite_id]);
+  // Projets des ONG / associations (069) : rien ne change pour une PME.
+  const ctxProjets = useContexteProjets();
+  const ong = Boolean(ctxProjets?.ong);
+  const projetsOng = ong ? (ctxProjets.projets || []) : [];
+  const projetsStructures = new Set(projetsOng.filter((p) => p.activites.length > 0).map((p) => p.id));
+  const activitesProjet = projetsOng.flatMap((p) => p.activites.map((a) => ({ ...a, projet: p })));
+  const [projetId, setProjetId] = useState('');
+  const [referenceFin, setReferenceFin] = useState('');
   const [montant, setMontant] = useState(mouvement ? (parseFloat(mouvement.entree) > 0 ? mouvement.entree : mouvement.sortie) : '');
   const [erreur, setErreur] = useState('');
   const [piecesHint, setPiecesHint] = useState(null); // { obligatoires:[], recommandees:[] } | null
@@ -84,8 +93,16 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   // internes et seulement s'il existe des activités actives. L'API applique la
   // même règle : ce contrôle n'évite qu'un aller-retour.
   const rubriqueChoisie = [...(rubriques.entrees || []), ...(rubriques.depenses || [])].find((r) => r.code === rubrique);
+  // ONG : une recette de nature « affectée » exige le projet bénéficiaire ;
+  // une activité de projet est contrôlée par le budget du projet.
+  const financementAffecte = ong && type === 'entree' && natureAffectee(rubriqueChoisie?.nature_recette);
+  const activiteProjet = ong ? activitesProjet.find((a) => String(a.id) === String(activiteId)) || null : null;
+  const activitesSimples = ong
+    ? activites.filter((a) => !a.projet_id && !(a.type === 'projet' && projetsStructures.has(a.id)))
+    : activites;
+  const rattachementProjetFige = Boolean(mouvement && activiteProjet);
   const activiteRequise = Boolean(user?.activite_obligatoire) && !rubriqueChoisie?.est_virement_interne
-    && activites.some((a) => a.actif);
+    && activites.some((a) => a.actif) && !financementAffecte;
 
   // Auto-remplissage code comptable + intitulé + annotation pièces, comme onRubriqueChange().
   useEffect(() => {
@@ -124,6 +141,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   const onTypeChange = (e) => {
     setType(e.target.value);
     setRubrique('');
+    setProjetId('');
   };
 
   const onAjouterFichier = (e) => {
@@ -160,6 +178,14 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       setErreur('Activité / projet obligatoire : choisissez l\'activité ou le projet concerné par cette opération.');
       return;
     }
+    if (!mouvement && financementAffecte && !projetId) {
+      setErreur('Projet obligatoire : cette recette est un financement affecté. Choisissez le projet bénéficiaire.');
+      return;
+    }
+    if (!mouvement && activiteProjet && type === 'sortie' && activiteProjet.reste !== null && montantNum > activiteProjet.reste) {
+      setErreur(`Budget de l'activité « ${activiteProjet.nom} » dépassé : il reste ${(activiteProjet.reste || 0).toLocaleString('fr-FR')} ${devise}.`);
+      return;
+    }
     // C16 : pièce obligatoire manquante → avertissement et confirmation
     // explicite (l'écriture n'est pas bloquée).
     if (!mouvement && type === 'sortie' && piecesHint?.obligatoires?.length && fichiers.length === 0) {
@@ -174,7 +200,8 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       code_comptable: codeComptable || '',
       nui: nui || '',
       tiers_id: tiersId || null,
-      activite_id: activiteId ? Number(activiteId) : null,
+      activite_id: financementAffecte ? null : (activiteId ? Number(activiteId) : null),
+      ...(!mouvement && financementAffecte ? { projet_id: Number(projetId), reference_financement: referenceFin.trim() } : {}),
       objet, beneficiaire, telephone,
       entree: type === 'entree' ? montantNum : 0,
       sortie: type === 'sortie' ? montantNum : 0,
@@ -189,7 +216,11 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
     // affiché — on préfère laisser la page telle qu'elle est.
     if (!navigator.onLine && !mouvement) {
       let verdict = { bloque: false, connu: false };
-      try { verdict = await syncManager.controleBudgetLocal(body); } catch { /* pré-contrôle indisponible */ }
+      // Remise de fonds à une activité de projet : pas de budget de
+      // fonctionnement (le budget du projet est contrôlé à la synchronisation).
+      if (!activiteProjet) {
+        try { verdict = await syncManager.controleBudgetLocal(body); } catch { /* pré-contrôle indisponible */ }
+      }
 
       const localId = await syncManager.cacheJournalEntry({
         ...body, id: null, type_caisse: body.type_caisse,
@@ -296,7 +327,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
               ))}
             </select>
           </div>
-          {dispo && (
+          {dispo && !activiteProjet && (
             <div className="span-2" style={{ margin: '4px 0 2px', padding: '6px 12px', borderRadius: 7, fontSize: 12,
               background: !dispo.valide ? '#fef3c7' : dispo.reste - (parseFloat(montant) || 0) < 0 ? '#fee2e2' : '#ecfdf5',
               color: !dispo.valide ? '#92400e' : dispo.reste - (parseFloat(montant) || 0) < 0 ? '#991b1b' : '#065f46' }}>
@@ -328,7 +359,34 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
               <span className="input-suffix">{devise}</span>
             </div>
           </div>
-          {activites.length > 0 && (
+          {financementAffecte && !mouvement && (
+            <div className="span-2 projet-imputation">
+              <div className="projet-imputation-titre">
+                <span className="badge-nature">{libelleNature(rubriqueChoisie?.nature_recette)}</span>
+                Financement affecté : le montant sera compté dans le financement reçu du projet.
+              </div>
+              <div className="projet-imputation-grille">
+                <div>
+                  <label>Projet bénéficiaire <span className="req">*</span></label>
+                  <select value={projetId} onChange={(e) => setProjetId(e.target.value)}>
+                    <option value="">— choisir le projet —</option>
+                    {projetsOng.map((p) => (
+                      <option key={p.id} value={p.id}>{p.code ? `[${p.code}] ` : ''}{p.nom}</option>
+                    ))}
+                  </select>
+                  {projetsOng.length === 0 && (
+                    <div className="field-hint" style={{ color: 'var(--accent-red)' }}>Aucun projet actif : créez d'abord le projet.</div>
+                  )}
+                </div>
+                <div>
+                  <label>Référence du financement <span className="field-hint" style={{ display: 'inline', textTransform: 'none', letterSpacing: 0 }}>(facultatif)</span></label>
+                  <input type="text" maxLength={120} placeholder="N° d'avis de crédit, de virement…" value={referenceFin} onChange={(e) => setReferenceFin(e.target.value)} />
+                </div>
+              </div>
+              <div className="field-hint">Le bailleur est le bénéficiaire / tiers indiqué plus bas.</div>
+            </div>
+          )}
+          {!financementAffecte && (activitesSimples.length > 0 || activitesProjet.length > 0) && (
             <div className="span-2">
               <label>
                 Activité / projet{' '}
@@ -336,10 +394,10 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
                   ? <span className="req">*</span>
                   : <span className="field-hint" style={{ display: 'inline', textTransform: 'none', letterSpacing: 0 }}>(facultatif — pour le suivi par activité)</span>}
               </label>
-              <select value={activiteId} onChange={(e) => setActiviteId(e.target.value)}>
+              <select value={activiteId} onChange={(e) => setActiviteId(e.target.value)} disabled={rattachementProjetFige}>
                 <option value="">{activiteRequise ? '— choisir —' : '— Non classé —'}</option>
                 {['activite', 'projet'].map((ty) => {
-                  const items = activites.filter((a) => a.type === ty);
+                  const items = activitesSimples.filter((a) => a.type === ty);
                   if (!items.length) return null;
                   return (
                     <optgroup key={ty} label={ty === 'projet' ? 'Projets' : 'Activités'}>
@@ -349,9 +407,44 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
                     </optgroup>
                   );
                 })}
+                {projetsOng.filter((p) => p.activites.length > 0).map((p) => (
+                  <optgroup key={`p${p.id}`} label={`Projet — ${p.nom}`}>
+                    {p.activites.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code ? `[${a.code}] ` : ''}{a.nom}{a.responsable_nom ? ` · ${a.responsable_nom}` : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
               </select>
+              {rattachementProjetFige && (
+                <div className="field-hint">Rattachement à un projet : il ne se corrige pas ici. Annulez l'écriture (↩) puis ressaisissez-la.</div>
+              )}
             </div>
           )}
+          {activiteProjet && type === 'sortie' && !mouvement && (() => {
+            const p = activiteProjet.projet;
+            const m = parseFloat(montant) || 0;
+            const etat = !p.budget_valide ? 'attente' : activiteProjet.reste === null || activiteProjet.reste - m < 0 ? 'depasse' : 'ok';
+            return (
+              <div className={`span-2 projet-dispo projet-dispo-${etat}`}>
+                {etat === 'attente' && <>⏳ Budget du projet « {p.nom} » pas encore validé par le directeur : la remise de fonds sera refusée.</>}
+                {etat !== 'attente' && activiteProjet.reste === null && <>⛔ L'activité « {activiteProjet.nom} » n'a pas de montant dans le budget validé du projet.</>}
+                {etat !== 'attente' && activiteProjet.reste !== null && (
+                  <>
+                    <strong>Budget du projet</strong> · {activiteProjet.nom}{activiteProjet.responsable_nom ? ` (${activiteProjet.responsable_nom})` : ''}
+                    <div className="projet-dispo-chiffres">
+                      <span>Budget validé <b>{(activiteProjet.budget || 0).toLocaleString('fr-FR')}</b></span>
+                      <span>Déjà remis <b>{(activiteProjet.consomme || 0).toLocaleString('fr-FR')}</b></span>
+                      <span>Reste <b>{(activiteProjet.reste || 0).toLocaleString('fr-FR')} {devise}</b></span>
+                      {m > 0 && <span>Après cette sortie <b>{(activiteProjet.reste - m).toLocaleString('fr-FR')}</b></span>}
+                    </div>
+                    <div className="projet-dispo-note">Hors budget de fonctionnement.</div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
           <div className="form-section">Détails complémentaires</div>
           <div>
             <label>Bénéficiaire {tiersChoisi && <span className="field-hint" style={{ display: 'inline', textTransform: 'none', letterSpacing: 0, color: '#166534' }}>✓ registre</span>}</label>

@@ -303,6 +303,10 @@ router.post  ('/activites',        authGuard, tenantGuard, requirePermission('ac
 router.put   ('/activites/:id',    authGuard, tenantGuard, requirePermission('activites.edit'), actCtrl.modifier);
 router.delete('/activites/:id',    authGuard, tenantGuard, requirePermission('activites.edit'), actCtrl.supprimer);
 
+// Suivi de la caisse des projets — ONG / associations (069, lot P1)
+const projCtrl = require('../controllers/projets.controller');
+router.get   ('/projets/saisie',   authGuard, tenantGuard, requireAnyPermission('journal.create', 'journal.view', 'projets.voir', 'rubriques.edit'), projCtrl.contexteSaisie);
+
 // ── Rapports (module de permission "rapport") ─────────────────────────────
 const rapportCtrl = require('../controllers/rapport.controller');
 router.get('/rapport/compte-emploi',     authGuard, tenantGuard, requirePermission('rapport.view'), rapportCtrl.getCompteEmploi);

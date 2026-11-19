@@ -149,6 +149,8 @@ const DONNEES_METIER = [
   ['controles_arrets', 'contrôle(s) d\'arrêté'],
   // NJ COMMERCIAL (050) : un client qui a commencé à travailler ne se supprime plus.
   ['com_articles', 'article(s)'], ['com_stock_mouvements', 'mouvement(s) de stock'], ['com_demandes', 'demande(s) d\'achat'],
+  // Projets des ONG / associations (069).
+  ['projet_budgets', 'budget(s) de projet'], ['journal_imputations_projet', 'financement(s) imputé(s) à un projet'],
 ];
 const LIENS_COMMERCIAUX = [
   ['prospects', 'fiche prospect / espace de démonstration'], ['abonnements', 'abonnement(s)'],

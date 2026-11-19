@@ -1,0 +1,42 @@
+/* Suivi de la caisse des projets (069) — ONG / associations.
+   Couleurs des montants, les mêmes partout : budget bleu, reçu vert,
+   alloué orange, justifié turquoise, en attente ambre. */
+:root {
+  --projet-budget:   #2563eb;
+  --projet-recu:     #059669;
+  --projet-alloue:   #ea580c;
+  --projet-justifie: #0d9488;
+  --projet-attente:  #d97706;
+}
+
+.badge-nature {
+  display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 20px;
+  font-size: 11px; font-weight: 700; background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0;
+  white-space: nowrap;
+}
+.badge-nature-libre { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+
+/* Bloc « Projet bénéficiaire » dans la saisie d'une entrée */
+.projet-imputation {
+  margin: 6px 0 4px; padding: 12px 14px; border-radius: 10px;
+  background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 4px solid var(--projet-recu);
+}
+.projet-imputation-titre {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  font-size: 12px; color: #065f46; margin-bottom: 10px;
+}
+.projet-imputation-grille { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.projet-imputation .field-hint { margin-top: 6px; }
+
+/* Reste du budget de l'activité de projet, à la saisie d'une sortie */
+.projet-dispo { margin: 4px 0 2px; padding: 8px 12px; border-radius: 8px; font-size: 12px; }
+.projet-dispo-ok      { background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
+.projet-dispo-depasse { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+.projet-dispo-attente { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+.projet-dispo-chiffres { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 4px; }
+.projet-dispo-chiffres b { font-variant-numeric: tabular-nums; }
+.projet-dispo-note { margin-top: 3px; font-size: 11px; opacity: .8; }
+
+@media (max-width: 640px) {
+  .projet-imputation-grille { grid-template-columns: 1fr; }
+}

@@ -11,10 +11,17 @@
 //
 // Fonctions pures vis-à-vis d'Express : aucune ne touche req/res, pour rester
 // appelables indépendamment du transport HTTP (tests, scripts, autres routes).
-const { Op } = require('sequelize');
+const { Op, literal } = require('sequelize');
 const { Journal, Mouvement, Ran, AppelFonds, BudgetCaisse, MouvementAttente } = require('../models');
 const notif = require('../services/notification.service');
 const hebdo = require('./budget_hebdo.service');
+const projets = require('./projets.service');
+
+// ONG / association (069) : les fonds remis aux activités de projet relèvent
+// du budget du projet ; ils sortent des sommes du budget de FONCTIONNEMENT
+// (rubrique et plafond de caisse). Pour une PME : aucun filtre, rien ne change.
+const filtreFonctionnement = async (tenantId) => (
+  (await projets.exclureProjetsDuFonctionnement(tenantId)) ? { [Op.and]: [literal(projets.SQL_HORS_PROJETS)] } : {});
 
 const MOIS = ['Janvier','Fevrier','Mars','Avril','Mai','Juin',
               'Juillet','Aout','Septembre','Octobre','Novembre','Decembre'];
@@ -400,7 +407,8 @@ const controleBudgetSortie = async (tenantId, p) => {
 
   // Référence budgétaire = montant APPROUVÉ de la rubrique dans la demande de fonds
   // (statuts 'approuve' et 'partiellement_approuve'), pour la période cible.
-  const sortiesRubriqueWhere = { tenant_id: tenantId, mois: p.mois, annee: an, rubrique_code: p.rubrique_code };
+  const horsProjets = await filtreFonctionnement(tenantId);
+  const sortiesRubriqueWhere = { tenant_id: tenantId, mois: p.mois, annee: an, rubrique_code: p.rubrique_code, ...horsProjets };
   if (hasExcl) sortiesRubriqueWhere.id = { [Op.ne]: exclId };
 
   // Virement interne entre caisses (rubrique marquée « virement interne ») :
@@ -428,7 +436,7 @@ const controleBudgetSortie = async (tenantId, p) => {
   let plafond = 0;
   let sj = 0;
   if (jid) {
-    const sortiesJournalWhere = { tenant_id: tenantId, journal_id: jid, mois: p.mois, annee: an };
+    const sortiesJournalWhere = { tenant_id: tenantId, journal_id: jid, mois: p.mois, annee: an, ...horsProjets };
     if (hasExcl) sortiesJournalWhere.id = { [Op.ne]: exclId };
     sj = (await Mouvement.sum('sortie', { where: sortiesJournalWhere })) || 0;
     try {
@@ -501,7 +509,8 @@ const controleBudgetSortieHebdo = async (tenantId, p) => {
   const periode = { [Op.between]: [debutMois, sem.fin] };
   const lib = `la semaine ${k} (du ${sem.debut.slice(8)} au ${sem.fin.slice(8)} ${p.mois})`;
 
-  const whereR = { tenant_id: tenantId, mois: p.mois, annee: p.an, rubrique_code: p.rubrique_code, date: periode };
+  const horsProjets = await filtreFonctionnement(tenantId);
+  const whereR = { tenant_id: tenantId, mois: p.mois, annee: p.an, rubrique_code: p.rubrique_code, date: periode, ...horsProjets };
   if (p.exclId !== null && p.exclId !== undefined) whereR.id = { [Op.ne]: p.exclId };
   const [budget, srVal] = await Promise.all([
     budgetApprouve(tenantId, p.mois, p.an, { semaine: k }),
@@ -513,7 +522,7 @@ const controleBudgetSortieHebdo = async (tenantId, p) => {
   let plafond = 0;
   let sj = 0;
   if (p.jid) {
-    const whereJ = { tenant_id: tenantId, journal_id: p.jid, mois: p.mois, annee: p.an, date: periode };
+    const whereJ = { tenant_id: tenantId, journal_id: p.jid, mois: p.mois, annee: p.an, date: periode, ...horsProjets };
     if (p.exclId !== null && p.exclId !== undefined) whereJ.id = { [Op.ne]: p.exclId };
     sj = (await Mouvement.sum('sortie', { where: whereJ })) || 0;
     try {
@@ -562,7 +571,7 @@ const disponibleRubrique = async (tenantId, { date, mois, annee, journal_id, rub
   const an = Number(annee);
   const hebdoMois = await hebdo.estHebdo(tenantId, mois, an);
   const sem = hebdoMois ? hebdo.semaineDeDate(date) : null;
-  const where = { tenant_id: tenantId, mois, annee: an, rubrique_code,
+  const where = { tenant_id: tenantId, mois, annee: an, rubrique_code, ...(await filtreFonctionnement(tenantId)),
     ...(sem ? { date: { [Op.between]: [`${String(date).slice(0, 8)}01`, sem.fin] } } : {}) };
   const [budget, sr] = await Promise.all([
     budgetApprouve(tenantId, mois, an, sem ? { semaine: sem.semaine } : {}),

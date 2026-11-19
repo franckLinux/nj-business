@@ -4,6 +4,7 @@ const { verifierPeriodeOuverte, verifierSoldeNonNegatif, ErreurComptable } = req
 // L'approbation bascule la ligne en écriture réelle dans `journal` (transaction atomique).
 const { sequelize, MouvementAttente, Mouvement, Rubrique, Journal, User } = require('../models');
 const notif = require('../services/notification.service');
+const projetsSvc = require('../services/projets.service');
 
 // ── GET /api/mouvements-attente?mois=&annee=&statut= ────────────────────────
 const list = async (req, res) => {
@@ -86,6 +87,12 @@ const approuver = async (req, res) => {
       // caisse jamais négative (la dépense reste en attente sinon).
       await verifierPeriodeOuverte(m.tenant_id, m.journal_id, m.mois, m.annee);
       await verifierSoldeNonNegatif(m.tenant_id, m.journal_id, m.mois, m.annee, -(parseFloat(m.sortie) || 0));
+      // 069 : une sortie rattachée à une activité de projet (ONG) reste soumise
+      // au budget VALIDÉ du projet, même autorisée par le directeur.
+      const actProjet = await projetsSvc.activiteDeProjet(m.tenant_id, m.activite_id, t);
+      if (actProjet) {
+        await projetsSvc.controlerSortieProjet(m.tenant_id, { activiteId: actProjet.id, montant: parseFloat(m.sortie) || 0 }, t);
+      }
 
       const j = await Mouvement.create({
         tenant_id: m.tenant_id, date: m.date, mois: m.mois, annee: m.annee,
@@ -114,6 +121,7 @@ const approuver = async (req, res) => {
     res.json({ ok: true, journal });
   } catch (err) {
     if (err instanceof ErreurComptable) return res.status(err.status).json({ error: `Approbation impossible : ${err.message}` });
+    if (err instanceof projetsSvc.ErreurProjet) return res.status(err.status).json({ error: `Approbation impossible : ${err.message}`, code: err.code });
     if (err.code === 'NOT_FOUND') {
       return res.status(404).json({ error: 'Dépense en attente introuvable ou déjà traitée.' });
     }

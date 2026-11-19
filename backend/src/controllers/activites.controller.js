@@ -36,6 +36,7 @@ const lister = async (req, res) => {
     const tous = req.query.tous === '1' || req.query.tous === 'true';
     const rows = await q(
       `SELECT a.id, a.code, a.nom, a.type, a.description, a.budget, a.date_debut, a.date_fin, a.actif,
+              (to_jsonb(a)->>'projet_id')::int AS projet_id,
               (SELECT COUNT(*)::int FROM journal j WHERE j.tenant_id = a.tenant_id AND j.activite_id = a.id) AS nb_operations
          FROM activites a
         WHERE a.tenant_id = :t ${tous ? '' : 'AND a.actif'}
@@ -94,6 +95,20 @@ const supprimer = async (req, res) => {
     const [{ n }] = await q(
       `SELECT (SELECT COUNT(*) FROM journal WHERE activite_id = :id)
             + (SELECT COUNT(*) FROM mouvements_attente WHERE activite_id = :id) AS n`, { id });
+    // 069 : un projet qui a des activités, ou une activité inscrite dans un
+    // budget de projet, n'est jamais supprimé (seulement désactivé).
+    let lie = 0;
+    if (await require('../services/projets.service').estInstalle()) {
+      [{ lie }] = await q(
+        `SELECT (SELECT COUNT(*) FROM activites WHERE projet_id = :id)
+              + (SELECT COUNT(*) FROM projet_budget_lignes WHERE activite_id = :id)
+              + (SELECT COUNT(*) FROM projet_budgets WHERE projet_id = :id)
+              + (SELECT COUNT(*) FROM journal_imputations_projet WHERE projet_id = :id) AS lie`, { id });
+    }
+    if (Number(lie) > 0 && Number(n) === 0) {
+      await q('UPDATE activites SET actif = false WHERE id = :id RETURNING id', { id });
+      return res.json({ desactivee: true, message: `« ${a.nom} » est liée à un projet ou à un budget de projet : elle a été désactivée (historique conservé).` });
+    }
     if (Number(n) > 0) {
       await q('UPDATE activites SET actif = false WHERE id = :id RETURNING id', { id });
       return res.json({ desactivee: true, message: `« ${a.nom} » est utilisée par ${n} opération(s) : elle a été désactivée (plus proposée à la saisie, historique conservé).` });

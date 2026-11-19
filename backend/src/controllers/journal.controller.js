@@ -6,6 +6,7 @@
 const { Op, fn, col } = require('sequelize');
 const { resoudreActivite } = require('./activites.controller');
 const hebdoSvc = require('../services/budget_hebdo.service');
+const projetsSvc = require('../services/projets.service');
 const ecartsSvc = require('../services/ecarts_caisse.service');
 
 // ── Activité / projet obligatoire (039) ───────────────────────────────────
@@ -154,9 +155,23 @@ const createMouvement = async (req, res) => {
     console.error('[Journal] contrôle rubrique d\'écart :', e.message);
     return res.status(500).json({ error: 'Erreur serveur.' });
   }
-  // Activité / projet obligatoire pour cette personne (039).
+  // ONG / association (069) : projet bénéficiaire d'un financement affecté,
+  // activité de projet d'une remise de fonds. null pour une PME.
+  let projetCtx = null;
   try {
-    await exigerActivite(req, rubrique_code, activiteId);
+    projetCtx = await projetsSvc.preparerSaisie(req.tenantId, {
+      rubriqueCode: rubrique_code, entree, sortie, activiteId,
+      projetId: req.body.projet_id, reference: req.body.reference_financement,
+    });
+  } catch (e) {
+    if (e instanceof projetsSvc.ErreurProjet) return res.status(e.status).json({ error: e.message, code: e.code });
+    console.error('[Journal] contrôle projet :', e.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+  // Activité / projet obligatoire pour cette personne (039). Un financement
+  // imputé à un projet n'en a pas besoin : le projet est déjà désigné.
+  try {
+    if (!projetCtx?.imputation) await exigerActivite(req, rubrique_code, activiteId);
   } catch (e) {
     if (e.status) return res.status(e.status).json({ error: e.message, code: e.code });
     console.error('[Journal] contrôle activité obligatoire :', e.message);
@@ -202,7 +217,10 @@ const createMouvement = async (req, res) => {
   }
 
   // RG-05 : les contrôles ne s'appliquent qu'aux SORTIES (entrées exemptées).
-  if (montantSortie > 0) {
+  // Sortie vers une activité de projet (ONG, 069) : contrôlée par le budget du
+  // projet au moment de l'enregistrement, pas par le budget de fonctionnement.
+  const sortieProjet = montantSortie > 0 && Boolean(projetCtx?.activiteProjet);
+  if (montantSortie > 0 && !sortieProjet) {
     let ctrl;
     try {
       ctrl = await controleBudgetSortie(req.tenantId, {
@@ -247,7 +265,7 @@ const createMouvement = async (req, res) => {
   }
 
   try {
-    const mouvement = await Mouvement.create({
+    const valeurs = {
       tenant_id: req.tenantId, date, mois, annee: an,
       journal_id: jid, type_caisse: resolvedCaisse,
       rubrique_code, intitule, objet: objet||'', beneficiaire: beneficiaire||'',
@@ -256,7 +274,28 @@ const createMouvement = async (req, res) => {
       ...(antidatee ? { rattrapage: true } : {}),
       ...(activiteId ? { activite_id: activiteId } : {}),
       ...(tiersId ? { tiers_id: tiersId } : {}),
-    });
+    };
+    let mouvement;
+    let projetInfo = null;
+    if (projetCtx?.imputation || sortieProjet) {
+      // Écriture + lien projet (ou contrôle du budget du projet) dans UNE
+      // transaction : tout ou rien.
+      mouvement = await sequelize.transaction(async (t) => {
+        if (sortieProjet) {
+          projetInfo = await projetsSvc.controlerSortieProjet(req.tenantId,
+            { activiteId: projetCtx.activiteProjet.id, montant: montantSortie }, t);
+        }
+        const m = await Mouvement.create(valeurs, { transaction: t });
+        if (projetCtx.imputation) {
+          await projetsSvc.enregistrerImputation(req.tenantId,
+            { journalId: m.id, imputation: projetCtx.imputation, userId: req.user.id }, t);
+          projetInfo = { projet_id: projetCtx.imputation.projetId };
+        }
+        return m;
+      });
+    } else {
+      mouvement = await Mouvement.create(valeurs);
+    }
     if (antidatee) {
       sequelize.query(
         `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
@@ -264,8 +303,9 @@ const createMouvement = async (req, res) => {
         { replacements: { t: req.tenantId, u: req.user.id, id: String(mouvement.id),
           v: JSON.stringify({ numero: mouvement.numero, date, journal_id: jid }) } }).catch(() => {});
     }
-    res.status(201).json({ ...mouvement.toJSON(), budget_warning: budgetWarning });
+    res.status(201).json({ ...mouvement.toJSON(), budget_warning: budgetWarning, ...(projetInfo ? { projet: projetInfo } : {}) });
   } catch (err) {
+    if (err instanceof projetsSvc.ErreurProjet) return res.status(err.status).json({ error: err.message, code: err.code });
     console.error('[Journal] createMouvement :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
   }
@@ -303,6 +343,8 @@ const updateMouvement = async (req, res) => {
     if (b.activite_id !== undefined) {
       const nouv = await resoudreActivite(req.tenantId, b.activite_id);
       if ((nouv || null) !== (old.activite_id || null)) {
+        // 069 : un rattachement à un projet (ONG) ne se corrige pas en place.
+        await projetsSvc.verifierChangementActivite(req.tenantId, old.activite_id || null, nouv || null);
         if (!nouv) await exigerActivite(req, old.rubrique_code, null);   // 039 : pas de retrait
         maj.activite_id = nouv;
       }
@@ -323,6 +365,7 @@ const updateMouvement = async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     if (refusComptable(res, err)) return;
+    if (err instanceof projetsSvc.ErreurProjet) return res.status(err.status).json({ error: err.message, code: err.code });
     if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error('[Journal] updateMouvement :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
@@ -658,12 +701,17 @@ const getControleContext = async (req, res) => {
   try {
     const jid = journal_id ? parseInt(journal_id, 10) : null;
     const an  = parseInt(annee, 10);
+    // ONG (069) : les remises de fonds aux activités de projet ne comptent pas
+    // dans le budget de fonctionnement — même règle que le contrôle serveur.
+    const exclureProjets = await projetsSvc.exclureProjetsDuFonctionnement(req.tenantId);
+    const horsProjets = exclureProjets ? { [Op.and]: [sequelize.literal(projetsSvc.SQL_HORS_PROJETS)] } : {};
+    const sqlHorsProjets = exclureProjets ? ` AND ${projetsSvc.sqlHorsProjets('journal')}` : '';
 
     const plafondPromise = jid
       ? BudgetCaisse.sum('montant', { where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an } }).catch(() => 0)
       : Promise.resolve(0);
     const sjPromise = jid
-      ? Mouvement.sum('sortie', { where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an } })
+      ? Mouvement.sum('sortie', { where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an, ...horsProjets } })
       : Promise.resolve(0);
 
     const [plafondVal, sjVal, apprRows, srRows] = await Promise.all([
@@ -671,7 +719,7 @@ const getControleContext = async (req, res) => {
       sjPromise,
       budgetApprouve(req.tenantId, mois, an),
       Mouvement.findAll({
-        where: { tenant_id: req.tenantId, mois, annee: an },
+        where: { tenant_id: req.tenantId, mois, annee: an, ...horsProjets },
         attributes: ['rubrique_code', [fn('COALESCE', fn('SUM', col('sortie')), 0), 'v']],
         group: ['rubrique_code'], raw: true,
       }),
@@ -689,7 +737,7 @@ const getControleContext = async (req, res) => {
       const [parJour, plafonds, valides] = await Promise.all([
         sequelize.query(
           `SELECT rubrique_code, journal_id, date::text AS date, COALESCE(SUM(sortie), 0) AS v
-             FROM journal WHERE tenant_id = :t AND mois = :m AND annee = :a AND sortie > 0
+             FROM journal WHERE tenant_id = :t AND mois = :m AND annee = :a AND sortie > 0${sqlHorsProjets}
             GROUP BY rubrique_code, journal_id, date`,
           { replacements: { t: req.tenantId, m: mois, a: an }, type: sequelize.QueryTypes.SELECT }),
         jid ? BudgetCaisse.findAll({ where: { tenant_id: req.tenantId, journal_id: jid, mois, annee: an }, attributes: ['semaine', 'montant'], raw: true }) : [],
