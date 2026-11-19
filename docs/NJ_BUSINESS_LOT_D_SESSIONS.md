@@ -9,7 +9,13 @@
 > - La règle devient : **une session par compte et par type d'appareil**. Les deux types sont « ordinateur » et « téléphone / tablette ».
 > - Un **deuxième ordinateur** ou un **deuxième téléphone** reste refusé. Il peut remplacer celui du même type, avec la même procédure : mot de passe redonné et alerte par e-mail.
 > - Le super_admin peut revenir à une seule session par compte, tous appareils confondus : case « Ordinateur et téléphone en même temps », dans Administration plateforme → Sessions.
-> - **Limite :** le type d'appareil est déduit de l'identification du navigateur (User-Agent). Une personne avertie peut la falsifier pour ouvrir une deuxième session. Cette limite est acceptée : le titulaire voit toutes ses sessions, et le directeur aussi, dans « Connectés maintenant ».
+> - **Reconnaissance du téléphone (v68, 19/11/2026).** Un téléphone en « version pour ordinateur » se présentait comme un PC, et il était refusé à côté de l'ordinateur. Trois indices sont désormais pris en compte, un seul suffit :
+>   - le User-Agent ;
+>   - l'indice client `Sec-CH-UA-Mobile`, envoyé par Chrome, Edge et Samsung Internet ;
+>   - l'indice envoyé par l'interface à la connexion : écran tactile sans souris ni pavé tactile, ou navigateur qui se déclare mobile.
+>
+>   L'écran « Compte déjà connecté » affiche maintenant l'appareil de la session ouverte et celui de **cet appareil**, chacun avec son type.
+> - **Limite :** le type d'appareil est déduit de ce que déclare le navigateur. Une personne avertie peut la falsifier pour ouvrir une deuxième session. Cette limite est acceptée : le titulaire voit toutes ses sessions, et le directeur aussi, dans « Connectés maintenant ».
 
 **Connexion depuis un deuxième appareil.** Le compte est déjà ouvert ailleurs, par exemple au bureau.
 1. L'écran « Compte déjà connecté » apparaît. Il affiche le message prévu : « Ce compte est déjà connecté sur un autre appareil. Veuillez fermer la session existante avant de vous connecter à nouveau. »

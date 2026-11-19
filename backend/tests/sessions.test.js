@@ -176,6 +176,24 @@ test('068 : ordinateur ET téléphone en même temps ; un seul de chaque type', 
   assert.equal((await brut('GET', '/auth/me', jetonPc)).status, 200, 'l\'ordinateur n\'est pas touché');
   const jetonIphone = r.data.accessToken;
 
+  // Téléphone en « version pour ordinateur » (User-Agent de PC) : reconnu par
+  // l'indice client Sec-CH-UA-Mobile ou par l'indice de l'interface.
+  const pcUa = 'Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0 Safari/537.36';
+  r = await connexion('dirB', { ua: pcUa });
+  assert.equal(r.status, 409, 'User-Agent de PC sans indice : compté comme ordinateur');
+  assert.deepEqual(r.data.session.cet_appareil, { appareil: 'Chrome sur Linux', type_appareil: 'ordinateur' });
+  const avecIndice = await fetch(`http://127.0.0.1:${PORT}/api/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': pcUa },
+    body: JSON.stringify({ username: U.dirB.username, password: MDP, type_appareil: 'mobile' }) });
+  const j = await avecIndice.json();
+  assert.equal(avecIndice.status, 409, 'indice mobile : en concurrence avec l\'iPhone');
+  assert.equal((j.data ?? j).session.cet_appareil.type_appareil, 'mobile');
+  const ch = await fetch(`http://127.0.0.1:${PORT}/api/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': pcUa, 'Sec-CH-UA-Mobile': '?1' },
+    body: JSON.stringify({ username: U.dirB.username, password: MDP }) });
+  assert.equal(((await ch.json()).data).session.cet_appareil.type_appareil, 'mobile');
+  assert.equal((await brut('POST', '/auth/login', null, { username: U.dirB.username, password: MDP, type_appareil: 'frigo' })).status, 400);
+
   // Réglage désactivé : une seule session par compte, tous appareils confondus.
   r = await brut('PUT', '/plateforme/sessions', U.adm.token, { inactivite_min: 60, duree_max_min: 720, par_type_appareil: false });
   assert.equal(r.status, 200, r.message);

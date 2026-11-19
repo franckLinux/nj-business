@@ -23,6 +23,17 @@ const readSession = () => {
   return { token: null, user: null };
 };
 
+// 068 : indice « mobile » envoyé à la connexion — écran tactile sans souris ni
+// pavé tactile, ou navigateur qui se déclare mobile. Couvre un téléphone en
+// « version pour ordinateur » et un iPad qui se présente comme un Mac.
+const indiceAppareil = () => {
+  try {
+    if (navigator.userAgentData?.mobile) return 'mobile';
+    const tactile = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(any-pointer: fine)').matches;
+    return tactile ? 'mobile' : null;
+  } catch { return null; }
+};
+
 export function AppProvider({ children }) {
   const initial = readSession();
   const [token, setToken] = useState(initial.token);
@@ -94,7 +105,9 @@ export function AppProvider({ children }) {
   // 067 : `remplacer` ferme la session ouverte sur un autre appareil (après
   // refus SESSION_ACTIVE et confirmation de la personne, mot de passe redonné).
   const login = useCallback(async (username, password, remplacer = false) => {
-    const res = await api.post('/auth/login', { username, password, ...(remplacer ? { remplacer: true } : {}) });
+    const res = await api.post('/auth/login', {
+      username, password, ...(remplacer ? { remplacer: true } : {}), ...(indiceAppareil() ? { type_appareil: indiceAppareil() } : {}),
+    });
     if (res.error) return res;
     localStorage.setItem(TOKEN_KEY, res.accessToken);
     localStorage.setItem(USER_KEY, JSON.stringify(res.user));

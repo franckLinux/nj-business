@@ -5,6 +5,7 @@ const loginRules = [
   body('username').trim().notEmpty().withMessage('Identifiant et mot de passe requis.'),
   body('password').notEmpty().withMessage('Identifiant et mot de passe requis.'),
   body('remplacer').optional().isBoolean({ strict: true }).withMessage('Paramètre « remplacer » invalide.'),
+  body('type_appareil').optional().isIn(['mobile', 'ordinateur']).withMessage('Type d\'appareil invalide.'),
 ];
 
 const changePasswordRules = [

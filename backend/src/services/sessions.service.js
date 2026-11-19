@@ -62,7 +62,16 @@ const reglages = async () => {
 };
 
 /** 068 : type d'appareil (téléphone et tablette = « mobile »). */
-const typeAppareil = (ua = '') => (/Mobi|Android|iPhone|iPad|iPod|Tablet/i.test(String(ua)) ? 'mobile' : 'ordinateur');
+// Trois indices, un seul suffit : le User-Agent, l'indice client du navigateur
+// (Sec-CH-UA-Mobile, envoyé par Chrome / Edge / Samsung Internet) et l'indice
+// de l'interface (écran tactile sans souris : couvre un téléphone en « version
+// pour ordinateur », ou un iPad qui se présente comme un Mac).
+const typeAppareil = (ua = '', { chMobile = null, indice = null } = {}) => {
+  if (/Mobi|Android|iPhone|iPad|iPod|Tablet/i.test(String(ua))) return 'mobile';
+  if (String(chMobile || '').trim() === '?1') return 'mobile';
+  if (indice === 'mobile') return 'mobile';
+  return 'ordinateur';
+};
 const NOM_TYPE = { ordinateur: 'ordinateur', mobile: 'téléphone ou tablette' };
 
 /** Appareil lisible à partir du User-Agent (affichage seulement). */
@@ -116,7 +125,7 @@ const ouvrir = async ({ user, req, remplacer = false }) => {
   const ua = req.get('user-agent') || '';
   const ip = String(req.ip || '').slice(0, 100) || null;
   const appareil = decrireAppareil(ua);
-  const type = typeAppareil(ua);
+  const type = typeAppareil(ua, { chMobile: req.get('sec-ch-ua-mobile'), indice: req.body?.type_appareil });
   const parType = r.par_type_appareil !== false;
   const db = await getClient();
   let remplacee = null;
@@ -136,7 +145,7 @@ const ouvrir = async ({ user, req, remplacer = false }) => {
         await db.query('COMMIT');
         throw new ErreurSession(409, MESSAGES.SESSION_ACTIVE, 'SESSION_ACTIVE', {
           appareil: active.appareil, type_appareil: active.type_appareil, depuis: active.cree_le, derniere_activite: active.derniere_activite,
-          par_type_appareil: parType });
+          par_type_appareil: parType, cet_appareil: { appareil, type_appareil: type } });
       }
       await db.query(
         `UPDATE sessions SET statut = 'remplacee', terminee_le = NOW(), terminee_par = $2, motif_fin = $3 WHERE id = ANY($1::uuid[])`,

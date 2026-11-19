@@ -104,7 +104,8 @@ export default function LoginPage() {
                 </p>
               )}
               <dl className="njb-session-detail">
-                <div><dt>Appareil</dt><dd>{autreSession.appareil || 'Non identifié'}</dd></div>
+                <div><dt>Session ouverte sur</dt><dd>{autreSession.appareil || 'Non identifié'}{autreSession.type_appareil ? ` (${autreSession.type_appareil === 'mobile' ? 'téléphone' : 'ordinateur'})` : ''}</dd></div>
+                {autreSession.cet_appareil && <div><dt>Cet appareil</dt><dd>{autreSession.cet_appareil.appareil} ({autreSession.cet_appareil.type_appareil === 'mobile' ? 'téléphone' : 'ordinateur'})</dd></div>}
                 {quand(autreSession.depuis) && <div><dt>Connecté depuis</dt><dd>{quand(autreSession.depuis)}</dd></div>}
                 {quand(autreSession.derniere_activite) && <div><dt>Dernière activité</dt><dd>{quand(autreSession.derniere_activite)}</dd></div>}
               </dl>
