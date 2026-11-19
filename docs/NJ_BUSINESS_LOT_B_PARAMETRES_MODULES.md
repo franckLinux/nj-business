@@ -156,6 +156,5 @@ Le script de démonstration NJ COMMERCIAL a été exécuté en entier.
 
 ## 9. Points restant à traiter
 
-- **Périodicités trimestrielle, semestrielle et annuelle du budget :** lot à part, après le lot E, comme vous l'avez décidé.
 - **Lot C :** utilisateurs par module (`user_modules`) et reprise des utilisateurs existants. Avant ce lot, lancer en production la requête d'inventaire, en lecture seule, du document d'audit.
 - **Dates d'exercice :** elles sont enregistrées, mais aucun traitement de la caisse ne les utilise encore.

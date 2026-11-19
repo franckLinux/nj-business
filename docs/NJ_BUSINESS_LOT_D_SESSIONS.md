@@ -187,4 +187,3 @@ Avec le complément 068, la mise à jour joue la 067 puis la 068, et le cache pa
 ## 8. Points restant à traiter
 
 - **Lot E : parcours de connexion**, l'accueil pour tous (décision n° 4) et la vérification de l'ensemble des scénarios.
-- Lot des périodicités du budget : mensuel, trimestriel, semestriel, annuel, en plus de l'hebdomadaire.

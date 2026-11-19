@@ -218,7 +218,8 @@ Chaque lot ajoute ses tests d'intégration, sur une base de test et jamais sur l
 
 ## 8. Décisions de Franck (17/11/2026)
 
-1. **Budget :** l'hebdomadaire est gardé ; les périodicités mensuelle, trimestrielle, semestrielle et annuelle sont ajoutées. Ce sera un lot à part, après le lot E.
+*La décision n° 1 notée sur le budget résultait d'un malentendu ; elle a été retirée le 19/11/2026. La numérotation des autres décisions est conservée, car les documents des lots y renvoient.*
+
 2. **Plan comptable :** il se choisit dans NJ CAISSE PRO ; la forme juridique ne fait que le suggérer.
 3. **Second appareil :** la connexion est bloquée avec le message demandé. On propose ensuite « Fermer l'autre session et me connecter ici », après saisie du mot de passe, et le titulaire reçoit un e-mail d'alerte.
 4. **Après la connexion :** tout le monde arrive sur l'accueil NJ BUSINESS, même avec un seul module.
