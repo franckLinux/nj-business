@@ -100,7 +100,7 @@ const login = async (req, res) => {
         permissions, // null = pas de restriction configurée (rôle fixe seul) ; tableau = liste exclusive
         modules,     // 048 : [{ code, nom, statut, actif, … }] ; null = système de modules non installé
       },
-      session: ouverte.session ? { id: ouverte.session.id, expire_le: ouverte.session.expire_le, remplace: Boolean(ouverte.remplacee) } : null,
+      session: ouverte.session ? { id: ouverte.session.id, expire_le: ouverte.session.expire_le, type_appareil: ouverte.session.type_appareil, remplace: Boolean(ouverte.remplacee) } : null,
     });
   } catch (err) {
     console.error('[Auth] Erreur login :', err.message);

@@ -32,7 +32,13 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 -- Une seule session active par compte : garantie par la base, même si deux
 -- connexions arrivent au même instant.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_sessions_une_active ON sessions (user_id) WHERE statut = 'active';
+-- (068 la remplace par une session par type d'appareil : on ne la recrée pas si la 068 est passée.)
+DO $$
+BEGIN
+  IF to_regclass('public.uq_sessions_active_par_type') IS NULL THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_sessions_une_active ON sessions (user_id) WHERE statut = 'active';
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS ix_sessions_tenant_actives ON sessions (tenant_id) WHERE statut = 'active';
 CREATE INDEX IF NOT EXISTS ix_sessions_user_date ON sessions (user_id, cree_le DESC);
 

@@ -3,7 +3,11 @@
 //  • Une session par connexion ; le jeton porte son identifiant (sid). Le serveur
 //    vérifie la session à CHAQUE requête : fermée, remplacée, révoquée ou expirée,
 //    elle rend son jeton inutilisable immédiatement (invalidation effective).
-//  • UNE session active par compte. Une deuxième connexion est refusée
+//  • 068 : UNE session active par compte ET par type d'appareil (ordinateur,
+//    mobile) : on peut être connecté sur son ordinateur et sur son téléphone en
+//    même temps (réglage par_type_appareil, activé par défaut ; à false : une
+//    seule session par compte, tous appareils confondus).
+//  • UNE session active par compte (par type d'appareil, voir ci-dessus). Une deuxième connexion est refusée
 //    (SESSION_ACTIVE), sauf remplacement explicite : identifiant et mot de passe
 //    vérifiés à nouveau, l'ancienne session est « remplacée », le titulaire est
 //    prévenu par e-mail. Verrou consultatif + index unique : deux connexions
@@ -45,7 +49,7 @@ const disponible = async () => {
 };
 
 let cacheReglages = null;
-const DEFAUT = { inactivite_min: 60, duree_max_min: 720 };
+const DEFAUT = { inactivite_min: 60, duree_max_min: 720, par_type_appareil: true };
 const reglages = async () => {
   if (cacheReglages && Date.now() - cacheReglages.t < 15000) return cacheReglages.v;
   let v = { ...DEFAUT };
@@ -56,6 +60,10 @@ const reglages = async () => {
   cacheReglages = { t: Date.now(), v };
   return v;
 };
+
+/** 068 : type d'appareil (téléphone et tablette = « mobile »). */
+const typeAppareil = (ua = '') => (/Mobi|Android|iPhone|iPad|iPod|Tablet/i.test(String(ua)) ? 'mobile' : 'ordinateur');
+const NOM_TYPE = { ordinateur: 'ordinateur', mobile: 'téléphone ou tablette' };
 
 /** Appareil lisible à partir du User-Agent (affichage seulement). */
 const decrireAppareil = (ua = '') => {
@@ -108,6 +116,8 @@ const ouvrir = async ({ user, req, remplacer = false }) => {
   const ua = req.get('user-agent') || '';
   const ip = String(req.ip || '').slice(0, 100) || null;
   const appareil = decrireAppareil(ua);
+  const type = typeAppareil(ua);
+  const parType = r.par_type_appareil !== false;
   const db = await getClient();
   let remplacee = null;
   try {
@@ -115,24 +125,28 @@ const ouvrir = async ({ user, req, remplacer = false }) => {
     // Verrou par compte : deux connexions simultanées passent l'une après l'autre.
     await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`nj_session_${user.id}`]);
     await expirerPerimees(db, user.id);
-    const { rows: [active] } = await db.query(
-      `SELECT id, appareil, ip, cree_le, derniere_activite FROM sessions WHERE user_id = $1 AND statut = 'active'`, [user.id]);
+    // Sessions en concurrence : même type d'appareil (068), ou toutes si le réglage est désactivé.
+    const { rows: concurrentes } = await db.query(
+      `SELECT id, appareil, type_appareil, ip, cree_le, derniere_activite FROM sessions
+        WHERE user_id = $1 AND statut = 'active' AND (NOT $2 OR type_appareil = $3) ORDER BY cree_le`, [user.id, parType, type]);
+    const active = concurrentes[0];
     if (active) {
       if (!remplacer && mode() === 'appliquer') {
-        await auditer(db, { tenantId: user.tenant_id, userId: user.id, action: 'SESSION_REFUSEE', sessionId: active.id, details: { appareil, ip } });
+        await auditer(db, { tenantId: user.tenant_id, userId: user.id, action: 'SESSION_REFUSEE', sessionId: active.id, details: { appareil, ip, type } });
         await db.query('COMMIT');
         throw new ErreurSession(409, MESSAGES.SESSION_ACTIVE, 'SESSION_ACTIVE', {
-          appareil: active.appareil, depuis: active.cree_le, derniere_activite: active.derniere_activite });
+          appareil: active.appareil, type_appareil: active.type_appareil, depuis: active.cree_le, derniere_activite: active.derniere_activite,
+          par_type_appareil: parType });
       }
       await db.query(
-        `UPDATE sessions SET statut = 'remplacee', terminee_le = NOW(), terminee_par = $2, motif_fin = $3 WHERE id = $1`,
-        [active.id, user.id, remplacer ? `Remplacée par une connexion depuis ${appareil}` : 'Nouvelle connexion (contrôle en observation)']);
+        `UPDATE sessions SET statut = 'remplacee', terminee_le = NOW(), terminee_par = $2, motif_fin = $3 WHERE id = ANY($1::uuid[])`,
+        [concurrentes.map((c) => c.id), user.id, remplacer ? `Remplacée par une connexion depuis ${appareil}` : 'Nouvelle connexion (contrôle en observation)']);
       remplacee = active;
     }
     const { rows: [s] } = await db.query(
-      `INSERT INTO sessions (user_id, tenant_id, expire_le, ip, appareil, navigateur)
-       VALUES ($1, $2, NOW() + make_interval(mins => $3::int), $4, $5, $6) RETURNING id, cree_le, expire_le`,
-      [user.id, user.tenant_id || null, r.duree_max_min, ip, appareil, ua.slice(0, 400)]);
+      `INSERT INTO sessions (user_id, tenant_id, expire_le, ip, appareil, navigateur, type_appareil)
+       VALUES ($1, $2, NOW() + make_interval(mins => $3::int), $4, $5, $6, $7) RETURNING id, cree_le, expire_le`,
+      [user.id, user.tenant_id || null, r.duree_max_min, ip, appareil, ua.slice(0, 400), type]);
     await auditer(db, { tenantId: user.tenant_id, userId: user.id, action: remplacee ? 'SESSION_REMPLACEMENT' : 'SESSION_OUVERTURE',
       sessionId: s.id, details: { appareil, ip, remplace: remplacee ? remplacee.id : null } });
     await db.query('COMMIT');
@@ -140,7 +154,7 @@ const ouvrir = async ({ user, req, remplacer = false }) => {
       prevenirRemplacement({ userId: user.id, ancienne: remplacee, nouvelle: { appareil, ip } })
         .catch((e) => console.error('[Sessions] alerte e-mail :', e.message));
     }
-    return { session: { id: s.id, expire_le: s.expire_le, duree_max_min: r.duree_max_min }, remplacee };
+    return { session: { id: s.id, expire_le: s.expire_le, duree_max_min: r.duree_max_min, type_appareil: type }, remplacee };
   } catch (err) {
     await db.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') {   // index unique : une autre connexion vient de passer
@@ -204,7 +218,7 @@ const lister = async ({ tenantId = null, userId = null, actives = true, limite =
   await expirerPerimees({ query });
   const { rows } = await query(
     `SELECT s.id, s.user_id, u.username, u.role, s.tenant_id, t.nom AS client, s.statut, s.cree_le, s.derniere_activite,
-            s.expire_le, s.appareil, s.ip, s.terminee_le, s.motif_fin
+            s.expire_le, s.appareil, s.type_appareil, s.ip, s.terminee_le, s.motif_fin
        FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN tenants t ON t.id = s.tenant_id
       WHERE ($1::uuid IS NULL OR s.tenant_id = $1) AND ($2::uuid IS NULL OR s.user_id = $2)
         AND (NOT $3 OR s.statut = 'active')
@@ -212,7 +226,10 @@ const lister = async ({ tenantId = null, userId = null, actives = true, limite =
   return rows;
 };
 
-const definirReglages = async ({ inactivite_min, duree_max_min, par }) => {
+const definirReglages = async ({ inactivite_min, duree_max_min, par_type_appareil, par }) => {
+  const actuel = await reglages();
+  const t = par_type_appareil === undefined ? actuel.par_type_appareil !== false : par_type_appareil;
+  if (typeof t !== 'boolean') throw new ErreurSession(400, 'Réglage « ordinateur et téléphone » invalide.');
   const i = Number(inactivite_min);
   const d = Number(duree_max_min);
   if (!Number.isInteger(i) || i < 5 || i > 1440) throw new ErreurSession(400, 'Inactivité : entre 5 et 1 440 minutes.');
@@ -220,13 +237,13 @@ const definirReglages = async ({ inactivite_min, duree_max_min, par }) => {
   if (d < i) throw new ErreurSession(400, 'La durée maximale doit être au moins égale au délai d\'inactivité.');
   await query(`INSERT INTO plateforme_reglages (cle, valeur, modifie_par, modifie_le) VALUES ('sessions', $1, $2, NOW())
                ON CONFLICT (cle) DO UPDATE SET valeur = EXCLUDED.valeur, modifie_par = EXCLUDED.modifie_par, modifie_le = NOW()`,
-  [JSON.stringify({ inactivite_min: i, duree_max_min: d }), par]);
-  await auditer({ query }, { userId: par, action: 'SESSIONS_REGLAGES', details: { inactivite_min: i, duree_max_min: d } });
+  [JSON.stringify({ inactivite_min: i, duree_max_min: d, par_type_appareil: t }), par]);
+  await auditer({ query }, { userId: par, action: 'SESSIONS_REGLAGES', details: { inactivite_min: i, duree_max_min: d, par_type_appareil: t } });
   cacheReglages = null;
   return reglages();
 };
 
 module.exports = {
-  ErreurSession, MESSAGES, mode, disponible, reglages, ouvrir, controler, terminer, lister, definirReglages, decrireAppareil,
+  ErreurSession, MESSAGES, mode, disponible, reglages, ouvrir, controler, terminer, lister, definirReglages, decrireAppareil, typeAppareil, NOM_TYPE,
   nouvelIdentifiant: () => crypto.randomUUID(),
 };

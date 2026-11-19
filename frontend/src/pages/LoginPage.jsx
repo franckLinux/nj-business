@@ -98,6 +98,11 @@ export default function LoginPage() {
               </div>
               <h1 id="njb-session-titre">Compte déjà connecté</h1>
               <p id="njb-session-texte" className="njb-sous-titre">Ce compte est déjà connecté sur un autre appareil. Veuillez fermer la session existante avant de vous connecter à nouveau.</p>
+              {autreSession.par_type_appareil !== false && autreSession.type_appareil && (
+                <p className="njb-session-note" style={{ margin: '-6px 0 14px' }}>
+                  Vous pouvez être connecté sur un ordinateur et sur un téléphone en même temps, mais pas sur deux {autreSession.type_appareil === 'mobile' ? 'téléphones' : 'ordinateurs'}.
+                </p>
+              )}
               <dl className="njb-session-detail">
                 <div><dt>Appareil</dt><dd>{autreSession.appareil || 'Non identifié'}</dd></div>
                 {quand(autreSession.depuis) && <div><dt>Connecté depuis</dt><dd>{quand(autreSession.depuis)}</dd></div>}

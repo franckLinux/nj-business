@@ -21,6 +21,7 @@ const depuis = (d) => {
   const h = Math.floor(min / 60);
   return h < 24 ? `il y a ${h} h ${String(min % 60).padStart(2, '0')}` : dateHeure(d);
 };
+const TYPES = { ordinateur: '💻 Ordinateur', mobile: '📱 Téléphone / tablette' };
 const STATUTS = { active: 'Active', fermee: 'Déconnectée', expiree: 'Expirée', remplacee: 'Remplacée', revoquee: 'Fermée par un administrateur' };
 
 export function SessionsOuvertes({ plateforme = false }) {
@@ -57,7 +58,9 @@ export function SessionsOuvertes({ plateforme = false }) {
         <button type="button" className="um-btn" onClick={charger}>Actualiser</button>
       </div>
       <p className="um-texte">
-        Une seule session par compte. Une session sans activité pendant {d.reglages.inactivite_min} min se ferme seule ;
+        {d.reglages.par_type_appareil !== false
+          ? 'Une session par compte et par type d\'appareil : un ordinateur et un téléphone au plus.'
+          : 'Une seule session par compte, tous appareils confondus.'} Une session sans activité pendant {d.reglages.inactivite_min} min se ferme seule ;
         aucune ne dure plus de {Math.round(d.reglages.duree_max_min / 60)} h.
       </p>
       {d.sessions.length === 0 ? <p className="um-texte">Personne n'est connecté.</p> : (
@@ -71,7 +74,7 @@ export function SessionsOuvertes({ plateforme = false }) {
                 <tr key={s.id}>
                   <td><b style={{ fontSize: 13 }}>{s.username}</b>{s.courante && <span className="um-module" style={{ marginLeft: 6 }}>vous</span>}</td>
                   {plateforme && <td style={{ fontSize: 12.5 }}>{s.client || 'Cabinet'}</td>}
-                  <td style={{ fontSize: 12.5 }}>{s.appareil || '—'}{s.ip && <span className="um-sous">{s.ip}</span>}</td>
+                  <td style={{ fontSize: 12.5 }}>{TYPES[s.type_appareil] && <span className="um-sous" style={{ marginTop: 0 }}>{TYPES[s.type_appareil]}</span>}{s.appareil || '—'}{s.ip && <span className="um-sous">{s.ip}</span>}</td>
                   <td style={{ fontSize: 12.5 }}>{dateHeure(s.cree_le)}</td>
                   <td style={{ fontSize: 12.5 }}>{depuis(s.derniere_activite)}</td>
                   <td style={{ textAlign: 'right' }}>
@@ -110,19 +113,19 @@ export function SessionsOuvertes({ plateforme = false }) {
 export function ReglagesSessions() {
   const toast = useToast();
   const [r, setR] = useState(null);
-  const [f, setF] = useState({ inactivite_min: '', duree_max_min: '' });
+  const [f, setF] = useState({ inactivite_min: '', duree_max_min: '', par_type_appareil: true });
   const [enCours, setEnCours] = useState(false);
   useEffect(() => {
     api.get('/plateforme/sessions').then((x) => {
       if (x?.error) return;
-      setR(x); setF({ inactivite_min: String(x.reglages.inactivite_min), duree_max_min: String(x.reglages.duree_max_min) });
+      setR(x); setF({ inactivite_min: String(x.reglages.inactivite_min), duree_max_min: String(x.reglages.duree_max_min), par_type_appareil: x.reglages.par_type_appareil !== false });
     });
   }, []);
   if (!r) return null;
   const enregistrer = async (e) => {
     e.preventDefault();
     setEnCours(true);
-    const x = await api.put('/plateforme/sessions', { inactivite_min: Number(f.inactivite_min), duree_max_min: Number(f.duree_max_min) });
+    const x = await api.put('/plateforme/sessions', { inactivite_min: Number(f.inactivite_min), duree_max_min: Number(f.duree_max_min), par_type_appareil: f.par_type_appareil });
     setEnCours(false);
     if (x?.error) { toast(x.error, 'error', 7000); return; }
     setR(x);
@@ -140,6 +143,10 @@ export function ReglagesSessions() {
         <input id="se-max" type="number" min="30" max="10080" className="um-select um-select-large" value={f.duree_max_min}
           onChange={(e) => setF({ ...f, duree_max_min: e.target.value })} />
       </div>
+      <label className="se-case">
+        <input type="checkbox" checked={f.par_type_appareil} onChange={(e) => setF({ ...f, par_type_appareil: e.target.checked })} />
+        <span><b>Ordinateur et téléphone en même temps</b>Une session sur un ordinateur et une sur un téléphone ou une tablette. Décoché : une seule session par compte.</span>
+      </label>
       <button type="submit" className="btn-add" disabled={enCours}>{enCours ? 'Enregistrement…' : 'Enregistrer'}</button>
       {r.mode !== 'appliquer' && <p className="um-note" style={{ gridColumn: '1 / -1' }}>Contrôle des sessions en <b>observation</b> sur ce serveur (SESSIONS_CONTROLE) : rien n'est refusé.</p>}
     </form>
@@ -170,7 +177,7 @@ export function MesAppareils() {
       {courante && <p className="um-texte" style={{ margin: '0 0 6px' }}>Cet appareil : <b>{courante.appareil}</b>, connecté le {dateHeure(courante.cree_le)}.</p>}
       {recentes.length > 0 && (
         <ul className="se-recentes">
-          {recentes.map((s) => <li key={s.id}>{s.appareil} · {dateHeure(s.cree_le)} · {STATUTS[s.statut] || s.statut}</li>)}
+          {recentes.map((s) => <li key={s.id}>{TYPES[s.type_appareil] ? `${TYPES[s.type_appareil]} — ` : ''}{s.appareil} · {dateHeure(s.cree_le)} · {STATUTS[s.statut] || s.statut}</li>)}
         </ul>
       )}
       <button type="button" className="um-btn um-retirer" onClick={toutFermer} disabled={enCours}>Déconnecter tous mes appareils</button>

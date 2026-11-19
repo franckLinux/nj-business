@@ -1,9 +1,15 @@
 # NJ BUSINESS — Lot D : sessions
 
-**Date :** 18/11/2026 · **Migration :** 067 · **Service Worker :** v66 · **Branche :** `module/commercial`
+**Date :** 18/11/2026, complété le 19/11/2026 · **Migrations :** 067, 068 · **Service Worker :** v67 · **Branche :** `module/commercial`
 **Référence :** `docs/AUDIT_AUTH_ENTREPRISE_UTILISATEURS.md`, lot D, et la décision n° 3 : bloquer, puis proposer « Fermer l'autre session et me connecter ici », avec une alerte par e-mail.
 
 ## 1. Ce qui change pour l'utilisateur
+
+> **Complément du 19/11/2026 (migration 068, v67), à la demande de Franck :** on peut être connecté **en même temps sur son ordinateur et sur son téléphone**.
+> - La règle devient : **une session par compte et par type d'appareil**. Les deux types sont « ordinateur » et « téléphone / tablette ».
+> - Un **deuxième ordinateur** ou un **deuxième téléphone** reste refusé. Il peut remplacer celui du même type, avec la même procédure : mot de passe redonné et alerte par e-mail.
+> - Le super_admin peut revenir à une seule session par compte, tous appareils confondus : case « Ordinateur et téléphone en même temps », dans Administration plateforme → Sessions.
+> - **Limite :** le type d'appareil est déduit de l'identification du navigateur (User-Agent). Une personne avertie peut la falsifier pour ouvrir une deuxième session. Cette limite est acceptée : le titulaire voit toutes ses sessions, et le directeur aussi, dans « Connectés maintenant ».
 
 **Connexion depuis un deuxième appareil.** Le compte est déjà ouvert ailleurs, par exemple au bureau.
 1. L'écran « Compte déjà connecté » apparaît. Il affiche le message prévu : « Ce compte est déjà connecté sur un autre appareil. Veuillez fermer la session existante avant de vous connecter à nouveau. »
@@ -36,7 +42,7 @@
 
 ## 2. Règles de gestion
 
-1. **Une seule session active par compte.** La base le garantit par un index unique partiel. Le serveur l'assure aussi par un verrou par compte. Six connexions simultanées au même compte : **une seule** est acceptée (testé).
+1. **Une seule session active par compte et par type d'appareil** (068). La base le garantit par l'index unique partiel `uq_sessions_active_par_type (user_id, type_appareil)`. Quand le réglage `par_type_appareil` est désactivé, le serveur n'accepte qu'une session par compte, sous verrou, et un remplacement ferme toutes les sessions du compte. Le serveur l'assure aussi par un verrou par compte. Six connexions simultanées au même compte : **une seule** est acceptée (testé).
 2. **Le jeton porte l'identifiant de sa session** (`sid`), et le serveur contrôle la session **à chaque requête**. Une session fermée, remplacée, révoquée ou expirée rend son jeton inutilisable immédiatement, sans attendre son expiration.
 3. **Remplacer exige le mot de passe.** Le refus (`SESSION_ACTIVE`) ne délivre aucun jeton. Le remplacement est une nouvelle connexion complète avec `remplacer: true`. Un mauvais mot de passe ne ferme rien.
 4. **Expiration.** Elle intervient après une inactivité de 60 min ou une durée de 12 h, toutes deux réglables :
@@ -72,7 +78,13 @@
   - colonnes : `id` (uuid), `user_id`, `tenant_id`, `statut` (`active`, `fermee`, `expiree`, `remplacee`, `revoquee`), `cree_le`, `derniere_activite`, `expire_le`, `ip`, `appareil`, `navigateur`, `terminee_le`, `terminee_par`, `motif_fin` ;
   - contrainte : une session active n'a pas de date de fin, et une session terminée en a une ;
   - **index unique** `uq_sessions_une_active (user_id) WHERE statut = 'active'`.
-- **`plateforme_reglages`** contient `sessions` = `{"inactivite_min": 60, "duree_max_min": 720}`.
+- **`plateforme_reglages`** contient `sessions` = `{"inactivite_min": 60, "duree_max_min": 720, "par_type_appareil": true}`.
+- **068** :
+  - ajoute `sessions.type_appareil` (`ordinateur` ou `mobile`), déduit pour les sessions existantes ;
+  - remplace l'index `uq_sessions_une_active` par `uq_sessions_active_par_type` ;
+  - ajoute le réglage `par_type_appareil`.
+
+  Retour arrière : `068_retour_arriere.sql`. Il ferme les sessions mobiles en double ; il a été testé sur une copie de la base : appliquer, retour arrière, puis appliquer à nouveau.
 - La migration est additive et idempotente.
 - Retour arrière : `db/migrations-retour-arriere/067_retour_arriere.sql`.
 
@@ -131,9 +143,14 @@
 
 ## 6. Tests
 
-**Backend : 26 suites, 217 tests, tous passent**, sur une base PostgreSQL 16 jetable (jamais la production).
+**Backend : 26 suites, 218 tests, tous passent** (après la 068), sur une base PostgreSQL 16 jetable (jamais la production).
 
-La nouvelle suite `sessions` (9 tests) couvre :
+La nouvelle suite `sessions` (10 tests) couvre :
+- **068** :
+  - ordinateur et téléphone connectés ensemble ;
+  - un deuxième téléphone est refusé ; s'il remplace le premier, l'ordinateur n'est pas touché ;
+  - réglage désactivé : un deuxième ordinateur est refusé, et le remplacement ferme les deux sessions ;
+  - une valeur invalide est refusée ;
 - le **scénario 5** :
   - deuxième appareil refusé avec son message, sans jeton, la session existante restant intacte ;
   - remplacement refusé avec un mauvais mot de passe ;
@@ -156,6 +173,8 @@ Les autres suites tournent en mode `observer`, le défaut quand `NODE_ENV=test` 
 - le PC revient à l'écran de connexion, avec le message de remplacement.
 
 ## 7. Déploiement
+
+Avec le complément 068, la mise à jour joue la 067 puis la 068, et le cache passe en v67. Si la 067 est déjà en production, seule la 068 est jouée, et personne n'a à se reconnecter.
 
 1. **Sauvegarder la base.**
 2. Mettre le code à jour, puis redémarrer : la 067 est jouée.

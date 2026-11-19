@@ -117,7 +117,8 @@ test('Scénario 5 : une seule session, deuxième appareil refusé puis remplacem
   assert.equal((await brut('GET', '/auth/me', jetonPc)).status, 200);
 
   // Deuxième appareil : refus clair, avec l'appareil de la session ouverte, sans jeton.
-  const tel = 'Mozilla/5.0 (Linux; Android 14) Chrome/120.0 Mobile';
+  // Deuxième ORDINATEUR (068 : même type d'appareil que le premier).
+  const tel = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Version/17.0 Safari/605.1.15';
   let r = await connexion('caiA', { ua: tel });
   assert.equal(r.status, 409);
   assert.equal(r.code, 'SESSION_ACTIVE');
@@ -143,10 +144,55 @@ test('Scénario 5 : une seule session, deuxième appareil refusé puis remplacem
   assert.equal((await brut('GET', '/auth/me', jetonTel)).status, 200);
   const toutes = await sql('SELECT statut, appareil, motif_fin FROM sessions WHERE user_id = $1 ORDER BY cree_le', [U.caiA.id]);
   assert.deepEqual(toutes.map((s) => s.statut), ['remplacee', 'active']);
-  assert.match(toutes[0].motif_fin, /Android/);
+  assert.match(toutes[0].motif_fin, /Mac/);
   const audit = await sql("SELECT action FROM audit_log WHERE user_id = $1 AND entite = 'session' ORDER BY id", [U.caiA.id]);
   assert.deepEqual(audit.map((a) => a.action), ['SESSION_OUVERTURE', 'SESSION_REFUSEE', 'SESSION_REMPLACEMENT']);
   U.caiA.token = jetonTel;
+});
+
+test('068 : ordinateur ET téléphone en même temps ; un seul de chaque type', async () => {
+  const android = 'Mozilla/5.0 (Linux; Android 14; Pixel 7) Chrome/120.0 Mobile Safari/537.36';
+  const iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Version/17.0 Mobile/15E148 Safari/604.1';
+  await sql("UPDATE sessions SET statut = 'fermee', terminee_le = NOW() WHERE user_id = $1 AND statut = 'active'", [U.dirB.id]);
+  const pc = await ouvrir('dirB');
+  assert.equal(pc.data.session.type_appareil, 'ordinateur');
+  const jetonPc = U.dirB.token;
+  let r = await connexion('dirB', { ua: android });
+  assert.equal(r.status, 200, `téléphone accepté à côté de l'ordinateur : ${r.message}`);
+  assert.equal(r.data.session.type_appareil, 'mobile');
+  const jetonTel = r.data.accessToken;
+  assert.equal((await brut('GET', '/auth/me', jetonPc)).status, 200, 'ordinateur toujours connecté');
+  assert.equal((await brut('GET', '/auth/me', jetonTel, undefined, android)).status, 200);
+  assert.equal((await actives('dirB')).length, 2);
+
+  // Deuxième téléphone : refusé, avec le téléphone en cours ; remplacement = le téléphone seulement.
+  r = await connexion('dirB', { ua: iphone });
+  assert.equal(r.status, 409);
+  assert.equal(r.data.session.type_appareil, 'mobile');
+  assert.match(r.data.session.appareil, /Android/);
+  r = await connexion('dirB', { ua: iphone, remplacer: true });
+  assert.equal(r.status, 200, r.message);
+  assert.equal((await brut('GET', '/auth/me', jetonTel)).code, 'SESSION_REMPLACEE');
+  assert.equal((await brut('GET', '/auth/me', jetonPc)).status, 200, 'l\'ordinateur n\'est pas touché');
+  const jetonIphone = r.data.accessToken;
+
+  // Réglage désactivé : une seule session par compte, tous appareils confondus.
+  r = await brut('PUT', '/plateforme/sessions', U.adm.token, { inactivite_min: 60, duree_max_min: 720, par_type_appareil: false });
+  assert.equal(r.status, 200, r.message);
+  assert.equal(r.data.reglages.par_type_appareil, false);
+  await new Promise((ok) => setTimeout(ok, 50));
+  r = await connexion('dirB', { ua: 'Mozilla/5.0 (Windows NT 10.0) Firefox/121.0' });
+  assert.equal(r.status, 409, 'un autre ordinateur est refusé');
+  assert.equal(r.data.session.par_type_appareil, false);
+  r = await connexion('dirB', { remplacer: true });
+  assert.equal(r.status, 200, r.message);
+  assert.equal((await brut('GET', '/auth/me', jetonPc)).code, 'SESSION_REMPLACEE');
+  assert.equal((await brut('GET', '/auth/me', jetonIphone)).code, 'SESSION_REMPLACEE', 'les deux sessions sont fermées');
+  assert.equal((await actives('dirB')).length, 1);
+  U.dirB.token = r.data.accessToken;
+  r = await brut('PUT', '/plateforme/sessions', U.adm.token, { inactivite_min: 60, duree_max_min: 720, par_type_appareil: true });
+  assert.equal(r.status, 200);
+  assert.equal((await brut('PUT', '/plateforme/sessions', U.adm.token, { inactivite_min: 60, duree_max_min: 720, par_type_appareil: 'oui' })).status, 400);
 });
 
 test('Connexions simultanées : une seule passe', async () => {
@@ -263,7 +309,7 @@ test('Réglages des sessions (super_admin)', async () => {
   assert.equal(r.status, 400, 'durée maximale inférieure à l\'inactivité');
   r = await brut('PUT', '/plateforme/sessions', U.adm.token, { inactivite_min: 30, duree_max_min: 600 });
   assert.equal(r.status, 200, r.message);
-  assert.deepEqual(r.data.reglages, { inactivite_min: 30, duree_max_min: 600 });
+  assert.deepEqual(r.data.reglages, { inactivite_min: 30, duree_max_min: 600, par_type_appareil: true });
   assert.equal(r.data.mode, 'appliquer');
   await new Promise((ok) => setTimeout(ok, 50));
   const c = await ouvrir('dirB', { remplacer: true });
@@ -271,8 +317,8 @@ test('Réglages des sessions (super_admin)', async () => {
   assert.equal(p.exp - p.iat, 600 * 60, 'le jeton ne vit pas plus longtemps que la session');
 });
 
-test('Migration 067 rejouable', async () => {
-  const migration = fs.readFileSync(path.join(__dirname, '..', 'db', 'migrations', '067_sessions.sql'), 'utf8');
+test('Migrations 067 et 068 rejouables', async () => {
+  const migration = ['067_sessions.sql', '068_sessions_par_appareil.sql'].map((f) => fs.readFileSync(path.join(__dirname, '..', 'db', 'migrations', f), 'utf8')).join('\n');
   const n = (await sql('SELECT COUNT(*)::int AS n FROM sessions'))[0].n;
   const client = await pool.connect();
   try {
@@ -282,5 +328,5 @@ test('Migration 067 rejouable', async () => {
   } finally { client.release(); }
   assert.equal((await sql('SELECT COUNT(*)::int AS n FROM sessions'))[0].n, n);
   await assert.rejects(sql("INSERT INTO sessions (user_id, expire_le) VALUES ($1, NOW() + interval '1 hour')", [U.dirB.id]),
-    /uq_sessions_une_active/, 'la base refuse une deuxième session active');
+    /uq_sessions_active_par_type/, 'la base refuse une deuxième session active du même type');
 });
