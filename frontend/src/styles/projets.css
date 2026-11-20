@@ -213,3 +213,29 @@
 }
 .pj-page textarea { font-family: inherit; font-size: 13px; padding: 8px 10px; border: 1.5px solid var(--border); border-radius: 8px; }
 .pj-modal-corps textarea, .pj-modal-corps input[type=text], .pj-modal-corps select { width: 100%; box-sizing: border-box; }
+
+/* ══ Justificatifs et bilan (lot P3) ══════════════════════════════════════ */
+.pj-nav { margin-top: -4px; }
+.pj-nav .pj-onglet-b { text-decoration: none; }
+.pj-kpis-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pj-select { padding: 8px 10px; border: 1.5px solid var(--border); border-radius: 9px; font-size: 13px; background: #fff; max-width: 260px; }
+.pj-badge-btn { border: 0; cursor: pointer; font-family: inherit; }
+.pj-badge-btn:hover { filter: brightness(.96); text-decoration: underline; }
+.pj-piece { border: 0; background: #eff6ff; color: #1d4ed8; font-weight: 700; font-size: 12px; padding: 4px 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.pj-piece:hover { background: #dbeafe; }
+.pj-actions-l { text-align: right; white-space: nowrap; }
+.pj-act { border: 1px solid var(--border); background: #fff; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 700; cursor: pointer; margin-left: 4px; color: var(--text); }
+.pj-act:hover { background: #f8fafc; }
+.pj-act.vert { background: #16a34a; border-color: #16a34a; color: #fff; }
+.pj-act.vert:hover { background: #15803d; }
+.pj-act.rouge { color: #b91c1c; border-color: #fecaca; }
+.pj-act:disabled { opacity: .5; cursor: wait; }
+.pj-depot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 2px dashed #cbd5e1; border-radius: 10px; padding: 14px; cursor: pointer; font-size: 13px; text-transform: none; letter-spacing: 0; font-weight: 500; background: #f8fafc; }
+.pj-depot:hover { border-color: var(--projet-budget); background: #eff6ff; }
+.pj-depot.ok { border-style: solid; border-color: #86efac; background: #f0fdf4; }
+.pj-depot input { display: none; }
+.pj-rappel { font-size: 12px; background: #fffbeb; border: 1px solid #fde68a; color: #78350f; border-radius: 8px; padding: 8px 10px; }
+.pj-bilan { display: grid; grid-template-columns: 1fr; gap: 0; }
+.pj-lien-l { color: inherit; text-decoration: none; }
+.pj-lien-l:hover strong { color: var(--projet-budget); text-decoration: underline; }
+@media (max-width: 1100px) { .pj-kpis-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

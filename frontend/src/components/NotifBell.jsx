@@ -73,6 +73,10 @@ export default function NotifBell() {
     if (n.type === 'attente_creee' && peutVoirAttente) {
       setOpen(false);
       navigate('/attente');
+    } else if (n.type === 'projet_justificatif' && n.ref_id) {
+      // Justificatif déposé (→ contrôle) ou décidé (→ déposant).
+      setOpen(false);
+      navigate(`/projets/${n.ref_id}?onglet=justificatifs`);
     } else if (n.type === 'projet_budget' && n.ref_id) {
       // Projets des ONG (069) : budget soumis, validé ou rejeté → fiche du projet.
       setOpen(false);

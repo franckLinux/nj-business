@@ -6,6 +6,7 @@
 // Le périmètre de chacun est vérifié par le service, à chaque appel.
 const projetsSvc = require('../services/projets.service');
 const gestion = require('../services/projets_gestion.service');
+const justif = require('../services/projets_justificatifs.service');
 
 // Réponse commune : erreurs métier en clair, le reste en 500 journalisé.
 const traiter = (nom, fn, statutOk = 200) => async (req, res) => {
@@ -14,7 +15,7 @@ const traiter = (nom, fn, statutOk = 200) => async (req, res) => {
     res.status(statutOk).json(r === undefined ? { ok: true } : r);
   } catch (err) {
     if (err instanceof projetsSvc.ErreurProjet) return res.status(err.status).json({ error: err.message, code: err.code });
-    if (/BUDGET_FIGE|BUDGET_INVALIDE|PROJET_INCOHERENT/.test(err?.message || '')) {
+    if (/BUDGET_FIGE|BUDGET_INVALIDE|PROJET_INCOHERENT|JUSTIFICATIF_INTANGIBLE|JUSTIFICATIF_INVALIDE|chk_justif_pas_auto_validation/.test(err?.message || '')) {
       return res.status(409).json({ error: String(err.message).replace(/^[A-Z_]+: /, ''), code: 'REGLE_BASE' });
     }
     console.error(`[Projets] ${nom} :`, err.message);
@@ -41,4 +42,31 @@ module.exports = {
   supprimerBudget:  traiter('suppression', (req) => gestion.supprimerBudget(req, req.params.id, req.params.bid)),
   validerBudget:    traiter('validation', (req) => gestion.deciderBudget(req, req.params.id, req.params.bid, { valider: true })),
   rejeterBudget:    traiter('rejet', (req) => gestion.deciderBudget(req, req.params.id, req.params.bid, { valider: false, motif: req.body?.motif })),
+  // P3 — justificatifs et bilan
+  listerJustificatifs: traiter('justificatifs', (req) => justif.lister(req, req.params.id, { activiteId: req.query.activite_id, statut: req.query.statut })),
+  deposerJustificatif: traiter('dépôt de justificatif', (req) => justif.deposer(req, req.params.id, req.body || {}), 201),
+  validerJustificatif: traiter('validation de justificatif', (req) => justif.decider(req, req.params.id, req.params.jid, { valider: true })),
+  rejeterJustificatif: traiter('rejet de justificatif', (req) => justif.decider(req, req.params.id, req.params.jid, { valider: false, motif: req.body?.motif })),
+  annulerJustificatif: traiter('annulation de justificatif', (req) => justif.annuler(req, req.params.id, req.params.jid, req.body?.motif)),
+  supprimerJustificatif: traiter('retrait de justificatif', (req) => justif.supprimer(req, req.params.id, req.params.jid)),
+  aControler:          traiter('justificatifs à contrôler', (req) => justif.aControler(req)),
+  bilan:               traiter('bilan', (req) => justif.bilan(req)),
+  // Fichier d'une pièce : flux binaire, jamais par /uploads.
+  fichierJustificatif: async (req, res) => {
+    try {
+      const f = await justif.fichier(req, req.params.id, req.params.jid);
+      const nom = String(f.nom || 'justificatif');
+      res.setHeader('Content-Type', f.mime || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${nom.replace(/[^\w.\- ()]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(nom)}`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, no-store');
+      require('fs').createReadStream(f.chemin)
+        .on('error', (e) => { console.error('[Projets] fichier :', e.message); if (!res.headersSent) res.status(500).end(); else res.destroy(); })
+        .pipe(res);
+    } catch (err) {
+      if (err instanceof projetsSvc.ErreurProjet) return res.status(err.status).json({ error: err.message, code: err.code });
+      console.error('[Projets] fichier :', err.message);
+      res.status(500).json({ error: 'Erreur serveur.' });
+    }
+  },
 };

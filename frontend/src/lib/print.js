@@ -873,3 +873,48 @@ export function printRapportControle({ data, filtres, entite, tenantNom, devise 
   <script>window.onload=()=>{ window.print(); };<\/script></body></html>`;
   return openPrintWindowViaWrite(html);
 }
+
+// ── Bilan des activités de projet (ONG / associations, 070) ──────────────────
+// Deux tableaux : activités validées (tout le remis est justifié ou remboursé)
+// et activités en attente de justification (montant, ancienneté, responsable).
+export function printBilanProjets({ bilan, projetNom, entite, tenantNom, devise = 'FCFA' }) {
+  const dateStr = new Date().toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+  const t = bilan.totaux;
+  const ligne = (l, attente) => `<tr>
+    <td>${esc(l.projet_nom)}</td><td><b>${esc(l.activite_nom)}</b></td><td>${esc(l.responsable_nom || '—')}</td>
+    <td class="n">${fmtN(l.alloue)}</td><td class="n">${fmtN(l.justifie)}</td><td class="n">${fmtN(l.rembourse)}</td>
+    ${attente ? `<td class="n att">${fmtN(l.en_attente)}</td><td class="n">${fmtN(l.a_controler)}</td><td class="n">${l.jours ?? '—'} j</td>` : ''}
+  </tr>`;
+  const entete = (attente) => `<tr><th>Projet</th><th>Activité</th><th>Responsable</th><th class="n">Remis</th><th class="n">Justifié</th><th class="n">Remboursé</th>
+    ${attente ? '<th class="n">En attente</th><th class="n">À contrôler</th><th class="n">Depuis</th>' : ''}</tr>`;
+  const css = `*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11px;padding:18px;color:#1a202c}
+    .ph{text-align:center;margin-bottom:14px;border-bottom:2px solid #1a365d;padding-bottom:10px}.ph h2{font-size:16px;color:#1a365d}
+    h3{font-size:12.5px;margin:16px 0 6px;color:#1a365d}table{width:100%;border-collapse:collapse;margin-bottom:6px}
+    th{background:#1a365d;color:#fff;padding:6px 7px;text-align:left;font-size:10px}td{padding:5px 7px;border-bottom:1px solid #e2e8f0}
+    .n{text-align:right;white-space:nowrap}.att{color:#b45309;font-weight:700}.tot td{background:#edf2f7;font-weight:700}
+    .kpis{display:flex;gap:8px;margin:8px 0 4px}.kpis div{flex:1;border:1px solid #cbd5e1;border-radius:6px;padding:7px;text-align:center}
+    .kpis b{display:block;font-size:14px;margin-top:2px}.vide{color:#64748b;font-style:italic;padding:8px 0}
+    .doc-ent{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+    @media print{@page{size:A4 landscape;margin:12mm}}${ENTITE_CSS}`;
+  const total = (liste, k) => liste.reduce((s, l) => s + (l[k] || 0), 0);
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Bilan des activités — ${esc(projetNom || 'tous les projets')}</title><style>${css}</style></head><body>
+    <div class="doc-ent">${blocEntite(entite, tenantNom)}</div>
+    <div class="ph"><h2>BILAN DES ACTIVITÉS DE PROJET</h2><p>${esc(projetNom || 'Tous les projets')} — au ${dateStr}</p></div>
+    <div class="kpis">
+      <div>Remis aux responsables<b>${fmtN(t.alloue)}</b></div><div>Justifié (pièces validées)<b>${fmtN(t.justifie)}</b></div>
+      <div>Remboursé<b>${fmtN(t.rembourse)}</b></div><div>En attente de justification<b style="color:#b45309">${fmtN(t.en_attente)}</b></div>
+    </div>
+    <p style="font-size:10px;color:#64748b">Montants en ${esc(devise)}. Activité validée : tout le montant remis est justifié par des pièces validées ou remboursé.</p>
+    <h3>1. Activités en attente de justification (${bilan.en_attente.length})</h3>
+    ${bilan.en_attente.length ? `<table><thead>${entete(true)}</thead><tbody>${bilan.en_attente.map((l) => ligne(l, true)).join('')}
+      <tr class="tot"><td colspan="3">TOTAL</td><td class="n">${fmtN(total(bilan.en_attente, 'alloue'))}</td><td class="n">${fmtN(total(bilan.en_attente, 'justifie'))}</td>
+      <td class="n">${fmtN(total(bilan.en_attente, 'rembourse'))}</td><td class="n att">${fmtN(total(bilan.en_attente, 'en_attente'))}</td>
+      <td class="n">${fmtN(total(bilan.en_attente, 'a_controler'))}</td><td></td></tr></tbody></table>` : '<div class="vide">Aucune.</div>'}
+    <h3>2. Activités validées (${bilan.validees.length})</h3>
+    ${bilan.validees.length ? `<table><thead>${entete(false)}</thead><tbody>${bilan.validees.map((l) => ligne(l, false)).join('')}
+      <tr class="tot"><td colspan="3">TOTAL</td><td class="n">${fmtN(total(bilan.validees, 'alloue'))}</td><td class="n">${fmtN(total(bilan.validees, 'justifie'))}</td>
+      <td class="n">${fmtN(total(bilan.validees, 'rembourse'))}</td></tr></tbody></table>` : '<div class="vide">Aucune.</div>'}
+    ${piedEntite(entite, tenantNom)}
+    </body></html>`;
+  return openPrintWindowViaBlob(html);
+}

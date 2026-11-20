@@ -13,6 +13,8 @@ import AppelFondsPage from '@/pages/AppelFondsPage';
 import SuiviActivitesPage from '@/pages/SuiviActivitesPage';
 import ProjetsPage from '@/pages/ProjetsPage';
 import ProjetPage from '@/pages/ProjetPage';
+import ProjetsAControlerPage from '@/pages/ProjetsAControlerPage';
+import ProjetsBilanPage from '@/pages/ProjetsBilanPage';
 import CompteEmploiPage from '@/pages/CompteEmploiPage';
 import ConfigPage from '@/pages/ConfigPage';
 import PasserelleTab from '@/components/config/PasserelleTab';
@@ -280,6 +282,8 @@ function AuthenticatedApp() {
         <Route path="activites"      element={<Autorise code={PAGE_PERMS['/activites']}><SuiviActivitesPage /></Autorise>} />
         {/* Projets des ONG / associations (069) : le serveur décide du périmètre. */}
         <Route path="projets"        element={<ProjetsPage />} />
+        <Route path="projets/a-controler" element={<ProjetsAControlerPage />} />
+        <Route path="projets/bilan"  element={<ProjetsBilanPage />} />
         <Route path="projets/:id"    element={<ProjetPage />} />
         <Route path="controle/pieces"     element={<Autorise code={PAGE_PERMS['/controle/pieces']}><ControlePage /></Autorise>} />
         <Route path="controle/regularite" element={<Autorise code={PAGE_PERMS['/controle/regularite']}><ControlePage /></Autorise>} />

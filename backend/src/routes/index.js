@@ -311,6 +311,9 @@ router.get   ('/projets/saisie',   authGuard, tenantGuard, requireAnyPermission(
 // sa DÉSIGNATION fixe son périmètre, contrôlé par le service à chaque appel.
 router.get   ('/projets/acces',        authGuard, tenantGuard, projCtrl.acces);
 router.get   ('/projets/utilisateurs', authGuard, tenantGuard, projCtrl.utilisateurs);
+// Lot P3 — routes fixes AVANT /projets/:id.
+router.get   ('/projets/bilan',                    authGuard, tenantGuard, projCtrl.bilan);
+router.get   ('/projets/controle/justificatifs',   authGuard, tenantGuard, projCtrl.aControler);
 router.get   ('/projets',              authGuard, tenantGuard, projCtrl.lister);
 router.post  ('/projets',              authGuard, tenantGuard, projCtrl.creerProjet);
 router.get   ('/projets/:id',          authGuard, tenantGuard, projCtrl.detail);
@@ -324,6 +327,13 @@ router.post  ('/projets/:id/budgets/:bid/soumettre',  authGuard, tenantGuard, pr
 router.post  ('/projets/:id/budgets/:bid/retirer',    authGuard, tenantGuard, projCtrl.retirerBudget);
 router.post  ('/projets/:id/budgets/:bid/valider',    authGuard, tenantGuard, projCtrl.validerBudget);
 router.post  ('/projets/:id/budgets/:bid/rejeter',    authGuard, tenantGuard, projCtrl.rejeterBudget);
+router.get   ('/projets/:id/justificatifs',                authGuard, tenantGuard, projCtrl.listerJustificatifs);
+router.post  ('/projets/:id/justificatifs',                authGuard, tenantGuard, projCtrl.deposerJustificatif);
+router.delete('/projets/:id/justificatifs/:jid',           authGuard, tenantGuard, projCtrl.supprimerJustificatif);
+router.get   ('/projets/:id/justificatifs/:jid/fichier',   authGuard, tenantGuard, projCtrl.fichierJustificatif);
+router.post  ('/projets/:id/justificatifs/:jid/valider',   authGuard, tenantGuard, projCtrl.validerJustificatif);
+router.post  ('/projets/:id/justificatifs/:jid/rejeter',   authGuard, tenantGuard, projCtrl.rejeterJustificatif);
+router.post  ('/projets/:id/justificatifs/:jid/annuler',   authGuard, tenantGuard, projCtrl.annulerJustificatif);
 
 // ── Rapports (module de permission "rapport") ─────────────────────────────
 const rapportCtrl = require('../controllers/rapport.controller');

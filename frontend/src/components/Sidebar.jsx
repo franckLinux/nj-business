@@ -127,8 +127,10 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
           <NavLink to="/projets" className={navClass}>
             <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><line x1="8" y1="13" x2="16" y2="13" /></svg>
             <span style={{ flex: 1 }}>Projets</span>
-            {accesProjets.a_valider > 0 && (
-              <span className="j-badge" style={{ background: '#d97706', color: '#fff' }} title="Budgets à valider">{accesProjets.a_valider}</span>
+            {(accesProjets.a_valider || 0) + (accesProjets.justificatifs_a_controler || 0) > 0 && (
+              <span className="j-badge" style={{ background: '#d97706', color: '#fff' }} title="Budgets à valider et justificatifs à contrôler">
+                {(accesProjets.a_valider || 0) + (accesProjets.justificatifs_a_controler || 0)}
+              </span>
             )}
           </NavLink>
         )}

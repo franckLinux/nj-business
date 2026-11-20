@@ -5,6 +5,13 @@ import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import { STATUTS_BUDGET, libelleNature } from '@/lib/projets';
 import { Modale, ProjetModal, dateFr, fcfa, pct } from './ProjetsPage';
+import { OngletJustificatifs } from '@/components/projets/Justificatifs';
+
+const STATUT_ACT = {
+  non_financee: { lib: 'Non financée', cls: 'pj-b-gris' },
+  en_attente: { lib: 'En attente de justification', cls: 'pj-b-ambre' },
+  validee: { lib: 'Justifiée', cls: 'pj-b-vert' },
+};
 
 // Fiche d'un projet (069, lot P2) : chiffres en cascade, activités et
 // responsables, budget (préparation → soumission → validation / rejet),
@@ -390,6 +397,7 @@ export default function ProjetPage() {
     ['budget', 'Budget'],
     ...(acces.voir_tout ? [['financements', `Financements reçus (${financements.length})`]] : []),
     ['remises', `Fonds remis (${remises.length})`],
+    ['justificatifs', 'Justificatifs'],
   ];
   const base = Math.max(chiffres.budget_valide, chiffres.recu || 0, chiffres.alloue, 1);
 
@@ -418,7 +426,9 @@ export default function ProjetPage() {
           ['Budget validé', chiffres.budget_valide, 'var(--projet-budget)', budgetValide ? `version ${budgetValide.version}` : 'aucun'],
           ...(chiffres.recu !== null ? [['Financement reçu', chiffres.recu, 'var(--projet-recu)', `${pct(chiffres.recu, chiffres.budget_valide)} % du budget`]] : []),
           ['Alloué aux responsables', chiffres.alloue, 'var(--projet-alloue)', `${pct(chiffres.alloue, chiffres.budget_valide)} % du budget`],
-          ...(chiffres.disponible !== null ? [['Disponible (reçu − alloué)', chiffres.disponible, 'var(--projet-justifie)', 'solde comptable du projet']] : []),
+          ['Justifié', chiffres.justifie, 'var(--projet-justifie)', `${pct(chiffres.justifie, chiffres.alloue)} % du remis`],
+          ['En attente de justification', chiffres.en_attente, 'var(--projet-attente)', 'remis − justifié − remboursé'],
+          ...(chiffres.disponible !== null ? [['Disponible (reçu − alloué)', chiffres.disponible, '#0f766e', 'solde comptable du projet']] : []),
           ...(chiffres.reste_a_recevoir !== null ? [['Reste à recevoir', chiffres.reste_a_recevoir, '#64748b', 'budget non encore financé']] : []),
         ].map(([lib, val, coul, sous]) => (
           <div key={lib} className="pj-cascade-c">
@@ -453,7 +463,7 @@ export default function ProjetPage() {
           ) : (
             <div className="table-wrap">
               <table className="pj-table">
-                <thead><tr><th>Activité</th><th>Responsable</th><th className="n">Budget validé</th><th className="n">Alloué</th><th className="n">Reste</th><th style={{ width: 160 }}>Consommation</th>{acces.gerer && <th />}</tr></thead>
+                <thead><tr><th>Activité</th><th>Responsable</th><th className="n">Budget validé</th><th className="n">Alloué</th><th className="n">Reste</th><th style={{ width: 150 }}>Consommation</th><th className="n">Justifié</th><th>Justification</th>{acces.gerer && <th />}</tr></thead>
                 <tbody>
                   {activites.map((a) => {
                     const taux = a.budget ? pct(a.alloue, a.budget) : 0;
@@ -468,6 +478,14 @@ export default function ProjetPage() {
                           <div className="pj-jauge"><span className={taux >= 100 ? 'plein' : taux >= 80 ? 'haut' : ''} style={{ width: `${taux}%` }} /></div>
                           <div className="pj-muted pj-petit">{a.budget ? `${taux} %` : 'pas de budget validé'} · {a.nb_remises} remise(s)</div>
                         </td>
+                        <td className="n" style={{ color: 'var(--projet-justifie)' }}>{fcfa(a.justifie)}</td>
+                        <td>
+                          <button type="button" className={`pj-badge ${STATUT_ACT[a.statut_justification].cls} pj-badge-btn`} style={{ marginLeft: 0 }}
+                            onClick={() => setParams({ onglet: 'justificatifs', activite: String(a.id) })} title="Voir les justificatifs">
+                            {STATUT_ACT[a.statut_justification].lib}
+                          </button>
+                          {a.en_attente > 0 && <div className="pj-muted pj-petit">{fcfa(a.en_attente)} à justifier</div>}
+                        </td>
                         {acces.gerer && <td><button type="button" className="btn-icon" title="Modifier" onClick={() => setModale({ type: 'activite', activite: a })}>✏️</button></td>}
                       </tr>
                     );
@@ -480,6 +498,8 @@ export default function ProjetPage() {
       )}
 
       {onglet === 'budget' && <OngletBudget d={d} devise={devise} onChange={charger} />}
+
+      {onglet === 'justificatifs' && <OngletJustificatifs key={params.get('activite') || 'tout'} d={d} activiteFiltre={params.get('activite') || ''} onChange={charger} />}
 
       {onglet === 'financements' && acces.voir_tout && (
         <div className="pj-carte">

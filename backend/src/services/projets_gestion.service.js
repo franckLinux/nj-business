@@ -31,9 +31,10 @@ const FILTRE_REEL = 'NOT COALESCE(j.annule, false) AND j.annulation_de_id IS NUL
 // ── Droits et périmètre ─────────────────────────────────────────────────────
 const droits = async (req) => {
   const ctx = { tenantId: req.tenantId, userId: req.user.id, role: req.user.role };
-  const [voirTous, gerer, valider, valJustif] = await Promise.all([
+  const [voirTous, gerer, valider, valJustif, annJustif] = await Promise.all([
     userHasPermission(ctx, 'projets.voir'), userHasPermission(ctx, 'projets.gerer'),
     userHasPermission(ctx, 'budgets_projet.valider'), userHasPermission(ctx, 'justificatifs.valider'),
+    userHasPermission(ctx, 'justificatifs.annuler'),
   ]);
   const chef = (await q(
     `SELECT id FROM activites WHERE tenant_id = :t AND type = 'projet' AND chef_projet_id = :u`,
@@ -42,7 +43,7 @@ const droits = async (req) => {
     `SELECT id, projet_id FROM activites WHERE tenant_id = :t AND projet_id IS NOT NULL AND responsable_id = :u`,
     { t: req.tenantId, u: req.user.id });
   return {
-    voirTous: voirTous || gerer, gerer, valider, validerJustificatifs: valJustif,
+    voirTous: voirTous || gerer, gerer, valider, validerJustificatifs: valJustif, annulerJustificatifs: annJustif,
     chef, responsable: resp.map((r) => Number(r.id)),
     projetsResponsable: [...new Set(resp.map((r) => Number(r.projet_id)))],
   };
@@ -70,27 +71,64 @@ const exigerOng = async (tenantId) => {
 
 // ── Lecture ─────────────────────────────────────────────────────────────────
 // Chiffres par activité de projet (budget validé, alloué).
-const chiffresActivites = (tenantId, projetIds) => q(
-  `SELECT a.id, a.projet_id, a.code, a.nom, a.actif, a.responsable_id, u.username AS responsable_nom,
-          l.montant AS budget,
-          (SELECT COALESCE(SUM(j.sortie), 0) FROM journal j
-            WHERE j.tenant_id = a.tenant_id AND j.activite_id = a.id AND ${FILTRE_REEL}) AS alloue,
-          (SELECT COUNT(*)::int FROM journal j
-            WHERE j.tenant_id = a.tenant_id AND j.activite_id = a.id AND j.sortie > 0 AND ${FILTRE_REEL}) AS nb_remises
-     FROM activites a
-     LEFT JOIN users u ON u.id = a.responsable_id
-     LEFT JOIN projet_budgets b ON b.projet_id = a.projet_id AND b.statut = 'valide'
-     LEFT JOIN projet_budget_lignes l ON l.budget_id = b.id AND l.activite_id = a.id
-    WHERE a.tenant_id = :t AND a.projet_id IN (:ids)
-    ORDER BY a.actif DESC, lower(a.nom)`, { t: tenantId, ids: projetIds.length ? projetIds : [0] });
+// Justificatifs (070) : présents seulement une fois la migration jouée.
+let justifOk = false;
+const justifInstalle = async () => {
+  if (justifOk) return true;
+  const [r] = await q("SELECT to_regclass('public.projet_justificatifs') IS NOT NULL AS ok");
+  justifOk = Boolean(r?.ok);
+  return justifOk;
+};
+
+// Chiffres par activité de projet : budget validé, alloué (sorties), remboursé
+// (entrées sur l'activité), justifié (pièces validées), à contrôler (déposées).
+const chiffresActivites = async (tenantId, projetIds) => {
+  const avecJustif = await justifInstalle();
+  const sj = (statut) => (avecJustif
+    ? `(SELECT COALESCE(SUM(pj.montant), 0) FROM projet_justificatifs pj WHERE pj.activite_id = a.id AND pj.statut = '${statut}')`
+    : '0');
+  return q(
+    `SELECT a.id, a.projet_id, a.code, a.nom, a.actif, a.responsable_id, u.username AS responsable_nom,
+            l.montant AS budget,
+            (SELECT COALESCE(SUM(j.sortie), 0) FROM journal j
+              WHERE j.tenant_id = a.tenant_id AND j.activite_id = a.id AND ${FILTRE_REEL}) AS alloue,
+            (SELECT COUNT(*)::int FROM journal j
+              WHERE j.tenant_id = a.tenant_id AND j.activite_id = a.id AND j.sortie > 0 AND ${FILTRE_REEL}) AS nb_remises,
+            (SELECT MAX(j.date) FROM journal j
+              WHERE j.tenant_id = a.tenant_id AND j.activite_id = a.id AND j.sortie > 0 AND ${FILTRE_REEL}) AS derniere_remise,
+            (SELECT COALESCE(SUM(j.entree), 0) FROM journal j
+              WHERE j.tenant_id = a.tenant_id AND j.activite_id = a.id AND ${FILTRE_REEL}) AS rembourse,
+            ${sj('valide')} AS justifie,
+            ${sj('depose')} AS a_controler
+       FROM activites a
+       LEFT JOIN users u ON u.id = a.responsable_id
+       LEFT JOIN projet_budgets b ON b.projet_id = a.projet_id AND b.statut = 'valide'
+       LEFT JOIN projet_budget_lignes l ON l.budget_id = b.id AND l.activite_id = a.id
+      WHERE a.tenant_id = :t AND a.projet_id IN (:ids)
+      ORDER BY a.actif DESC, lower(a.nom)`, { t: tenantId, ids: projetIds.length ? projetIds : [0] });
+};
+
+// Statut de justification d'une activité (bilan) :
+//   non_financee : aucun fonds remis ;
+//   en_attente   : il reste des fonds remis à justifier ;
+//   validee      : tout ce qui a été remis est justifié (pièces validées) ou remboursé.
+const statutJustification = (alloue, enAttente) => {
+  if (alloue <= 0) return 'non_financee';
+  return enAttente > 0.004 ? 'en_attente' : 'validee';
+};
 
 const formerActivite = (a) => {
   const budget = a.budget === null ? null : n(a.budget);
   const alloue = n(a.alloue);
+  const justifie = n(a.justifie);
+  const rembourse = n(a.rembourse);
+  const enAttente = Math.max(alloue - justifie - rembourse, 0);
   return {
     id: Number(a.id), projet_id: Number(a.projet_id), code: a.code, nom: a.nom, actif: a.actif,
     responsable_id: a.responsable_id, responsable_nom: a.responsable_nom,
     budget, alloue, reste: budget === null ? null : budget - alloue, nb_remises: a.nb_remises,
+    justifie, rembourse, a_controler: n(a.a_controler), en_attente: enAttente,
+    derniere_remise: a.derniere_remise, statut_justification: statutJustification(alloue, enAttente),
   };
 };
 
@@ -123,12 +161,15 @@ const lister = async (req) => {
     const mesActs = acts.filter((a) => a.projet_id === Number(p.id) && (acc.voirTout || d.responsable.includes(a.id)));
     const budget = mesActs.reduce((s, a) => s + (a.budget || 0), 0);
     const alloue = mesActs.reduce((s, a) => s + a.alloue, 0);
+    const justifie = mesActs.reduce((s, a) => s + a.justifie, 0);
+    const enAttente = mesActs.reduce((s, a) => s + a.en_attente, 0);
     const recu = acc.voirTout ? n(p.recu) : null;
     return {
       id: Number(p.id), code: p.code, nom: p.nom, description: p.description, date_debut: p.date_debut, date_fin: p.date_fin,
       actif: p.actif, chef_projet_id: p.chef_projet_id, chef_nom: p.chef_nom,
       budget_valide: p.budget_valide, budget_ouvert: p.budget_ouvert, dernier_rejet: p.dernier_rejet,
-      montant_budget: p.budget_valide ? budget : 0, recu, alloue,
+      montant_budget: p.budget_valide ? budget : 0, recu, alloue, justifie, en_attente: enAttente,
+      nb_activites_en_attente: mesActs.filter((a) => a.statut_justification === 'en_attente').length,
       disponible: recu === null ? null : recu - alloue,
       reste_a_recevoir: recu === null || !p.budget_valide ? null : Math.max(budget - recu, 0),
       nb_activites: mesActs.length, nb_financements: acc.voirTout ? p.nb_financements : null,
@@ -216,14 +257,23 @@ const detail = async (req, projetId) => {
   const budgetValide = budgetsVus.find((b) => b.statut === 'valide');
   const montantBudget = budgetValide ? budgetValide.total : 0;
   const alloue = activites.reduce((s, a) => s + a.alloue, 0);
+  const justifie = activites.reduce((s, a) => s + a.justifie, 0);
+  const enAttente = activites.reduce((s, a) => s + a.en_attente, 0);
   return {
     projet: {
       id: Number(p.id), code: p.code, nom: p.nom, description: p.description, date_debut: p.date_debut, date_fin: p.date_fin,
       actif: p.actif, chef_projet_id: p.chef_projet_id, chef_nom: p.chef_nom,
     },
-    acces: { voir_tout: acc.voirTout, gerer: acc.gerer, valider: acc.valider, chef: acc.estChef, modifier_projet: d.gerer },
+    acces: {
+      voir_tout: acc.voirTout, gerer: acc.gerer, valider: acc.valider, chef: acc.estChef, modifier_projet: d.gerer,
+      // Justificatifs (070) : dépôt par le responsable de l'activité (ou la gestion du projet) ;
+      // validation par le chef de ce projet ou le comptable ; annulation par le directeur.
+      valider_justificatifs: acc.estChef || d.validerJustificatifs,
+      annuler_justificatifs: d.annulerJustificatifs,
+      mes_activites: d.responsable,
+    },
     chiffres: {
-      budget_valide: montantBudget, recu: acc.voirTout ? recu : null, alloue,
+      budget_valide: montantBudget, recu: acc.voirTout ? recu : null, alloue, justifie, en_attente: enAttente,
       disponible: acc.voirTout ? recu - alloue : null,
       reste_a_recevoir: acc.voirTout && budgetValide ? Math.max(montantBudget - recu, 0) : null,
     },
@@ -499,12 +549,15 @@ const acces = async (req) => {
     ong: true,
     visible: d.voirTous || d.chef.length > 0 || d.responsable.length > 0,
     a_valider: nb,
+    justificatifs_a_controler: await require('./projets_justificatifs.service').nbAControler(req, d),
+    controle_justificatifs: d.validerJustificatifs || d.chef.length > 0,
     voir_tous: d.voirTous, gerer: d.gerer, valider: d.valider,
     chef: d.chef.length, responsable: d.responsable.length,
   };
 };
 
 module.exports = {
+  chargerProjet, chiffresActivites, formerActivite, accesProjet, exigerOng, justifInstalle,
   droits, acces, lister, detail, utilisateurs,
   creerProjet, modifierProjet, creerActivite, modifierActivite,
   creerBudget, enregistrerBudget, soumettreBudget, retirerBudget, supprimerBudget, deciderBudget,

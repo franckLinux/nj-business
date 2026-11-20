@@ -22,6 +22,8 @@ const TITLES = {
   '/compte-emploi': "Compte d'emploi",
   '/activites': 'Suivi par activité',
   '/projets': 'Projets',
+  '/projets/a-controler': 'Justificatifs à contrôler',
+  '/projets/bilan': 'Bilan des activités',
   '/config': 'Configuration',
   '/tenants': 'Clients (Tenants)',
   '/permissions': 'Gestion des permissions',

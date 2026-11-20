@@ -4,6 +4,7 @@ import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import { statutProjet } from '@/lib/projets';
+import ProjetsNav from '@/components/projets/ProjetsNav';
 
 // Projets des ONG / associations (069, lot P2) — tableau de bord et liste.
 // Le serveur ne renvoie que les projets du périmètre de l'utilisateur
@@ -138,7 +139,8 @@ export default function ProjetsPage() {
     const actifs = projets.filter((p) => p.actif);
     const s = (k) => actifs.reduce((t, p) => t + (Number(p[k]) || 0), 0);
     return {
-      budget: s('montant_budget'), recu: s('recu'), alloue: s('alloue'),
+      budget: s('montant_budget'), recu: s('recu'), alloue: s('alloue'), enAttente: s('en_attente'), justifie: s('justifie'),
+      nbAttente: actifs.reduce((t, p) => t + (p.nb_activites_en_attente || 0), 0),
       disponible: s('recu') - s('alloue'), resteRecevoir: s('reste_a_recevoir'), nb: actifs.length,
     };
   }, [projets]);
@@ -176,14 +178,15 @@ export default function ProjetsPage() {
         </div>
       </div>
 
+      <ProjetsNav />
+
       <div className={`pj-kpis ${voitFinancements ? '' : 'pj-kpis-3'}`}>
         <Kpi titre="Budget validé" valeur={fcfa(totaux.budget)} devise={devise} couleur="var(--projet-budget)" sous={`${totaux.nb} projet(s) actif(s)`} />
         {voitFinancements && <Kpi titre="Financement reçu" valeur={fcfa(totaux.recu)} devise={devise} couleur="var(--projet-recu)" sous={`${pct(totaux.recu, totaux.budget)} % du budget validé`} />}
         <Kpi titre="Alloué aux responsables" valeur={fcfa(totaux.alloue)} devise={devise} couleur="var(--projet-alloue)" sous={`${pct(totaux.alloue, totaux.budget)} % du budget validé`} />
-        {voitFinancements && <Kpi titre="Disponible" valeur={fcfa(totaux.disponible)} devise={devise} couleur="var(--projet-justifie)" sous="Reçu − alloué (solde comptable des projets)" />}
-        {voitFinancements
-          ? <Kpi titre="Reste à recevoir" valeur={fcfa(totaux.resteRecevoir)} devise={devise} couleur="#64748b" sous="Budget validé non encore financé" />
-          : <Kpi titre="Reste sur budget" valeur={fcfa(totaux.budget - totaux.alloue)} devise={devise} couleur="#64748b" sous="Budget validé − déjà remis" />}
+        {voitFinancements && <Kpi titre="Disponible" valeur={fcfa(totaux.disponible)} devise={devise} couleur="#0f766e" sous="Reçu − alloué (solde comptable des projets)" />}
+        <Kpi titre="En attente de justification" valeur={fcfa(totaux.enAttente)} devise={devise} couleur="var(--projet-attente)"
+          sous={`${totaux.nbAttente} activité(s) · justifié ${fcfa(totaux.justifie)}`} />
       </div>
 
       {donnees.a_valider.length > 0 && (
