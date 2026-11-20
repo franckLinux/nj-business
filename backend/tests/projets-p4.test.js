@@ -265,3 +265,45 @@ test('Suppression : un projet sans mouvement part avec ses activités et ses bud
   const [bv] = await sql(`SELECT id FROM projet_budgets WHERE projet_id = $1 AND statut = 'valide'`, [S.projet]);
   await assert.rejects(sql('DELETE FROM projet_budgets WHERE id = $1', [bv.id]), /BUDGET_FIGE/);
 });
+
+// ── Suppression d'un budget validé (20/11/2026) ─────────────────────────────
+test('Budget validé : supprimé par le directeur seulement, motif obligatoire, refusé si des fonds ont été remis', async () => {
+  const [bv] = await sql(`SELECT id FROM projet_budgets WHERE projet_id = $1 AND statut = 'valide'`, [S.projet]);
+  const utilise = await appel('DELETE', `/projets/${S.projet}/budgets/${bv.id}`, 'dir', { motif: 'Erreur' });
+  assert.equal(utilise.status, 409);
+  assert.equal(utilise.code, 'BUDGET_UTILISE');
+
+  const p = await appel('POST', '/projets', 'dir', { nom: 'Projet budget à supprimer', chef_projet_id: C.u.chef.id });
+  const a = await appel('POST', `/projets/${p.data.id}/activites`, 'chef', { nom: 'Activité unique' });
+  const valider = async (montant) => {
+    const b = await appel('POST', `/projets/${p.data.id}/budgets`, 'chef');
+    await appel('PUT', `/projets/${p.data.id}/budgets/${b.data.id}`, 'chef', { lignes: [{ activite_id: a.data.id, montant }] });
+    assert.equal((await appel('POST', `/projets/${p.data.id}/budgets/${b.data.id}/soumettre`, 'chef')).status, 200);
+    assert.equal((await appel('POST', `/projets/${p.data.id}/budgets/${b.data.id}/valider`, 'dir')).status, 200);
+    return b.data.id;
+  };
+  const v1 = await valider(1000);
+  const v2 = await valider(5000);
+  // Un financement reçu ne bloque pas : il ne dépend pas du budget.
+  assert.equal((await saisie({ rubrique_code: 'SUB', entree: 3000, projet_id: p.data.id })).status, 201);
+  assert.equal((await appel('DELETE', `/projets/${p.data.id}/budgets/${v2}`, 'chef', { motif: 'x' })).status, 403);
+  assert.equal((await appel('DELETE', `/projets/${p.data.id}/budgets/${v2}`, 'dir')).code, 'MOTIF_REQUIS');
+  const ok = await appel('DELETE', `/projets/${p.data.id}/budgets/${v2}`, 'dir', { motif: 'Montant saisi par erreur' });
+  assert.equal(ok.status, 200, ok.message);
+  assert.equal(ok.data.version_retablie, 1);
+  let d = (await appel('GET', `/projets/${p.data.id}`, 'dir')).data;
+  assert.deepEqual(d.budgets.map((b) => [b.version, b.statut]), [[1, 'valide']]);
+  assert.equal(d.chiffres.budget_valide, 1000);
+  // Le chef de projet est prévenu ; la suppression est tracée.
+  const [{ nb }] = await sql(`SELECT COUNT(*)::int AS nb FROM notifications WHERE destinataire_id = $1 AND titre LIKE 'Budget supprimé%'`, [C.u.chef.id]);
+  assert.equal(nb, 1);
+  const [log] = await sql(`SELECT ancienne_valeur FROM audit_log WHERE tenant_id = $1 AND action = 'DELETE_BUDGET_VALIDE' ORDER BY id DESC LIMIT 1`, [C.tenant]);
+  assert.equal(log.ancienne_valeur.motif, 'Montant saisi par erreur');
+  // Dernière version : le projet revient à « sans budget validé ».
+  const fin = await appel('DELETE', `/projets/${p.data.id}/budgets/${v1}`, 'dir', { motif: 'Projet à rebudgéter' });
+  assert.equal(fin.data.version_retablie, null);
+  d = (await appel('GET', `/projets/${p.data.id}`, 'dir')).data;
+  assert.equal(d.budgets.length, 0);
+  // Une remise de fonds est alors refusée.
+  assert.equal((await saisie({ rubrique_code: 'D1', sortie: 100, activite_id: a.data.id })).code, 'BUDGET_PROJET_NON_VALIDE');
+});

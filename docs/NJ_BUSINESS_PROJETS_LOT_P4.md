@@ -73,3 +73,18 @@ Remarque de Franck : « on ne peut pas supprimer les projets créés ».
 Chaque suppression est tracée dans `audit_log` (`DELETE_PROJET`, `DELETE_ACTIVITE_PROJET`, avec le nom, les activités et les budgets supprimés). Les garde-fous en base des budgets restent actifs : seule la transaction de suppression d'un projet sans mouvement les lève.
 
 Tests : 2 scénarios ajoutés à `projets-p4` (11 au total) ; suite complète **274 / 274**. Service Worker v76. Pas de migration.
+
+## 9. Complément — suppression d'un budget validé par le directeur (20/11/2026)
+
+Remarque de Franck : « je n'arrive pas à supprimer le budget validé ».
+
+| Action | Qui | Possible si | Effet |
+|---|---|---|---|
+| **Supprimer le budget en vigueur** (onglet Budget → « 🗑 Supprimer ce budget ») | Directeur seulement (`budgets_projet.valider`) ; **motif obligatoire** | Aucune remise de fonds sur le projet ou ses activités (écriture de sortie, même annulée), aucune sortie en attente, aucun justificatif déposé ou validé. Un financement reçu ne bloque pas. | Le budget et ses lignes sont supprimés ; la version précédente (statut « remplacé »), s'il y en a une, redevient le budget en vigueur. Sinon le projet n'a plus de budget validé. |
+| Brouillon ou budget rejeté | Chef de projet ou direction | Toujours | Inchangé. |
+
+Si des fonds ont déjà été remis, la suppression est refusée (`BUDGET_UTILISE`) : il faut préparer une **révision** du budget.
+
+Traçabilité : `audit_log` `DELETE_BUDGET_VALIDE` (projet, version, total, motif, version rétablie) ; le chef de projet reçoit une notification.
+
+Tests : `projets-p4` (suppression v2 → v1 rétablie, puis v1 → plus de budget ; financement non bloquant ; chef refusé ; motif requis) et `projets-p2` test 9 adapté. Les 31 fichiers de tests passent. Vérifié dans le navigateur. Service Worker v77. Pas de migration.

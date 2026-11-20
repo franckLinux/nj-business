@@ -41,7 +41,14 @@ module.exports = {
   enregistrerBudget: traiter('budget', (req) => gestion.enregistrerBudget(req, req.params.id, req.params.bid, req.body || {})),
   soumettreBudget:  traiter('soumission', (req) => gestion.soumettreBudget(req, req.params.id, req.params.bid)),
   retirerBudget:    traiter('reprise', (req) => gestion.retirerBudget(req, req.params.id, req.params.bid)),
-  supprimerBudget:  traiter('suppression', (req) => gestion.supprimerBudget(req, req.params.id, req.params.bid)),
+  // Brouillon : chef de projet. Budget validé : directeur, motif obligatoire (corps { motif }).
+  supprimerBudget:  traiter('suppression', async (req) => {
+    const [b] = await require('../models').sequelize.query('SELECT statut FROM projet_budgets WHERE id = :b',
+      { replacements: { b: parseInt(req.params.bid, 10) || 0 }, type: require('../models').sequelize.QueryTypes.SELECT });
+    return b?.statut === 'valide'
+      ? gestion.supprimerBudgetValide(req, req.params.id, req.params.bid, req.body?.motif ?? req.query.motif)
+      : gestion.supprimerBudget(req, req.params.id, req.params.bid);
+  }),
   validerBudget:    traiter('validation', (req) => gestion.deciderBudget(req, req.params.id, req.params.bid, { valider: true })),
   rejeterBudget:    traiter('rejet', (req) => gestion.deciderBudget(req, req.params.id, req.params.bid, { valider: false, motif: req.body?.motif })),
   // P3 — justificatifs et bilan

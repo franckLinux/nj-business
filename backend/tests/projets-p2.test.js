@@ -252,10 +252,13 @@ test('ONG : budget révisé jamais sous les fonds remis ; l\'ancienne version es
   assert.equal((await saisie('chef', { rubrique_code: 'D1', sortie: 2000000, activite_id: S.act1 })).status, 201);
 });
 
-test('ONG : brouillon supprimable, budget validé jamais', async () => {
+test('ONG : brouillon supprimable ; budget validé seulement par le directeur, motivé, sans fonds remis', async () => {
   const b = await ong('POST', `/projets/${S.projet}/budgets`, 'chef');
   assert.equal((await ong('DELETE', `/projets/${S.projet}/budgets/${b.data.id}`, 'chef')).status, 200);
-  assert.equal((await ong('DELETE', `/projets/${S.projet}/budgets/${S.b2}`, 'dir')).code, 'BUDGET_FIGE');
+  assert.equal((await ong('DELETE', `/projets/${S.projet}/budgets/${S.b2}`, 'chef', { motif: 'x' })).status, 403);
+  assert.equal((await ong('DELETE', `/projets/${S.projet}/budgets/${S.b2}`, 'dir')).code, 'MOTIF_REQUIS');
+  // Des fonds ont été remis sur ce budget : suppression refusée (faire une révision).
+  assert.equal((await ong('DELETE', `/projets/${S.projet}/budgets/${S.b2}`, 'dir', { motif: 'Erreur' })).code, 'BUDGET_UTILISE');
 });
 
 test('ONG : désactivation d\'une activité et changement de chef par la direction', async () => {

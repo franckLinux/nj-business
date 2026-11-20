@@ -753,6 +753,70 @@ const supprimerActivite = async (req, projetId, activiteId) => {
   });
 };
 
+/**
+ * Suppression d'un budget VALIDÉ par le directeur (20/11/2026), motif obligatoire.
+ * Possible tant qu'aucune remise de fonds (même annulée) ni aucun justificatif
+ * (déposé ou validé) ne s'appuie sur le projet. La version précédente, si elle
+ * existe (« remplacée »), redevient le budget en vigueur ; sinon le projet
+ * revient à « sans budget validé ». Tracé dans audit_log.
+ */
+const supprimerBudgetValide = async (req, projetId, budgetId, motif) => {
+  const { projet: p, budget, droits: d } = await chargerBudget(req, projetId, budgetId);
+  if (!d.valider) throw err(403, 'Seul le directeur (validation des budgets) peut supprimer un budget validé.', 'PROJET_NON_AUTORISE');
+  if (budget.statut !== 'valide') throw err(409, 'Ce budget n\'est pas le budget validé en vigueur.', 'BUDGET_STATUT');
+  const m = lireTexte(motif, 2000);
+  if (!m) throw err(400, 'Le motif de la suppression est obligatoire.', 'MOTIF_REQUIS');
+  return sequelize.transaction(async (t) => {
+    await q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `projet_remise:${p.id}` }, t);
+    await q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `projet_budget:${p.id}` }, t);
+    const avecJustif = await justifInstalle();
+    const [r] = await q(
+      `SELECT (SELECT COUNT(*)::int FROM journal j JOIN activites x ON x.id = j.activite_id
+                WHERE (x.id = :p OR x.projet_id = :p) AND j.sortie <> 0) AS remises,
+              (SELECT COUNT(*)::int FROM mouvements_attente ma JOIN activites x ON x.id = ma.activite_id
+                WHERE (x.id = :p OR x.projet_id = :p)) AS attentes,
+              ${avecJustif ? `(SELECT COUNT(*)::int FROM projet_justificatifs WHERE projet_id = :p AND statut IN ('depose', 'valide'))` : '0'} AS justificatifs`,
+      { p: p.id }, t);
+    const motifs = [
+      r.remises && `${r.remises} remise(s) de fonds dans le journal`,
+      r.attentes && `${r.attentes} sortie(s) en attente`,
+      r.justificatifs && `${r.justificatifs} justificatif(s)`,
+    ].filter(Boolean);
+    if (motifs.length) {
+      throw err(409, `Le budget v${budget.version} ne peut pas être supprimé : ${motifs.join(', ')} s'appuient dessus. Faites plutôt une révision du budget.`, 'BUDGET_UTILISE');
+    }
+    const [{ total }] = await q('SELECT COALESCE(SUM(montant), 0) AS total FROM projet_budget_lignes WHERE budget_id = :b', { b: budget.id }, t);
+    // Budget figé en base : la suppression passe par le mode maintenance de la transaction.
+    await q("SELECT set_config('app.journal_maintenance', 'on', true)", {}, t);
+    if (await postesInstalles()) await q('DELETE FROM projet_budget_postes WHERE budget_id = :b RETURNING id', { b: budget.id }, t);
+    await q('DELETE FROM projet_budget_lignes WHERE budget_id = :b RETURNING id', { b: budget.id }, t);
+    await q('DELETE FROM projet_budgets WHERE id = :b RETURNING id', { b: budget.id }, t);
+    const [precedent] = await q(
+      `UPDATE projet_budgets SET statut = 'valide'
+        WHERE id = (SELECT id FROM projet_budgets WHERE projet_id = :p AND statut = 'remplace' ORDER BY version DESC LIMIT 1)
+       RETURNING id, version`, { p: p.id }, t);
+    await q("SELECT set_config('app.journal_maintenance', 'off', true)", {}, t);
+    await journaliser(req, 'DELETE_BUDGET_VALIDE', 'projets', p.id,
+      { projet: p.nom, version: budget.version, total: n(total), motif: m, version_retablie: precedent ? precedent.version : null }, t);
+    if (p.chef_projet_id && p.chef_projet_id !== req.user.id) {
+      await notif.creerNotification({
+        tenantId: req.tenantId, destinataireId: p.chef_projet_id, type: 'projet_budget',
+        titre: `Budget supprimé : ${p.nom}`,
+        message: `Le budget v${budget.version} a été supprimé par le directeur. Motif : ${m}`
+          + (precedent ? ` La version ${precedent.version} redevient le budget en vigueur.` : ' Préparez un nouveau budget.'),
+        refType: 'projet', refId: p.id,
+      });
+    }
+    return {
+      supprime: true,
+      version_retablie: precedent ? precedent.version : null,
+      message: precedent
+        ? `Budget v${budget.version} supprimé : la version ${precedent.version} redevient le budget en vigueur.`
+        : `Budget v${budget.version} supprimé : le projet n'a plus de budget validé.`,
+    };
+  });
+};
+
 /** Utilisateurs actifs de l'entreprise, pour les désignations. */
 const utilisateurs = async (req) => {
   await exigerOng(req.tenantId);
@@ -784,5 +848,5 @@ module.exports = {
   situationProjets, totaliser, postesInstalles,
   droits, acces, lister, detail, utilisateurs,
   creerProjet, modifierProjet, creerActivite, modifierActivite, supprimerProjet, supprimerActivite,
-  creerBudget, enregistrerBudget, soumettreBudget, retirerBudget, supprimerBudget, deciderBudget,
+  creerBudget, enregistrerBudget, soumettreBudget, retirerBudget, supprimerBudget, deciderBudget, supprimerBudgetValide,
 };

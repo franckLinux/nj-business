@@ -368,9 +368,40 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
   );
 }
 
+function SuppressionBudgetModal({ budget, devise, onFermer, onConfirmer }) {
+  const [motif, setMotif] = useState('');
+  const [enCours, setEnCours] = useState(false);
+  return (
+    <Modale titre={`Supprimer le budget validé v${budget.version}`} onFermer={onFermer} enCours={enCours} largeur={500}
+      pied={<>
+        <button type="button" className="btn-ghost" onClick={onFermer} disabled={enCours}>Annuler</button>
+        <button type="button" className="btn-primary btn-auto pj-btn-rouge" disabled={enCours || !motif.trim()}
+          onClick={async () => { setEnCours(true); await onConfirmer(motif.trim()); setEnCours(false); }}>Supprimer le budget</button>
+      </>}
+    >
+      <div className="pj-alerte rouge" style={{ margin: 0 }}>
+        Budget de <b>{fcfa(budget.total)} {devise}</b>, validé par {budget.decide_par_nom || '—'} le {dateFr(budget.decide_le)}.
+        Possible seulement si aucune remise de fonds ni aucun justificatif ne s'appuie sur le projet ; sinon, faites une révision.
+        La version précédente, s'il y en a une, redevient le budget en vigueur.
+      </div>
+      <label>Motif de la suppression <span className="req">*</span></label>
+      <textarea rows={3} maxLength={2000} value={motif} autoFocus onChange={(e) => setMotif(e.target.value)} placeholder="Ex. : montants saisis par erreur" />
+      <div className="field-hint">Le chef de projet est prévenu ; la suppression est tracée dans le journal d'audit.</div>
+    </Modale>
+  );
+}
+
 function OngletBudget({ d, devise, onChange }) {
   const toast = useToast();
   const [ouvert, setOuvert] = useState(null);
+  const [suppression, setSuppression] = useState(null);
+  const supprimerValide = async (motif) => {
+    const r = await api.delete(`/projets/${d.projet.id}/budgets/${suppression.id}`, { motif });
+    if (r.error) { toast(r.error, 'error', 12000); return; }
+    toast(r.message || 'Budget supprimé.', 'success');
+    setSuppression(null);
+    onChange();
+  };
   const { projet, acces, activites, budgets } = d;
   const budgetValide = budgets.find((b) => b.statut === 'valide');
   const enCours = budgets.find((b) => ['brouillon', 'soumis'].includes(b.statut))
@@ -397,13 +428,22 @@ function OngletBudget({ d, devise, onChange }) {
                 : 'Tant que le directeur n\'a pas validé un budget, aucune remise de fonds aux activités n\'est possible.'}
             </div>
           </div>
+          <div className="pj-actions">
+          {acces.valider && budgetValide && (
+            <button type="button" className="btn-ghost pj-btn-rouge-c" onClick={() => setSuppression(budgetValide)}>🗑 Supprimer ce budget</button>
+          )}
           {acces.gerer && (
             <button type="button" className="btn-primary btn-auto" onClick={preparer} disabled={activites.length === 0}
               title={activites.length === 0 ? 'Ajoutez d\'abord les activités' : undefined}>
               {budgetValide ? '✎ Préparer une révision' : '＋ Préparer le budget'}
             </button>
           )}
+          </div>
         </div>
+      )}
+
+      {suppression && (
+        <SuppressionBudgetModal budget={suppression} devise={devise} onFermer={() => setSuppression(null)} onConfirmer={supprimerValide} />
       )}
 
       <div className="pj-carte">
