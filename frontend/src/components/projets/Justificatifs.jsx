@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import { Modale, dateFr, fcfa } from '@/pages/ProjetsPage';
+import { formuleUnite, quantiteUnites } from '@/lib/projets';
 
 // Justificatifs des projets (070, lot P3) : dépôt avec pièce scannée,
 // contrôle (chef de projet ou comptable, jamais ses propres pièces), rejet
@@ -39,6 +40,7 @@ export function DepotModal({ projetId, activites, remises, activiteInitiale, onF
   const [f, setF] = useState({
     activite_id: activiteInitiale || (activites.length === 1 ? String(activites[0].id) : ''),
     remise_id: '', poste_cle: '', date_piece: auj, montant: '', fournisseur: '', numero_piece: '', libelle: '',
+    quantite_realisee: '', jours_realises: '1',
   });
   const [fichier, setFichier] = useState(null);
   const [erreur, setErreur] = useState('');
@@ -63,6 +65,12 @@ export function DepotModal({ projetId, activites, remises, activiteInitiale, onF
     const montant = Number(String(f.montant).replace(/[\s  ]/g, '').replace(',', '.'));
     if (!f.activite_id) return setErreur('Choisissez l\'activité justifiée.');
     if (postes.length && !f.poste_cle) return setErreur('Choisissez la ligne budgétaire justifiée.');
+    const parUnite = poste?.mode === 'unite';
+    const nombre = (v) => Number(String(v ?? '').replace(/[\s  ]/g, '').replace(',', '.'));
+    if (parUnite && (String(f.quantite_realisee).trim() === '' || !(nombre(f.quantite_realisee) >= 0))) {
+      return setErreur(`Indiquez la quantité réalisée${poste.unite ? ` (${poste.unite})` : ''}.`);
+    }
+    if (parUnite && !(nombre(f.jours_realises || 1) > 0)) return setErreur('Le nombre de jours réalisés doit être positif.');
     if (!f.libelle.trim()) return setErreur('Indiquez l\'objet de la dépense.');
     if (!Number.isFinite(montant) || montant <= 0) return setErreur('Le montant doit être positif.');
     if (plafond !== null && montant > plafond) {
@@ -74,7 +82,8 @@ export function DepotModal({ projetId, activites, remises, activiteInitiale, onF
     try {
       const data = await lireFichier(fichier);
       const r = await api.post(`/projets/${projetId}/justificatifs`, {
-        ...f, montant, remise_id: f.remise_id || null, poste_cle: f.poste_cle || null, fichier: { nom_fichier: fichier.name, data_base64: data },
+        ...f, montant, remise_id: f.remise_id || null, poste_cle: f.poste_cle || null,
+        ...(poste?.mode === 'unite' ? {} : { quantite_realisee: null, jours_realises: null }), fichier: { nom_fichier: fichier.name, data_base64: data },
       });
       if (r.error) { setErreur(r.error); return; }
       toast('Justificatif déposé : il attend le contrôle.', 'success');
@@ -122,6 +131,21 @@ export function DepotModal({ projetId, activites, remises, activiteInitiale, onF
               ))}
             </select>
           </div>
+        )}
+        {poste?.mode === 'unite' && (
+          <>
+            <div>
+              <label>Quantité réalisée{poste.unite ? ` (${poste.unite})` : ''} <span className="req">*</span></label>
+              <input inputMode="decimal" value={f.quantite_realisee} onChange={maj('quantite_realisee')} placeholder={String(poste.quantite)} />
+            </div>
+            <div>
+              <label>Nombre de jours <span className="req">*</span></label>
+              <input inputMode="decimal" value={f.jours_realises} onChange={maj('jours_realises')} placeholder="1" />
+            </div>
+            <div className="pj-col-2 pj-muted pj-petit">
+              Prévu : {formuleUnite(poste)} · déjà réalisé {quantiteUnites(poste.realise_unites, poste)} / {quantiteUnites(poste.prevu_unites, poste)}
+            </div>
+          </>
         )}
         {plafond !== null && (
           <div className="pj-col-2 pj-plafond">
@@ -219,7 +243,10 @@ export function TablePieces({ pieces, projetId, avecProjet = false, onChange, vi
                   </td>
                   {avecProjet && <td>{j.projet_nom}</td>}
                   <td>{j.activite_nom}
-                    {j.poste_libelle && <div className="pj-petit" style={{ color: 'var(--projet-budget)' }}>└ {j.poste_libelle}</div>}
+                    {j.poste_libelle && <div className="pj-petit" style={{ color: 'var(--projet-budget)' }}>└ {j.poste_libelle}
+                      {j.quantite_realisee !== null && j.quantite_realisee !== undefined && (
+                        <span className="pj-muted"> · réalisé {Number(j.quantite_realisee).toLocaleString('fr-FR')} × {Number(j.jours_realises).toLocaleString('fr-FR')} j</span>
+                      )}</div>}
                     {j.remise_numero && <div className="pj-muted pj-petit">remise {j.remise_journal} n° {j.remise_numero}</div>}</td>
                   <td>{j.libelle}{j.fournisseur && <div className="pj-muted pj-petit">{j.fournisseur}</div>}</td>
                   <td className="n"><b>{fcfa(j.montant)}</b></td>

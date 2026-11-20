@@ -117,6 +117,11 @@ const postesInstalles = async () => {
   return postesOk;
 };
 
+// Détail d'une ligne budgétaire par unité (072) : quantité × jours × prix unitaire.
+const detailUnite = (po) => (po.mode === 'unite'
+  ? { mode: 'unite', unite: po.unite || '', quantite: n(po.quantite), jours: n(po.jours), prix_unitaire: n(po.prix_unitaire) }
+  : { mode: 'forfait' });
+
 const formerActivite = (a) => {
   const budget = a.budget === null ? null : n(a.budget);
   const alloue = n(a.alloue);
@@ -155,7 +160,9 @@ const situationProjets = async (tenantId, projetIds) => {
   let postes = [];
   if (await postesInstalles()) {
     postes = await q(
-      `SELECT po.activite_id, po.cle, po.libelle, po.montant, po.ordre,
+      `SELECT po.activite_id, po.cle, po.libelle, po.montant, po.ordre, po.mode, po.unite, po.quantite, po.jours, po.prix_unitaire,
+              (SELECT COALESCE(SUM(pj.quantite_realisee * pj.jours_realises), 0) FROM projet_justificatifs pj
+                WHERE pj.poste_cle = po.cle AND pj.statut = 'valide') AS realise,
               (SELECT COALESCE(SUM(pj.montant), 0) FROM projet_justificatifs pj WHERE pj.poste_cle = po.cle AND pj.statut = 'valide') AS justifie,
               (SELECT COALESCE(SUM(pj.montant), 0) FROM projet_justificatifs pj WHERE pj.poste_cle = po.cle AND pj.statut = 'depose') AS a_controler
          FROM projet_budget_postes po JOIN projet_budgets b ON b.id = po.budget_id AND b.statut = 'valide'
@@ -174,6 +181,10 @@ const situationProjets = async (tenantId, projetIds) => {
       else if (a.justifie > 0) statut = 'sur_global';
       const mesPostes = postes.filter((po) => Number(po.activite_id) === a.id).map((po) => ({
         cle: po.cle, libelle: po.libelle, budget: n(po.montant), justifie: n(po.justifie), a_controler: n(po.a_controler),
+        ...detailUnite(po),
+        // Par unité : quantité × jours prévus et réalisés (justificatifs validés).
+        prevu_unites: po.mode === 'unite' ? n(po.quantite) * n(po.jours) : null,
+        realise_unites: po.mode === 'unite' ? n(po.realise) : null,
         reste: n(po.montant) - n(po.justifie) - n(po.a_controler),
       }));
       return {
@@ -292,14 +303,15 @@ const detail = async (req, projetId) => {
             uc.username AS cree_par_nom, us.username AS soumis_par_nom, ud.username AS decide_par_nom,
             COALESCE((SELECT jsonb_agg(jsonb_build_object('activite_id', l.activite_id, 'montant', l.montant) ORDER BY l.id)
                         FROM projet_budget_lignes l WHERE l.budget_id = b.id), '[]'::jsonb) AS lignes,
-            ${postesOn ? `COALESCE((SELECT jsonb_agg(jsonb_build_object('activite_id', po.activite_id, 'cle', po.cle, 'libelle', po.libelle, 'montant', po.montant)
+            ${postesOn ? `COALESCE((SELECT jsonb_agg(jsonb_build_object('activite_id', po.activite_id, 'cle', po.cle, 'libelle', po.libelle, 'montant', po.montant,
+                        'mode', po.mode, 'unite', po.unite, 'quantite', po.quantite, 'jours', po.jours, 'prix_unitaire', po.prix_unitaire)
                         ORDER BY po.ordre, po.id) FROM projet_budget_postes po WHERE po.budget_id = b.id), '[]'::jsonb)` : `'[]'::jsonb`} AS postes
        FROM projet_budgets b
        LEFT JOIN users uc ON uc.id = b.cree_par LEFT JOIN users us ON us.id = b.soumis_par LEFT JOIN users ud ON ud.id = b.decide_par
       WHERE b.projet_id = :p ORDER BY b.version DESC`, { p: p.id });
   const idsVisibles = new Set(activites.map((a) => a.id));
   const budgetsVus = budgets.map((b) => {
-    const postesB = (b.postes || []).map((po) => ({ activite_id: Number(po.activite_id), cle: po.cle, libelle: po.libelle, montant: n(po.montant) }));
+    const postesB = (b.postes || []).map((po) => ({ activite_id: Number(po.activite_id), cle: po.cle, libelle: po.libelle, montant: n(po.montant), ...detailUnite(po) }));
     const lignes = b.lignes.map((l) => ({
       activite_id: Number(l.activite_id), montant: n(l.montant),
       postes: postesB.filter((po) => po.activite_id === Number(l.activite_id)),
@@ -498,8 +510,8 @@ const creerBudget = async (req, projetId) => {
     // justificatifs déjà rattachés restent sur leur ligne.
     if (await postesInstalles()) {
       await q(
-        `INSERT INTO projet_budget_postes (tenant_id, budget_id, activite_id, cle, libelle, montant, ordre)
-         SELECT :t, :b, po.activite_id, po.cle, po.libelle, po.montant, po.ordre
+        `INSERT INTO projet_budget_postes (tenant_id, budget_id, activite_id, cle, libelle, montant, ordre, mode, unite, quantite, jours, prix_unitaire)
+         SELECT :t, :b, po.activite_id, po.cle, po.libelle, po.montant, po.ordre, po.mode, po.unite, po.quantite, po.jours, po.prix_unitaire
            FROM projet_budget_postes po JOIN projet_budgets bv ON bv.id = po.budget_id AND bv.statut = 'valide'
           WHERE bv.projet_id = :p
          RETURNING id`, { t: req.tenantId, b: b.id, p: p.id }, t);
@@ -510,6 +522,30 @@ const creerBudget = async (req, projetId) => {
 
 const lireMontant = (v) => Number(String(v ?? '').replace(/[\s  ]/g, '').replace(',', '.') || 0);
 const CLE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const produitArrondi = (quantite, jours, prix) => {
+  const x = BigInt(Math.round(quantite * 1000)) * BigInt(Math.round(jours * 100)) * BigInt(Math.round(prix * 100)); // ×10^7
+  const centimes = (x + 50000n) / 100000n;
+  return Number(centimes) / 100;
+};
+const lireUnite = (po, libelle) => {
+  const quantite = Math.round(lireMontant(po.quantite) * 1000) / 1000;
+  const jours = po.jours === undefined || po.jours === null || po.jours === '' ? 1 : Math.round(lireMontant(po.jours) * 100) / 100;
+  const prix = lireMontant(po.prix_unitaire);
+  if (!Number.isFinite(quantite) || quantite <= 0) {
+    throw err(400, `Ligne « ${libelle} » : la quantité doit être positive.`, 'LIGNES_INVALIDES');
+  }
+  if (!Number.isFinite(jours) || jours <= 0) {
+    throw err(400, `Ligne « ${libelle} » : le nombre de jours doit être positif.`, 'LIGNES_INVALIDES');
+  }
+  if (!Number.isFinite(prix) || prix < 0) throw err(400, `Ligne « ${libelle} » : le prix unitaire doit être positif ou nul.`, 'LIGNES_INVALIDES');
+  const p = Math.round(prix * 100) / 100;
+  return {
+    unite: lireTexte(po.unite, 40), quantite, jours, prix_unitaire: p,
+    // Calcul exact en entiers, même arrondi que la base (round(quantite * jours * prix, 2)).
+    montant: produitArrondi(quantite, jours, p),
+  };
+};
 
 // Lignes d'activité, avec leurs lignes budgétaires facultatives (071) : quand
 // une activité en a, son montant est la SOMME de ses lignes.
@@ -524,13 +560,15 @@ const lireLignes = (lignes) => {
     vues.add(activiteId);
     const postes = (Array.isArray(l.postes) ? l.postes : []).map((po, i) => {
       const libelle = lireTexte(po.libelle, 150);
-      const m = lireMontant(po.montant);
       if (!libelle) throw err(400, 'Chaque ligne budgétaire doit avoir un libellé.', 'LIGNES_INVALIDES');
+      // Par unité (072) : montant = quantité × jours × prix unitaire, recalculé ici.
+      const unite = po.mode === 'unite' ? lireUnite(po, libelle) : null;
+      const m = unite ? unite.montant : lireMontant(po.montant);
       if (!Number.isFinite(m) || m < 0) throw err(400, 'Les montants du budget doivent être positifs ou nuls.', 'LIGNES_INVALIDES');
       const cle = po.cle && CLE_RE.test(String(po.cle)) ? String(po.cle).toLowerCase() : null;
       if (cle && cles.has(cle)) throw err(400, 'Une ligne budgétaire figure deux fois.', 'LIGNES_INVALIDES');
       if (cle) cles.add(cle);
-      return { cle, libelle, montant: Math.round(m * 100) / 100, ordre: i };
+      return { cle, libelle, montant: Math.round(m * 100) / 100, ordre: i, unite };
     });
     const montant = postes.length ? postes.reduce((t, po) => t + po.montant, 0) : lireMontant(l.montant);
     if (!Number.isFinite(montant) || montant < 0) throw err(400, 'Les montants du budget doivent être positifs ou nuls.', 'LIGNES_INVALIDES');
@@ -566,9 +604,11 @@ const enregistrerBudget = async (req, projetId, budgetId, b) => {
         { t: req.tenantId, b: budget.id, a: l.activiteId, m: l.montant }, t);
       for (const po of l.postes) {
         await q(
-          `INSERT INTO projet_budget_postes (tenant_id, budget_id, activite_id, cle, libelle, montant, ordre)
-           VALUES (:t, :b, :a, COALESCE(CAST(:cle AS uuid), gen_random_uuid()), :lib, :m, :o) RETURNING id`,
-          { t: req.tenantId, b: budget.id, a: l.activiteId, cle: po.cle, lib: po.libelle, m: po.montant, o: po.ordre }, t);
+          `INSERT INTO projet_budget_postes (tenant_id, budget_id, activite_id, cle, libelle, montant, ordre, mode, unite, quantite, jours, prix_unitaire)
+           VALUES (:t, :b, :a, COALESCE(CAST(:cle AS uuid), gen_random_uuid()), :lib, :m, :o, :mode, :u, :qte, :j, :pu) RETURNING id`,
+          { t: req.tenantId, b: budget.id, a: l.activiteId, cle: po.cle, lib: po.libelle, m: po.montant, o: po.ordre,
+            mode: po.unite ? 'unite' : 'forfait', u: po.unite?.unite || '', qte: po.unite?.quantite ?? null,
+            j: po.unite?.jours ?? null, pu: po.unite?.prix_unitaire ?? null }, t);
       }
     }
     await q('UPDATE projet_budgets SET commentaire = :c WHERE id = :b RETURNING id',

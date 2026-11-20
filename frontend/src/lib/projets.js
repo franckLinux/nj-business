@@ -66,3 +66,12 @@ export const statutProjet = (p) => {
   if (p.dernier_rejet && !p.budget_ouvert) return { lib: 'Budget rejeté', cls: 'pj-b-rouge', cle: 'sans_budget' };
   return { lib: 'Sans budget validé', cls: 'pj-b-gris', cle: 'sans_budget' };
 };
+
+// Ligne budgétaire par unité (072) : quantité × jours × prix unitaire.
+const nb = (v) => Number(v || 0).toLocaleString('fr-FR', { maximumFractionDigits: 3 });
+/** « 25 participant × 3 j × 2 500 » (vide pour un forfait). */
+export const formuleUnite = (po) => (po?.mode === 'unite'
+  ? `${nb(po.quantite)}${po.unite ? ` ${po.unite}` : ''} × ${nb(po.jours)} j × ${nb(po.prix_unitaire)}`
+  : '');
+/** Quantité en « unités × jours » (ex. 75 participant·jours ; « 75 » si un seul jour prévu). */
+export const quantiteUnites = (v, po) => `${nb(v)}${po?.unite ? ` ${po.unite}${Number(po.jours) !== 1 ? '·jours' : ''}` : (Number(po?.jours) !== 1 ? ' unités·jours' : '')}`;

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
-import { STATUTS_BUDGET, libelleNature } from '@/lib/projets';
+import { STATUTS_BUDGET, formuleUnite, libelleNature, quantiteUnites } from '@/lib/projets';
 import { Modale, ProjetModal, dateFr, fcfa, pct } from './ProjetsPage';
 import { OngletJustificatifs } from '@/components/projets/Justificatifs';
 
@@ -25,6 +25,21 @@ const lireMontant = (v) => {
   const n = Number(t);
   return Number.isFinite(n) ? n : NaN;
 };
+
+// Montant d'une ligne en cours de saisie : forfait saisi, ou quantité × jours ×
+// prix unitaire (jours vide = 1), arrondi au centime comme le serveur. NaN si invalide.
+const montantPoste = (po) => {
+  if (po.mode !== 'unite') return lireMontant(po.montant);
+  const q = lireMontant(po.quantite); const j = String(po.jours ?? '').trim() === '' ? 1 : lireMontant(po.jours);
+  const p = lireMontant(po.prix_unitaire);
+  if ([q, j, p].some(Number.isNaN) || q <= 0 || j <= 0 || p < 0) return NaN;
+  return Math.round(q * j * p * 100) / 100;
+};
+const posteSaisi = (po) => ({
+  cle: po.cle, libelle: po.libelle, montant: String(po.montant), mode: po.mode || 'forfait',
+  unite: po.unite || '', quantite: po.mode === 'unite' ? String(po.quantite) : '',
+  jours: po.mode === 'unite' ? String(po.jours) : '1', prix_unitaire: po.mode === 'unite' ? String(po.prix_unitaire) : '',
+});
 
 function ActiviteModal({ projetId, activite, onFermer, onEnregistre }) {
   const toast = useToast();
@@ -155,7 +170,7 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
   const editable = acces.gerer && ['brouillon', 'rejete'].includes(budget.statut);
   const initiales = useMemo(() => Object.fromEntries(budget.lignes.map((l) => [l.activite_id, {
     montant: String(l.montant),
-    postes: (l.postes || []).map((po) => ({ cle: po.cle, libelle: po.libelle, montant: String(po.montant) })),
+    postes: (l.postes || []).map(posteSaisi),
   }])), [budget]);
   const [lignes, setLignes] = useState(initiales);
   const [commentaire, setCommentaire] = useState(budget.commentaire || '');
@@ -168,13 +183,13 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
   const ligneDe = (id) => lignes[id] || { montant: '', postes: [] };
   const montantDe = (id) => {
     const l = ligneDe(id);
-    return l.postes.length ? l.postes.reduce((t, po) => t + (lireMontant(po.montant) || 0), 0) : lireMontant(l.montant);
+    return l.postes.length ? l.postes.reduce((t, po) => t + (montantPoste(po) || 0), 0) : lireMontant(l.montant);
   };
   const majLigne = (id, f) => setLignes((x) => ({ ...x, [id]: f(ligneDe(id)) }));
   const total = affichees.reduce((t, a) => t + (montantDe(a.id) || 0), 0);
   const totalVigueur = budgetValide?.total || 0;
   const invalides = affichees.filter((a) => Number.isNaN(montantDe(a.id)) || montantDe(a.id) < 0
-    || ligneDe(a.id).postes.some((po) => !po.libelle.trim() || Number.isNaN(lireMontant(po.montant))));
+    || ligneDe(a.id).postes.some((po) => !po.libelle.trim() || Number.isNaN(montantPoste(po))));
   const sousAlloue = affichees.filter((a) => (montantDe(a.id) || 0) < a.alloue);
   const modifie = JSON.stringify(lignes) !== JSON.stringify(initiales) || commentaire !== (budget.commentaire || '');
   // Justifié par ligne (budget en vigueur) : une ligne ne descend pas en dessous.
@@ -195,7 +210,9 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
       const l = ligneDe(a.id);
       return {
         activite_id: a.id, montant: montantDe(a.id) || 0,
-        postes: l.postes.map((po) => ({ cle: po.cle || null, libelle: po.libelle.trim(), montant: lireMontant(po.montant) || 0 })),
+        postes: l.postes.map((po) => (po.mode === 'unite'
+          ? { cle: po.cle || null, libelle: po.libelle.trim(), mode: 'unite', unite: po.unite.trim(), quantite: po.quantite, jours: po.jours, prix_unitaire: po.prix_unitaire }
+          : { cle: po.cle || null, libelle: po.libelle.trim(), mode: 'forfait', montant: lireMontant(po.montant) || 0 })),
       };
     }),
   }), silencieux ? null : 'Budget enregistré.');
@@ -256,7 +273,7 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
                     <td>
                       <strong>{a.nom}</strong>{!a.actif && <span className="pj-badge pj-b-ardoise">désactivée</span>}
                       {editable && (
-                        <button type="button" className="pj-ajout-ligne" onClick={() => majLigne(a.id, (x) => ({ ...x, postes: [...x.postes, { cle: null, libelle: '', montant: '' }] }))}>
+                        <button type="button" className="pj-ajout-ligne" onClick={() => majLigne(a.id, (x) => ({ ...x, postes: [...x.postes, { cle: null, libelle: '', montant: '', mode: 'forfait', unite: '', quantite: '', jours: '1', prix_unitaire: '' }] }))}>
                           ＋ ligne
                         </button>
                       )}
@@ -275,7 +292,8 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
                     <td className={`n ${ecart > 0 ? 'pj-hausse' : ecart < 0 ? 'pj-baisse' : 'pj-muted'}`}>{ecart === 0 ? '—' : `${ecart > 0 ? '+' : ''}${fcfa(ecart)}`}</td>
                   </tr>
                   {l.postes.map((po, i) => {
-                    const pm = lireMontant(po.montant);
+                    const pm = montantPoste(po);
+                    const parUnite = po.mode === 'unite';
                     const pris = po.cle ? (justifieLigne[po.cle] || 0) : 0;
                     const sousJ = !Number.isNaN(pm) && pm < pris;
                     const majPoste = (k, v) => majLigne(a.id, (x) => ({ ...x, postes: x.postes.map((y, j) => (j === i ? { ...y, [k]: v } : y)) }));
@@ -284,18 +302,40 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
                         <td colSpan={2}>
                           <span className="pj-poste-trait">└</span>
                           {editable ? (
-                            <input className="pj-in-libelle" value={po.libelle} maxLength={150} placeholder="Ligne budgétaire (ex. pause café)"
-                              onChange={(e) => majPoste('libelle', e.target.value)} aria-label="Libellé de la ligne" />
-                          ) : po.libelle}
+                            <>
+                              <input className="pj-in-libelle" value={po.libelle} maxLength={150} placeholder="Ligne budgétaire (ex. pause café)"
+                                onChange={(e) => majPoste('libelle', e.target.value)} aria-label="Libellé de la ligne" />
+                              <div className="pj-mode" role="group" aria-label="Mode de calcul">
+                                <button type="button" className={parUnite ? '' : 'actif'} onClick={() => majPoste('mode', 'forfait')}>Forfait</button>
+                                <button type="button" className={parUnite ? 'actif' : ''} onClick={() => majPoste('mode', 'unite')}>Par unité</button>
+                              </div>
+                              {parUnite && (
+                                <div className="pj-unite">
+                                  <label>Qté<input inputMode="decimal" value={po.quantite} placeholder="25" onChange={(e) => majPoste('quantite', e.target.value)} /></label>
+                                  <label>Unité<input className="pj-unite-lib" value={po.unite} maxLength={40} placeholder="participant" onChange={(e) => majPoste('unite', e.target.value)} /></label>
+                                  <span className="pj-fois">×</span>
+                                  <label>Jours<input inputMode="decimal" value={po.jours} placeholder="1" onChange={(e) => majPoste('jours', e.target.value)} /></label>
+                                  <span className="pj-fois">×</span>
+                                  <label>Prix unitaire<input className="pj-unite-pu" inputMode="decimal" value={po.prix_unitaire} placeholder="2 500" onChange={(e) => majPoste('prix_unitaire', e.target.value)} /></label>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {po.libelle}
+                              {parUnite && <div className="pj-muted pj-petit pj-formule">{formuleUnite(po)}</div>}
+                            </>
+                          )}
                           {pris > 0 && <span className="pj-muted pj-petit"> · justifié ou déposé {fcfa(pris)}</span>}
                         </td>
                         <td className="n pj-muted">{po.cle && vigPoste[po.cle] !== undefined ? fcfa(vigPoste[po.cle]) : '—'}</td>
                         <td />
                         <td className="n">
-                          {editable ? (
+                          {editable && !parUnite ? (
                             <input className={`pj-in-montant pj-in-poste${sousJ || Number.isNaN(pm) ? ' erreur' : ''}`} inputMode="decimal" value={po.montant}
                               onChange={(e) => majPoste('montant', e.target.value)} placeholder="0" aria-label={`Montant ${po.libelle}`} />
-                          ) : fcfa(pm)}
+                          ) : Number.isNaN(pm) ? <span className="pj-err-ligne">À compléter</span> : <b>{fcfa(pm)}</b>}
+                          {editable && parUnite && !Number.isNaN(pm) && <div className="pj-muted pj-petit">calculé</div>}
                           {sousJ && <div className="pj-err-ligne">Inférieur au justifié</div>}
                         </td>
                         <td className="n">
@@ -472,7 +512,9 @@ function OngletBudget({ d, devise, onChange }) {
                         <Fragment key={l.activite_id}>
                           <div className="pj-kv"><span>{nomActivite[l.activite_id] || `Activité ${l.activite_id}`}</span><b>{fcfa(l.montant)}</b></div>
                           {(l.postes || []).map((po) => (
-                            <div key={po.cle} className="pj-kv pj-kv-poste"><span>└ {po.libelle}</span><span>{fcfa(po.montant)}</span></div>
+                            <div key={po.cle} className="pj-kv pj-kv-poste">
+                              <span>└ {po.libelle}{po.mode === 'unite' && <span className="pj-petit"> · {formuleUnite(po)}</span>}</span><span>{fcfa(po.montant)}</span>
+                            </div>
                           ))}
                         </Fragment>
                       ))}
@@ -666,7 +708,15 @@ export default function ProjetPage() {
                           </tr>
                           {(a.postes || []).map((po) => (
                             <tr key={po.cle} className="pj-poste">
-                              <td colSpan={2}><span className="pj-poste-trait">└</span>{po.libelle}</td>
+                              <td colSpan={2}><span className="pj-poste-trait">└</span>{po.libelle}
+                                {po.mode === 'unite' && (
+                                  <div className="pj-petit pj-formule">
+                                    <span className="pj-muted">{formuleUnite(po)}</span>
+                                    <span className="pj-realise">réalisé {quantiteUnites(po.realise_unites, po)} / {quantiteUnites(po.prevu_unites, po)}
+                                      {po.prevu_unites > 0 && ` (${Math.round((po.realise_unites / po.prevu_unites) * 100)} %)`}</span>
+                                  </div>
+                                )}
+                              </td>
                               <td className="n pj-muted">{fcfa(po.budget)}</td>
                               <td />
                               <td className="n" style={{ color: 'var(--projet-justifie)' }}>{fcfa(po.justifie)}

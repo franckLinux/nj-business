@@ -29,6 +29,7 @@ const exigerInstalle = async () => {
 const COLONNES = `pj.id, pj.projet_id, pj.activite_id, a.nom AS activite_nom, p.nom AS projet_nom, pj.remise_id,
   r.numero AS remise_numero, r.date AS remise_date, rj.code AS remise_journal,
   pj.date_piece, pj.montant, pj.fournisseur, pj.numero_piece, pj.libelle, pj.poste_cle, pj.poste_libelle,
+  pj.quantite_realisee, pj.jours_realises,
   pj.fichier_nom, pj.fichier_mime, pj.fichier_taille, (pj.fichier_path IS NOT NULL) AS a_fichier,
   pj.statut, pj.depose_par, ud.username AS depose_par_nom, pj.depose_le,
   pj.decide_par, uv.username AS decide_par_nom, pj.decide_le, pj.motif_rejet,
@@ -43,6 +44,8 @@ const JOINTURES = `FROM projet_justificatifs pj
   LEFT JOIN users ua ON ua.id = pj.annule_par`;
 const former = (j, req, droitsPiece) => ({
   ...j, id: Number(j.id), montant: n(j.montant), remise_id: j.remise_id ? Number(j.remise_id) : null,
+  quantite_realisee: j.quantite_realisee === null || j.quantite_realisee === undefined ? null : n(j.quantite_realisee),
+  jours_realises: j.jours_realises === null || j.jours_realises === undefined ? null : n(j.jours_realises),
   ...(droitsPiece ? { droits: droitsPiece(j, req) } : {}),
 });
 
@@ -84,6 +87,21 @@ const lister = async (req, projetId, { activiteId, statut } = {}) => {
   return rows.map((j) => former(j, req, dr));
 };
 
+// Quantité et jours réalisés d'une pièce sur une ligne par unité (ex. 22 participants × 1 jour).
+const lireRealise = (b, poste) => {
+  const nombre = (v) => Number(String(v ?? '').replace(/[\s  ]/g, '').replace(',', '.'));
+  const vide = (v) => v === undefined || v === null || String(v).trim() === '';
+  const unite = poste.unite ? ` (${poste.unite})` : '';
+  if (vide(b.quantite_realisee)) {
+    throw err(400, `Indiquez la quantité réalisée${unite} pour la ligne « ${poste.libelle} ».`, 'QUANTITE_REQUISE');
+  }
+  const quantite = Math.round(nombre(b.quantite_realisee) * 1000) / 1000;
+  if (!Number.isFinite(quantite) || quantite < 0) throw err(400, 'La quantité réalisée doit être positive ou nulle.', 'QUANTITE_REQUISE');
+  const jours = vide(b.jours_realises) ? 1 : Math.round(nombre(b.jours_realises) * 100) / 100;
+  if (!Number.isFinite(jours) || jours <= 0) throw err(400, 'Le nombre de jours réalisés doit être positif.', 'QUANTITE_REQUISE');
+  return { quantite, jours };
+};
+
 /** Dépôt d'un justificatif (pièce scannée obligatoire). */
 const deposer = async (req, projetId, b) => {
   const ctx = await contexte(req, projetId);
@@ -119,13 +137,16 @@ const deposer = async (req, projetId, b) => {
     await q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `projet_justif:${a.id}` }, t);
     const avecPostes = await g.postesInstalles();
     const postes = avecPostes ? await q(
-      `SELECT po.cle, po.libelle, po.montant FROM projet_budget_postes po
+      `SELECT po.cle, po.libelle, po.montant, po.mode, po.unite FROM projet_budget_postes po
          JOIN projet_budgets bv ON bv.id = po.budget_id AND bv.statut = 'valide'
         WHERE po.activite_id = :a ORDER BY po.ordre, po.id`, { a: a.id }, t) : [];
     let poste = null;
+    let realise = null;
     if (postes.length) {
       poste = postes.find((po) => String(po.cle) === String(b.poste_cle || ''));
       if (!poste) throw err(400, `Choisissez la ligne budgétaire de « ${a.nom} » que cette pièce justifie.`, 'LIGNE_REQUISE');
+      // Ligne par unité (072) : la quantité et les jours réalisés sont obligatoires.
+      if (poste.mode === 'unite') realise = lireRealise(b, poste);
       const [{ pris }] = await q(
         `SELECT COALESCE(SUM(montant), 0) AS pris FROM projet_justificatifs WHERE poste_cle = :c AND statut IN ('depose', 'valide')`,
         { c: poste.cle }, t);
@@ -153,8 +174,9 @@ const deposer = async (req, projetId, b) => {
       { t: req.tenantId, p: ctx.projet.id, a: a.id, r: remiseId, d: datePiece, m,
         f: texte(b.fournisseur, 150), np: texte(b.numero_piece, 60), l: libelle, u: req.user.id }, t);
     if (poste) {
-      await q('UPDATE projet_justificatifs SET poste_cle = :c, poste_libelle = :lib WHERE id = :id RETURNING id',
-        { c: poste.cle, lib: poste.libelle, id: row.id }, t);
+      await q(`UPDATE projet_justificatifs SET poste_cle = :c, poste_libelle = :lib, quantite_realisee = :qr, jours_realises = :jr
+                WHERE id = :id RETURNING id`,
+        { c: poste.cle, lib: poste.libelle, qr: realise?.quantite ?? null, jr: realise?.jours ?? null, id: row.id }, t);
     }
     const chemin = await pv.enregistrer(req.tenantId, 'justificatifs', row.id, fichier);
     await q(

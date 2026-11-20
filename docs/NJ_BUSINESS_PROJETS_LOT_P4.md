@@ -88,3 +88,25 @@ Si des fonds ont déjà été remis, la suppression est refusée (`BUDGET_UTILIS
 Traçabilité : `audit_log` `DELETE_BUDGET_VALIDE` (projet, version, total, motif, version rétablie) ; le chef de projet reçoit une notification.
 
 Tests : `projets-p4` (suppression v2 → v1 rétablie, puis v1 → plus de budget ; financement non bloquant ; chef refusé ; motif requis) et `projets-p2` test 9 adapté. Les 31 fichiers de tests passent. Vérifié dans le navigateur. Service Worker v77. Pas de migration.
+
+## 10. Complément — ligne budgétaire au forfait ou par unité (20/11/2026, migration 072)
+
+Demande de Franck : « dans le budget de l'activité, permettre de faire montant par unité ou forfait pour que le budget soit réel à ce qui est fait sur le terrain ».
+
+**Décisions** : formule *quantité × jours × prix unitaire* (jours = 1 par défaut) ; quantité réalisée saisie sur chaque justificatif ; s'applique aux **lignes budgétaires** seulement (une activité sans lignes garde un montant global : pour la chiffrer par unité, on lui ajoute une ligne).
+
+| Où | Ce qui change |
+|---|---|
+| **Budget** (préparation) | Chaque ligne a un sélecteur **Forfait / Par unité**. Par unité : Qté, Unité (ex. participant), Jours, Prix unitaire ; le montant est **calculé** (ex. 25 participant × 3 j × 2 500 = 187 500). En lecture et dans l'historique, la formule s'affiche sous la ligne. |
+| **Dépôt d'un justificatif** | Sur une ligne par unité, **quantité réalisée** et **nombre de jours** obligatoires (ex. 22 participants × 1 jour), avec le rappel du prévu et du déjà réalisé. Le plafond reste le montant de la ligne. |
+| **Onglet Activités** | Sous la ligne : formule prévue et **réalisé / prévu** en unités·jours, sur les pièces validées (ex. 66 / 75 participant·jours, 88 %). |
+| **Liste des justificatifs** | « réalisé 22 × 1 j » à côté de la ligne. |
+| **Révision du budget** | Le détail par unité est recopié avec la même clé. |
+
+**Garde-fous** : le serveur recalcule le montant (calcul exact en entiers) et la base vérifie `montant = round(quantité × jours × prix, 2)` ; quantité et jours > 0, prix ≥ 0 ; la quantité réalisée d'un justificatif contrôlé ne se modifie plus. Les lignes existantes deviennent « forfait », sans changement de montant.
+
+Fichiers : `072_projets_lignes_par_unite.sql` (+ retour arrière), `projets_gestion.service.js`, `projets_justificatifs.service.js`, `ProjetPage.jsx`, `Justificatifs.jsx`, `lib/projets.js`, `projets.css`, `tests/projets-p5.test.js` (4 scénarios).
+
+Vérifications : suite complète **279 / 279** sur la base de test ; migration rejouée, retour arrière puis nouvelle application ; parcours dans le navigateur (chef : ligne « Déjeuner » par unité + « Salle » au forfait → soumis ; directeur : validation ; dépôt de 22 × 1 j ; onglet Activités : réalisé 22 / 75 participant·jours). Service Worker v78.
+
+**Déploiement** : sauvegarde, envoi du code (backend + `frontend/dist`), `node db/migrate.js` (applique la 072), redémarrage, Ctrl+Maj+R.

@@ -263,3 +263,18 @@
 .pj-globale-c { display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 4px 16px 12px; font-size: 13px; color: var(--text-muted); }
 .pj-globale-c b { font-variant-numeric: tabular-nums; margin-left: 4px; }
 .pj-plafond { font-size: 12.5px; background: #f0fdfa; border: 1px solid #99f6e4; color: #115e59; border-radius: 8px; padding: 8px 10px; }
+
+/* Ligne budgétaire forfait / par unité (072) */
+.pj-mode { display: inline-flex; margin-left: 8px; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; vertical-align: middle; }
+.pj-mode button { border: 0; background: #fff; color: var(--text-muted); font-size: 11.5px; font-weight: 600; padding: 4px 9px; cursor: pointer; }
+.pj-mode button + button { border-left: 1px solid var(--border); }
+.pj-mode button.actif { background: #eff6ff; color: #1d4ed8; }
+.pj-unite { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; margin: 6px 0 2px 22px; }
+.pj-unite label { display: flex; flex-direction: column; font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; gap: 2px; }
+.pj-unite input { width: 64px; padding: 4px 7px; border: 1.5px solid var(--border); border-radius: 7px; font-size: 12.5px; text-align: right; }
+.pj-unite input.pj-unite-lib { width: 110px; text-align: left; }
+.pj-unite input.pj-unite-pu { width: 92px; }
+.pj-unite input:focus, .pj-mode button:focus-visible { outline: 2px solid #93c5fd; outline-offset: 0; }
+.pj-fois { color: var(--text-muted); font-weight: 700; padding-bottom: 5px; }
+.pj-formule { margin: 2px 0 0 22px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.pj-realise { color: var(--projet-justifie); font-weight: 600; }
