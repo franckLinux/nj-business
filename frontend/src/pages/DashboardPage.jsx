@@ -105,8 +105,43 @@ export default function DashboardPage() {
   if (erreur) return <div className="alert-err">{erreur}</div>;
   if (!data) return <div className="loading-msg">Chargement…</div>;
 
+  // Cumuls du mois sélectionné en haut de page (le mois en cours par défaut),
+  // tous journaux confondus — même base que les cumuls de l'année.
+  const duMois = (data.tendance || []).filter((r) => r.mois === data.mois);
+  const entreesMois = duMois.reduce((s, r) => s + (parseFloat(r.entrees) || 0), 0);
+  const sortiesMois = duMois.reduce((s, r) => s + (parseFloat(r.sorties) || 0), 0);
+  const soldeMois = entreesMois - sortiesMois;
+
   return (
     <div id="dashboard-content">
+      <h3 style={{ fontSize: 14, fontWeight: 700, margin: '0 0 10px', color: 'var(--text-secondary)' }}>
+        Cumuls du mois — {data.mois} {data.annee}
+        <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>
+          {' '}· solde du mois : <b style={{ color: soldeMois < 0 ? '#dc2626' : '#16a34a' }}>{soldeMois > 0 ? '+' : ''}{fmt(soldeMois, devise)}</b>
+        </span>
+      </h3>
+      <div className="kpi-grid">
+        <div className="kpi-card" style={{ borderLeft: '4px solid #16a34a' }}>
+          <div className="kpi-icon kpi-green">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></svg>
+          </div>
+          <div className="kpi-body">
+            <p className="kpi-label">Entrées du mois · {data.mois}</p>
+            <p className="kpi-value">{fmt(entreesMois, devise)}</p>
+          </div>
+        </div>
+        <div className="kpi-card" style={{ borderLeft: '4px solid #dc2626' }}>
+          <div className="kpi-icon kpi-red">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></svg>
+          </div>
+          <div className="kpi-body">
+            <p className="kpi-label">Sorties du mois · {data.mois}</p>
+            <p className="kpi-value">{fmt(sortiesMois, devise)}</p>
+          </div>
+        </div>
+      </div>
+
+      <h3 style={{ fontSize: 14, fontWeight: 700, margin: '4px 0 10px', color: 'var(--text-secondary)' }}>Cumuls de l'année {annee}</h3>
       <div className="kpi-grid">
         <div className="kpi-card">
           <div className="kpi-icon kpi-green">
