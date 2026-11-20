@@ -267,10 +267,14 @@ test('ONG : dépassement du budget de l\'activité → refusé, rien n\'est écr
   assert.equal(sansBudget.code, 'ACTIVITE_SANS_BUDGET');
 });
 
-test('ONG : le projet structuré ne reçoit pas de sortie en direct', async () => {
+test('ONG : remise GLOBALE au projet (lot P4), plafonnée par le budget total', async () => {
   const r = await saisie('ong', 'cai', { rubrique_code: 'D1', sortie: 1000, activite_id: C.ong.projet });
-  assert.equal(r.status, 400);
-  assert.equal(r.code, 'ACTIVITE_DE_PROJET_REQUISE');
+  assert.equal(r.status, 201, r.message);
+  assert.equal(r.data.projet.global, true);
+  assert.equal(r.data.projet.reste, 300000 - 200000 - 1000);
+  const trop = await saisie('ong', 'cai', { rubrique_code: 'D1', sortie: 100000, activite_id: C.ong.projet });
+  assert.equal(trop.status, 409);
+  assert.equal(trop.code, 'DEPASSEMENT_BUDGET_PROJET');
 });
 
 test('ONG : les remises de projet ne pèsent pas sur le budget de fonctionnement', async () => {

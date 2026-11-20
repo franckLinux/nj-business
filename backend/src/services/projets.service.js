@@ -52,8 +52,12 @@ const estOng = async (tenantId, transaction) => {
 
 // Condition SQL « l'écriture n'est pas rattachée à une activité de projet »,
 // pour les sommes du budget de fonctionnement (alias Sequelize "Mouvement").
+// « Projet géré » : un projet qui a des activités ou un budget (069). Une
+// écriture qui lui est rattachée en direct est une remise GLOBALE (lot P4).
+const sqlProjetGere = (alias) => `(${alias}.type = 'projet' AND (EXISTS (SELECT 1 FROM activites c_p WHERE c_p.projet_id = ${alias}.id)
+  OR EXISTS (SELECT 1 FROM projet_budgets b_p WHERE b_p.projet_id = ${alias}.id)))`;
 const sqlHorsProjets = (alias) => `NOT EXISTS (SELECT 1 FROM activites a_p
-  WHERE a_p.id = ${alias}.activite_id AND a_p.projet_id IS NOT NULL)`;
+  WHERE a_p.id = ${alias}.activite_id AND (a_p.projet_id IS NOT NULL OR ${sqlProjetGere('a_p')}))`;
 const SQL_HORS_PROJETS = sqlHorsProjets('"Mouvement"');
 
 /** Faut-il retirer les sorties de projet des contrôles de fonctionnement ? */
@@ -76,8 +80,7 @@ const preparerSaisie = async (tenantId, { rubriqueCode, entree, sortie, activite
   const [ctx] = await q(
     `SELECT tenant_est_ong(:t) AS ong,
             (SELECT to_jsonb(r)->>'nature_recette' FROM rubriques r WHERE r.tenant_id = :t AND r.code = :code LIMIT 1) AS nature,
-            (SELECT jsonb_build_object('id', a.id, 'type', a.type, 'projet_id', a.projet_id,
-                    'structure', EXISTS (SELECT 1 FROM activites c WHERE c.projet_id = a.id))
+            (SELECT jsonb_build_object('id', a.id, 'type', a.type, 'projet_id', a.projet_id, 'gere', ${sqlProjetGere('a')})
                FROM activites a WHERE a.id = :a AND a.tenant_id = :t) AS activite`,
     { t: tenantId, code: String(rubriqueCode || ''), a: activiteId || 0 });
   if (!ctx?.ong) {
@@ -88,14 +91,11 @@ const preparerSaisie = async (tenantId, { rubriqueCode, entree, sortie, activite
   const montantEntree = parseFloat(entree) || 0;
   const montantSortie = parseFloat(sortie) || 0;
   const act = ctx.activite;
-  // Un projet qui a des activités ne reçoit pas d'écriture en direct : on
-  // choisit l'une de ses activités (sortie) ou on impute la recette au projet.
-  if (act && act.type === 'projet' && act.structure) {
-    throw new ErreurProjet(400, montantSortie > 0
-      ? 'Ce projet est organisé en activités : choisissez l\'activité à laquelle les fonds sont remis.'
-      : 'Pour un financement, choisissez le projet dans « Projet bénéficiaire » et laissez l\'activité vide.', 'ACTIVITE_DE_PROJET_REQUISE');
-  }
-  const activiteProjet = act && act.projet_id ? { id: Number(act.id), projet_id: Number(act.projet_id) } : null;
+  // Rattachement à une activité du projet, ou au projet lui-même (remise
+  // GLOBALE, lot P4 — justifiée ensuite activité par activité).
+  let activiteProjet = null;
+  if (act && act.projet_id) activiteProjet = { id: Number(act.id), projet_id: Number(act.projet_id), global: false };
+  else if (act && act.type === 'projet' && act.gere) activiteProjet = { id: Number(act.id), projet_id: Number(act.id), global: true };
 
   let imputation = null;
   const affectee = montantEntree > 0 && estAffectee(ctx.nature);
@@ -108,52 +108,73 @@ const preparerSaisie = async (tenantId, { rubriqueCode, entree, sortie, activite
     const [p] = await q(`SELECT id FROM activites WHERE id = :id AND tenant_id = :t AND type = 'projet' AND actif`, { id, t: tenantId });
     if (!p) throw new ErreurProjet(400, 'Projet introuvable ou désactivé.', 'PROJET_INVALIDE');
     if (activiteProjet) {
-      throw new ErreurProjet(400, 'Un financement se rattache au projet, pas à l\'une de ses activités : laissez l\'activité vide.', 'ACTIVITE_SUR_FINANCEMENT');
+      throw new ErreurProjet(400, 'Un financement se rattache par « Projet bénéficiaire » : laissez le champ activité / projet vide.', 'ACTIVITE_SUR_FINANCEMENT');
     }
     imputation = { projetId: id, nature: ctx.nature, reference: String(reference || '').trim().slice(0, 120) };
   } else if (projetDemande) {
     throw new ErreurProjet(400, montantEntree > 0
       ? 'Cette rubrique n\'est pas une recette affectée à un projet : le projet ne peut pas être choisi.'
-      : 'Le projet bénéficiaire ne se choisit que pour une recette. Pour une sortie, choisissez l\'activité du projet.', 'PROJET_NON_APPLICABLE');
+      : 'Le projet bénéficiaire ne se choisit que pour une recette. Pour une sortie, choisissez le projet ou l\'activité dans « Activité / projet ».', 'PROJET_NON_APPLICABLE');
   }
   return { ong: true, imputation, activiteProjet };
 };
 
 /**
- * Contrôle d'une SORTIE rattachée à une activité de projet, à faire DANS la
- * transaction qui enregistre l'écriture (verrou par activité : deux remises
- * de fonds simultanées ne peuvent pas dépasser ensemble le budget).
- * Référence = ligne de l'activité dans le budget VALIDÉ du projet.
- * Consommé = sorties nettes de l'activité (contre-passations déduites).
+ * Contrôle d'une SORTIE vers un projet, à faire DANS la transaction qui
+ * enregistre l'écriture (verrou par projet : deux remises simultanées ne
+ * peuvent pas dépasser ensemble le budget). Référence = budget VALIDÉ.
+ *   • remise à une activité : ≤ budget de l'activité − déjà remis à l'activité,
+ *     et ≤ budget total du projet − total déjà remis ;
+ *   • remise GLOBALE au projet : ≤ budget total − total déjà remis.
+ * Remis = sorties nettes (contre-passations déduites).
  */
 const controlerSortieProjet = async (tenantId, { activiteId, montant, excludeId = null }, transaction) => {
-  await q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `projet_activite:${activiteId}` }, transaction);
-  const fmt = (n) => (parseFloat(n) || 0).toLocaleString('fr-FR');
+  const fmt = (v) => (parseFloat(v) || 0).toLocaleString('fr-FR');
+  const [a] = await q('SELECT id, nom, type, projet_id FROM activites WHERE id = :a AND tenant_id = :t',
+    { a: activiteId, t: tenantId }, transaction);
+  if (!a) throw new ErreurProjet(400, 'Activité de projet introuvable.', 'ACTIVITE_INVALIDE');
+  const global = a.type === 'projet';
+  const projetId = global ? a.id : a.projet_id;
+  await q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `projet_remise:${projetId}` }, transaction);
   const [r] = await q(
-    `SELECT a.nom, p.nom AS projet_nom, b.id AS budget_id, l.montant AS budget,
+    `SELECT p.nom AS projet_nom, b.id AS budget_id,
+            (SELECT COALESCE(SUM(l.montant), 0) FROM projet_budget_lignes l WHERE l.budget_id = b.id) AS budget_total,
+            (SELECT l.montant FROM projet_budget_lignes l WHERE l.budget_id = b.id AND l.activite_id = :a) AS budget_activite,
+            (SELECT COALESCE(SUM(j.sortie), 0) FROM journal j JOIN activites x ON x.id = j.activite_id
+              WHERE j.tenant_id = :t AND (x.id = p.id OR x.projet_id = p.id)
+                AND (:excl::bigint IS NULL OR j.id <> :excl::bigint)) AS remis_total,
             (SELECT COALESCE(SUM(j.sortie), 0) FROM journal j
-              WHERE j.tenant_id = :t AND j.activite_id = a.id AND (:excl::bigint IS NULL OR j.id <> :excl::bigint)) AS consomme
-       FROM activites a
-       JOIN activites p ON p.id = a.projet_id
+              WHERE j.tenant_id = :t AND j.activite_id = :a AND (:excl::bigint IS NULL OR j.id <> :excl::bigint)) AS remis_activite
+       FROM activites p
        LEFT JOIN projet_budgets b ON b.projet_id = p.id AND b.statut = 'valide'
-       LEFT JOIN projet_budget_lignes l ON l.budget_id = b.id AND l.activite_id = a.id
-      WHERE a.id = :a AND a.tenant_id = :t`,
-    { t: tenantId, a: activiteId, excl: excludeId }, transaction);
-  if (!r) throw new ErreurProjet(400, 'Activité de projet introuvable.', 'ACTIVITE_INVALIDE');
+      WHERE p.id = :p`,
+    { t: tenantId, a: a.id, p: projetId, excl: excludeId }, transaction);
   if (!r.budget_id) {
     throw new ErreurProjet(409, `Le budget du projet « ${r.projet_nom} » n'est pas encore validé par le directeur : aucune remise de fonds possible.`, 'BUDGET_PROJET_NON_VALIDE');
   }
-  const budget = parseFloat(r.budget) || 0;
-  const consomme = parseFloat(r.consomme) || 0;
-  if (budget <= 0) {
-    throw new ErreurProjet(409, `L'activité « ${r.nom} » n'a pas de montant dans le budget validé du projet « ${r.projet_nom} ».`, 'ACTIVITE_SANS_BUDGET');
+  const total = parseFloat(r.budget_total) || 0;
+  const remisTotal = parseFloat(r.remis_total) || 0;
+  if (!global) {
+    const budget = parseFloat(r.budget_activite) || 0;
+    const remis = parseFloat(r.remis_activite) || 0;
+    if (budget <= 0) {
+      throw new ErreurProjet(409, `L'activité « ${a.nom} » n'a pas de montant dans le budget validé du projet « ${r.projet_nom} ».`, 'ACTIVITE_SANS_BUDGET');
+    }
+    if (remis + montant > budget) {
+      throw new ErreurProjet(409,
+        `Budget de l'activité « ${a.nom} » dépassé de ${fmt(remis + montant - budget)} FCFA (budget validé : ${fmt(budget)} FCFA, déjà remis : ${fmt(remis)} FCFA). Sortie refusée.`,
+        'DEPASSEMENT_BUDGET_PROJET');
+    }
   }
-  if (consomme + montant > budget) {
+  if (remisTotal + montant > total) {
     throw new ErreurProjet(409,
-      `Budget de l'activité « ${r.nom} » dépassé de ${fmt(consomme + montant - budget)} FCFA (budget validé : ${fmt(budget)} FCFA, déjà remis : ${fmt(consomme)} FCFA). Sortie refusée.`,
+      `Budget du projet « ${r.projet_nom} » dépassé de ${fmt(remisTotal + montant - total)} FCFA (budget validé : ${fmt(total)} FCFA, déjà remis : ${fmt(remisTotal)} FCFA). Sortie refusée.`,
       'DEPASSEMENT_BUDGET_PROJET');
   }
-  return { budget, consomme, reste: budget - consomme - montant };
+  if (global) return { budget: total, consomme: remisTotal, reste: total - remisTotal - montant, global: true };
+  const budget = parseFloat(r.budget_activite) || 0;
+  const remis = parseFloat(r.remis_activite) || 0;
+  return { budget, consomme: remis, reste: budget - remis - montant, reste_projet: total - remisTotal - montant };
 };
 
 /** Enregistre le lien écriture ↔ projet (dans la transaction de l'écriture). */
@@ -175,7 +196,7 @@ const verifierChangementActivite = async (tenantId, ancienId, nouveauId) => {
   const ids = [ancienId, nouveauId].filter(Boolean);
   const rows = await q(
     `SELECT id FROM activites WHERE tenant_id = :t AND id IN (:ids)
-        AND (projet_id IS NOT NULL OR (type = 'projet' AND EXISTS (SELECT 1 FROM activites c WHERE c.projet_id = activites.id)))`,
+        AND (projet_id IS NOT NULL OR ${sqlProjetGere('activites')})`,
     { t: tenantId, ids });
   if (rows.length) {
     throw new ErreurProjet(409, 'Le rattachement d\'une écriture à un projet ne se corrige pas : annulez l\'écriture (contre-passation) puis ressaisissez-la.', 'ANNULATION_REQUISE');
@@ -185,9 +206,11 @@ const verifierChangementActivite = async (tenantId, ancienId, nouveauId) => {
 /** Activité de projet d'une écriture en attente (approbation du directeur). */
 const activiteDeProjet = async (tenantId, activiteId, transaction) => {
   if (!activiteId || !(await estOng(tenantId, transaction))) return null;
-  const [a] = await q('SELECT id, projet_id FROM activites WHERE id = :a AND tenant_id = :t AND projet_id IS NOT NULL',
-    { a: activiteId, t: tenantId }, transaction);
-  return a ? { id: Number(a.id), projet_id: Number(a.projet_id) } : null;
+  const [a] = await q(`SELECT id, projet_id, type FROM activites
+                        WHERE id = :a AND tenant_id = :t AND (projet_id IS NOT NULL OR ${sqlProjetGere('activites')})`,
+  { a: activiteId, t: tenantId }, transaction);
+  if (!a) return null;
+  return a.projet_id ? { id: Number(a.id), projet_id: Number(a.projet_id), global: false } : { id: Number(a.id), projet_id: Number(a.id), global: true };
 };
 
 /**
@@ -199,7 +222,11 @@ const contexteSaisie = async (tenantId) => {
   if (!(await estOng(tenantId))) return { ong: false };
   const projets = await q(
     `SELECT p.id, p.code, p.nom,
-            EXISTS (SELECT 1 FROM projet_budgets b WHERE b.projet_id = p.id AND b.statut = 'valide') AS budget_valide
+            EXISTS (SELECT 1 FROM projet_budgets b WHERE b.projet_id = p.id AND b.statut = 'valide') AS budget_valide,
+            (SELECT COALESCE(SUM(l.montant), 0) FROM projet_budgets b JOIN projet_budget_lignes l ON l.budget_id = b.id
+              WHERE b.projet_id = p.id AND b.statut = 'valide') AS budget_total,
+            (SELECT COALESCE(SUM(j.sortie), 0) FROM journal j JOIN activites x ON x.id = j.activite_id
+              WHERE j.tenant_id = p.tenant_id AND (x.id = p.id OR x.projet_id = p.id)) AS remis_total
        FROM activites p
       WHERE p.tenant_id = :t AND p.type = 'projet' AND p.actif
       ORDER BY lower(p.nom)`, { t: tenantId });
@@ -219,6 +246,9 @@ const contexteSaisie = async (tenantId) => {
     natures: NATURES,
     projets: projets.map((p) => ({
       ...p,
+      budget_total: parseFloat(p.budget_total) || 0,
+      remis_total: parseFloat(p.remis_total) || 0,
+      reste_total: (parseFloat(p.budget_total) || 0) - (parseFloat(p.remis_total) || 0),
       activites: activites.filter((a) => Number(a.projet_id) === Number(p.id)).map((a) => {
         const budget = a.budget === null ? null : parseFloat(a.budget);
         const consomme = parseFloat(a.consomme) || 0;

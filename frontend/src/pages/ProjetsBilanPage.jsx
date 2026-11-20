@@ -67,9 +67,13 @@ export default function ProjetsBilanPage() {
               {liste.map((l) => {
                 const taux = pct(l.justifie + l.rembourse, l.alloue);
                 return (
-                  <tr key={l.activite_id}>
-                    <td><Link to={`/projets/${l.projet_id}?onglet=justificatifs&activite=${l.activite_id}`} className="pj-lien-l"><strong>{l.activite_nom}</strong></Link>
-                      <div className="pj-muted pj-petit">{l.projet_nom}</div></td>
+                  <tr key={l.globale ? `g${l.projet_id}` : l.activite_id}>
+                    <td>
+                      <Link to={l.globale ? `/projets/${l.projet_id}` : `/projets/${l.projet_id}?onglet=justificatifs&activite=${l.activite_id}`} className="pj-lien-l">
+                        <strong>{l.globale ? '◆ ' : ''}{l.activite_nom}</strong>
+                      </Link>
+                      <div className="pj-muted pj-petit">{l.projet_nom}{l.sur_global ? ' · dépenses sur la remise globale' : ''}</div>
+                    </td>
                     <td>{l.responsable_nom || <span className="pj-muted">à désigner</span>}</td>
                     <td className="n">{fcfa(l.alloue)}</td>
                     <td className="n" style={{ color: 'var(--projet-justifie)' }}>{fcfa(l.justifie)}</td>

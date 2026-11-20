@@ -53,7 +53,18 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   const ong = Boolean(ctxProjets?.ong);
   const projetsOng = ong ? (ctxProjets.projets || []) : [];
   const projetsStructures = new Set(projetsOng.filter((p) => p.activites.length > 0).map((p) => p.id));
-  const activitesProjet = projetsOng.flatMap((p) => p.activites.map((a) => ({ ...a, projet: p })));
+  // Remise à une activité (plafonnée aussi par le reste du projet) ou remise
+  // GLOBALE au projet (lot P4), justifiée ensuite activité par activité.
+  const activitesProjet = projetsOng.flatMap((p) => [
+    ...(p.activites.length ? [{
+      id: p.id, nom: 'Remise globale au projet', global: true, projet: p,
+      budget: p.budget_valide ? p.budget_total : null, consomme: p.remis_total, reste: p.budget_valide ? p.reste_total : null,
+    }] : []),
+    ...p.activites.map((a) => ({
+      ...a, projet: p,
+      reste: a.reste === null ? null : Math.min(a.reste, p.budget_valide ? p.reste_total : a.reste),
+    })),
+  ]);
   const [projetId, setProjetId] = useState('');
   const [referenceFin, setReferenceFin] = useState('');
   const [montant, setMontant] = useState(mouvement ? (parseFloat(mouvement.entree) > 0 ? mouvement.entree : mouvement.sortie) : '');
@@ -409,6 +420,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
                 })}
                 {projetsOng.filter((p) => p.activites.length > 0).map((p) => (
                   <optgroup key={`p${p.id}`} label={`Projet — ${p.nom}`}>
+                    <option value={p.id}>◆ Remise globale au projet — reste {p.budget_valide ? (p.reste_total || 0).toLocaleString('fr-FR') : 'budget non validé'}</option>
                     {p.activites.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.code ? `[${a.code}] ` : ''}{a.nom}{a.responsable_nom ? ` · ${a.responsable_nom}` : ''}
@@ -432,14 +444,17 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
                 {etat !== 'attente' && activiteProjet.reste === null && <>⛔ L'activité « {activiteProjet.nom} » n'a pas de montant dans le budget validé du projet.</>}
                 {etat !== 'attente' && activiteProjet.reste !== null && (
                   <>
-                    <strong>Budget du projet</strong> · {activiteProjet.nom}{activiteProjet.responsable_nom ? ` (${activiteProjet.responsable_nom})` : ''}
+                    <strong>{activiteProjet.global ? `Remise globale — ${p.nom}` : 'Budget du projet'}</strong>
+                    {!activiteProjet.global && <> · {activiteProjet.nom}{activiteProjet.responsable_nom ? ` (${activiteProjet.responsable_nom})` : ''}</>}
                     <div className="projet-dispo-chiffres">
-                      <span>Budget validé <b>{(activiteProjet.budget || 0).toLocaleString('fr-FR')}</b></span>
+                      <span>{activiteProjet.global ? 'Budget total' : 'Budget validé'} <b>{(activiteProjet.budget || 0).toLocaleString('fr-FR')}</b></span>
                       <span>Déjà remis <b>{(activiteProjet.consomme || 0).toLocaleString('fr-FR')}</b></span>
                       <span>Reste <b>{(activiteProjet.reste || 0).toLocaleString('fr-FR')} {devise}</b></span>
                       {m > 0 && <span>Après cette sortie <b>{(activiteProjet.reste - m).toLocaleString('fr-FR')}</b></span>}
                     </div>
-                    <div className="projet-dispo-note">Hors budget de fonctionnement.</div>
+                    <div className="projet-dispo-note">
+                      {activiteProjet.global ? 'Montant non affecté : il sera justifié activité par activité. ' : ''}Hors budget de fonctionnement.
+                    </div>
                   </>
                 )}
               </div>

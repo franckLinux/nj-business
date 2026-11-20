@@ -38,13 +38,17 @@ export function DepotModal({ projetId, activites, remises, activiteInitiale, onF
   const auj = new Date().toISOString().slice(0, 10);
   const [f, setF] = useState({
     activite_id: activiteInitiale || (activites.length === 1 ? String(activites[0].id) : ''),
-    remise_id: '', date_piece: auj, montant: '', fournisseur: '', numero_piece: '', libelle: '',
+    remise_id: '', poste_cle: '', date_piece: auj, montant: '', fournisseur: '', numero_piece: '', libelle: '',
   });
   const [fichier, setFichier] = useState(null);
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
-  const maj = (k) => (e) => { setF((x) => ({ ...x, [k]: e.target.value, ...(k === 'activite_id' ? { remise_id: '' } : {}) })); setErreur(''); };
+  const maj = (k) => (e) => { setF((x) => ({ ...x, [k]: e.target.value, ...(k === 'activite_id' ? { remise_id: '', poste_cle: '' } : {}) })); setErreur(''); };
   const act = activites.find((a) => String(a.id) === String(f.activite_id));
+  const postes = act?.postes || [];
+  const poste = postes.find((po) => po.cle === f.poste_cle);
+  // Plafond (décision du 20/11/2026) : bloqué au-delà du budget de la ligne, ou de l'activité sans lignes.
+  const plafond = poste ? poste.reste : (act && !postes.length && act.budget !== null ? act.reste_budget_justif : null);
   const remisesAct = remises.filter((r) => String(r.activite_id) === String(f.activite_id) && !r.annule);
 
   const choisir = (e) => {
@@ -58,15 +62,19 @@ export function DepotModal({ projetId, activites, remises, activiteInitiale, onF
   const deposer = async () => {
     const montant = Number(String(f.montant).replace(/[\s  ]/g, '').replace(',', '.'));
     if (!f.activite_id) return setErreur('Choisissez l\'activité justifiée.');
+    if (postes.length && !f.poste_cle) return setErreur('Choisissez la ligne budgétaire justifiée.');
     if (!f.libelle.trim()) return setErreur('Indiquez l\'objet de la dépense.');
     if (!Number.isFinite(montant) || montant <= 0) return setErreur('Le montant doit être positif.');
+    if (plafond !== null && montant > plafond) {
+      return setErreur(`Dépôt impossible : il ne reste que ${fcfa(Math.max(plafond, 0))} FCFA sur ${poste ? `la ligne « ${poste.libelle} »` : 'le budget de l\'activité'}.`);
+    }
     if (!f.date_piece || f.date_piece > auj) return setErreur('Date de la pièce invalide (pas dans le futur).');
     if (!fichier) return setErreur('Joignez la pièce scannée (PDF ou photo).');
     setEnCours(true);
     try {
       const data = await lireFichier(fichier);
       const r = await api.post(`/projets/${projetId}/justificatifs`, {
-        ...f, montant, remise_id: f.remise_id || null, fichier: { nom_fichier: fichier.name, data_base64: data },
+        ...f, montant, remise_id: f.remise_id || null, poste_cle: f.poste_cle || null, fichier: { nom_fichier: fichier.name, data_base64: data },
       });
       if (r.error) { setErreur(r.error); return; }
       toast('Justificatif déposé : il attend le contrôle.', 'success');
@@ -102,6 +110,25 @@ export function DepotModal({ projetId, activites, remises, activiteInitiale, onF
             {remisesAct.map((r) => <option key={r.id} value={r.id}>{r.journal_code} n° {r.numero} · {dateFr(r.date)} · {fcfa(r.sortie)}</option>)}
           </select>
         </div>
+        {postes.length > 0 && (
+          <div className="pj-col-2">
+            <label>Ligne budgétaire justifiée <span className="req">*</span></label>
+            <select value={f.poste_cle} onChange={maj('poste_cle')}>
+              <option value="">— choisir la ligne —</option>
+              {postes.map((po) => (
+                <option key={po.cle} value={po.cle} disabled={po.reste <= 0}>
+                  {po.libelle} — budget {fcfa(po.budget)} · reste {fcfa(Math.max(po.reste, 0))}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {plafond !== null && (
+          <div className="pj-col-2 pj-plafond">
+            Reste à justifier sur {poste ? `la ligne « ${poste.libelle} »` : 'le budget de l\'activité'} : <b>{fcfa(Math.max(plafond, 0))} FCFA</b>
+            <span className="pj-muted"> — au-delà, le dépôt est refusé.</span>
+          </div>
+        )}
         {act && (
           <div className="pj-col-2 pj-rappel">
             Remis : <b>{fcfa(act.alloue)}</b> · justifié : <b>{fcfa(act.justifie)}</b> · à contrôler : <b>{fcfa(act.a_controler)}</b> ·
@@ -191,7 +218,9 @@ export function TablePieces({ pieces, projetId, avecProjet = false, onChange, vi
                     {j.numero_piece && <div className="pj-muted pj-petit">n° {j.numero_piece}</div>}
                   </td>
                   {avecProjet && <td>{j.projet_nom}</td>}
-                  <td>{j.activite_nom}{j.remise_numero && <div className="pj-muted pj-petit">remise {j.remise_journal} n° {j.remise_numero}</div>}</td>
+                  <td>{j.activite_nom}
+                    {j.poste_libelle && <div className="pj-petit" style={{ color: 'var(--projet-budget)' }}>└ {j.poste_libelle}</div>}
+                    {j.remise_numero && <div className="pj-muted pj-petit">remise {j.remise_journal} n° {j.remise_numero}</div>}</td>
                   <td>{j.libelle}{j.fournisseur && <div className="pj-muted pj-petit">{j.fournisseur}</div>}</td>
                   <td className="n"><b>{fcfa(j.montant)}</b></td>
                   <td className="pj-muted">{j.depose_par_nom}<div className="pj-petit">{dateFr(j.depose_le)}</div></td>

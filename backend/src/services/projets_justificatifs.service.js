@@ -28,7 +28,7 @@ const exigerInstalle = async () => {
 
 const COLONNES = `pj.id, pj.projet_id, pj.activite_id, a.nom AS activite_nom, p.nom AS projet_nom, pj.remise_id,
   r.numero AS remise_numero, r.date AS remise_date, rj.code AS remise_journal,
-  pj.date_piece, pj.montant, pj.fournisseur, pj.numero_piece, pj.libelle,
+  pj.date_piece, pj.montant, pj.fournisseur, pj.numero_piece, pj.libelle, pj.poste_cle, pj.poste_libelle,
   pj.fichier_nom, pj.fichier_mime, pj.fichier_taille, (pj.fichier_path IS NOT NULL) AS a_fichier,
   pj.statut, pj.depose_par, ud.username AS depose_par_nom, pj.depose_le,
   pj.decide_par, uv.username AS decide_par_nom, pj.decide_le, pj.motif_rejet,
@@ -109,14 +109,53 @@ const deposer = async (req, projetId, b) => {
     throw err(400, String(e.message).replace(/le PV scanné/g, 'la pièce scannée').replace(/le PV/g, 'la pièce').replace(/PV /g, 'Pièce '), 'FICHIER_INVALIDE');
   }
   const remiseId = b.remise_id ? parseInt(b.remise_id, 10) : null;
+  const m = Math.round(montant * 100) / 100;
+  const fmt = (v) => (parseFloat(v) || 0).toLocaleString('fr-FR');
 
   return sequelize.transaction(async (t) => {
+    // Plafond (lot P4, décision du 20/11/2026) : le dépôt est BLOQUÉ s'il fait
+    // dépasser le budget validé de sa ligne budgétaire, ou de l'activité quand
+    // elle n'a pas de lignes. Les pièces déposées et validées comptent.
+    await q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `projet_justif:${a.id}` }, t);
+    const avecPostes = await g.postesInstalles();
+    const postes = avecPostes ? await q(
+      `SELECT po.cle, po.libelle, po.montant FROM projet_budget_postes po
+         JOIN projet_budgets bv ON bv.id = po.budget_id AND bv.statut = 'valide'
+        WHERE po.activite_id = :a ORDER BY po.ordre, po.id`, { a: a.id }, t) : [];
+    let poste = null;
+    if (postes.length) {
+      poste = postes.find((po) => String(po.cle) === String(b.poste_cle || ''));
+      if (!poste) throw err(400, `Choisissez la ligne budgétaire de « ${a.nom} » que cette pièce justifie.`, 'LIGNE_REQUISE');
+      const [{ pris }] = await q(
+        `SELECT COALESCE(SUM(montant), 0) AS pris FROM projet_justificatifs WHERE poste_cle = :c AND statut IN ('depose', 'valide')`,
+        { c: poste.cle }, t);
+      if (n(pris) + m > n(poste.montant)) {
+        throw err(409, `Dépôt refusé : la ligne « ${poste.libelle} » dépasserait son budget de ${fmt(n(pris) + m - n(poste.montant))} FCFA `
+          + `(budget ${fmt(poste.montant)}, déjà justifié ou déposé ${fmt(pris)}).`, 'DEPASSEMENT_LIGNE');
+      }
+    } else {
+      const [lb] = await q(
+        `SELECT l.montant FROM projet_budget_lignes l JOIN projet_budgets bv ON bv.id = l.budget_id AND bv.statut = 'valide'
+          WHERE l.activite_id = :a`, { a: a.id }, t);
+      if (!lb) throw err(409, `Dépôt refusé : l'activité « ${a.nom} » n'a pas de budget validé.`, 'BUDGET_PROJET_NON_VALIDE');
+      const [{ pris }] = await q(
+        `SELECT COALESCE(SUM(montant), 0) AS pris FROM projet_justificatifs WHERE activite_id = :a AND statut IN ('depose', 'valide')`,
+        { a: a.id }, t);
+      if (n(pris) + m > n(lb.montant)) {
+        throw err(409, `Dépôt refusé : l'activité « ${a.nom} » dépasserait son budget de ${fmt(n(pris) + m - n(lb.montant))} FCFA `
+          + `(budget ${fmt(lb.montant)}, déjà justifié ou déposé ${fmt(pris)}).`, 'DEPASSEMENT_LIGNE');
+      }
+    }
     const [row] = await q(
       `INSERT INTO projet_justificatifs (tenant_id, projet_id, activite_id, remise_id, date_piece, montant,
               fournisseur, numero_piece, libelle, depose_par)
        VALUES (:t, :p, :a, :r, :d, :m, :f, :np, :l, :u) RETURNING id`,
-      { t: req.tenantId, p: ctx.projet.id, a: a.id, r: remiseId, d: datePiece, m: Math.round(montant * 100) / 100,
+      { t: req.tenantId, p: ctx.projet.id, a: a.id, r: remiseId, d: datePiece, m,
         f: texte(b.fournisseur, 150), np: texte(b.numero_piece, 60), l: libelle, u: req.user.id }, t);
+    if (poste) {
+      await q('UPDATE projet_justificatifs SET poste_cle = :c, poste_libelle = :lib WHERE id = :id RETURNING id',
+        { c: poste.cle, lib: poste.libelle, id: row.id }, t);
+    }
     const chemin = await pv.enregistrer(req.tenantId, 'justificatifs', row.id, fichier);
     await q(
       `UPDATE projet_justificatifs SET fichier_nom = :nom, fichier_path = :path, fichier_mime = :mime,
@@ -220,20 +259,32 @@ const bilan = async (req) => {
        FROM activites p LEFT JOIN users u ON u.id = p.chef_projet_id
       WHERE p.tenant_id = :t AND p.type = 'projet' ORDER BY lower(p.nom)`, { t: req.tenantId });
   const visibles = projets.filter((p) => g.accesProjet(d, p).voir);
-  const acts = (await g.chiffresActivites(req.tenantId, visibles.map((p) => Number(p.id)))).map(g.formerActivite);
+  const situation = await g.situationProjets(req.tenantId, visibles.map((p) => Number(p.id)));
   const auj = Date.now();
+  const jours = (dt) => (dt ? Math.max(0, Math.floor((auj - new Date(dt).getTime()) / 86400000)) : null);
   const lignes = [];
   for (const p of visibles) {
     const acc = g.accesProjet(d, p);
-    for (const a of acts.filter((x) => x.projet_id === Number(p.id) && (acc.voirTout || d.responsable.includes(x.id)))) {
+    const sit = situation.get(Number(p.id));
+    const base = { projet_id: Number(p.id), projet_code: p.code, projet_nom: p.nom, projet_actif: p.actif, chef_nom: p.chef_nom };
+    // Remise globale au projet (lot P4) : une ligne à part, au nom du chef de projet.
+    if (acc.voirTout && sit.global.alloue > 0) {
+      lignes.push({
+        ...base, activite_id: null, globale: true, activite_nom: 'Remise globale au projet', responsable_nom: p.chef_nom,
+        alloue: sit.global.alloue, justifie: sit.global.justifie, rembourse: sit.global.rembourse, a_controler: 0,
+        en_attente: sit.global.en_attente, derniere_remise: sit.global.derniere_remise, jours: jours(sit.global.derniere_remise),
+        statut: sit.global.en_attente > 0.004 ? 'en_attente' : 'validee',
+      });
+    }
+    for (const a of sit.activites.filter((x) => acc.voirTout || d.responsable.includes(x.id))) {
       if (a.statut_justification === 'non_financee') continue;
       lignes.push({
-        projet_id: Number(p.id), projet_code: p.code, projet_nom: p.nom, projet_actif: p.actif, chef_nom: p.chef_nom,
-        activite_id: a.id, activite_nom: a.nom, responsable_nom: a.responsable_nom,
+        ...base, activite_id: a.id, globale: false, activite_nom: a.nom, responsable_nom: a.responsable_nom,
         alloue: a.alloue, justifie: a.justifie, rembourse: a.rembourse, a_controler: a.a_controler, en_attente: a.en_attente,
-        derniere_remise: a.derniere_remise,
-        jours: a.derniere_remise ? Math.max(0, Math.floor((auj - new Date(a.derniere_remise).getTime()) / 86400000)) : null,
-        statut: a.statut_justification,
+        derniere_remise: a.derniere_remise, jours: jours(a.derniere_remise),
+        // Activité financée par la remise globale : ses justifications sont comptées dans la ligne globale.
+        statut: a.statut_justification === 'sur_global' ? 'validee' : a.statut_justification,
+        sur_global: a.statut_justification === 'sur_global',
       });
     }
   }
@@ -243,7 +294,7 @@ const bilan = async (req) => {
   return {
     validees, en_attente: enAttente,
     totaux: {
-      alloue: somme(lignes, 'alloue'), justifie: somme(lignes, 'justifie'), rembourse: somme(lignes, 'rembourse'),
+      alloue: somme(lignes, 'alloue'), justifie: somme(lignes.filter((l) => !l.globale), 'justifie'), rembourse: somme(lignes, 'rembourse'),
       en_attente: somme(lignes, 'en_attente'), a_controler: somme(lignes, 'a_controler'),
       nb_validees: validees.length, nb_en_attente: enAttente.length,
     },

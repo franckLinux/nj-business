@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
@@ -11,6 +11,7 @@ const STATUT_ACT = {
   non_financee: { lib: 'Non financée', cls: 'pj-b-gris' },
   en_attente: { lib: 'En attente de justification', cls: 'pj-b-ambre' },
   validee: { lib: 'Justifiée', cls: 'pj-b-vert' },
+  sur_global: { lib: 'Justifiée (remise globale)', cls: 'pj-b-vert' },
 };
 
 // Fiche d'un projet (069, lot P2) : chiffres en cascade, activités et
@@ -134,24 +135,39 @@ function RejetModal({ onFermer, onConfirmer }) {
   );
 }
 
-/** Budget en préparation (brouillon / rejeté) ou soumis, et ses actions. */
+/** Budget en préparation (brouillon / rejeté) ou soumis, et ses actions.
+ *  Une activité peut se détailler en lignes budgétaires (lot P4) : son
+ *  montant est alors la somme de ses lignes, et chaque justificatif choisit
+ *  sa ligne. */
 function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise, onChange }) {
   const toast = useToast();
   const editable = acces.gerer && ['brouillon', 'rejete'].includes(budget.statut);
-  const initiales = useMemo(() => Object.fromEntries(budget.lignes.map((l) => [l.activite_id, String(l.montant)])), [budget]);
-  const [montants, setMontants] = useState(initiales);
+  const initiales = useMemo(() => Object.fromEntries(budget.lignes.map((l) => [l.activite_id, {
+    montant: String(l.montant),
+    postes: (l.postes || []).map((po) => ({ cle: po.cle, libelle: po.libelle, montant: String(po.montant) })),
+  }])), [budget]);
+  const [lignes, setLignes] = useState(initiales);
   const [commentaire, setCommentaire] = useState(budget.commentaire || '');
   const [enCours, setEnCours] = useState(false);
   const [rejet, setRejet] = useState(false);
-  useEffect(() => { setMontants(initiales); setCommentaire(budget.commentaire || ''); }, [initiales, budget.commentaire]);
+  useEffect(() => { setLignes(initiales); setCommentaire(budget.commentaire || ''); }, [initiales, budget.commentaire]);
 
-  const enVigueur = Object.fromEntries((budgetValide?.lignes || []).map((l) => [l.activite_id, l.montant]));
-  const lignesAffichees = activites.filter((a) => a.actif || montants[a.id] !== undefined);
-  const total = lignesAffichees.reduce((s, a) => s + (lireMontant(montants[a.id]) || 0), 0);
+  const enVigueur = Object.fromEntries((budgetValide?.lignes || []).map((l) => [l.activite_id, l]));
+  const affichees = activites.filter((a) => a.actif || lignes[a.id] !== undefined);
+  const ligneDe = (id) => lignes[id] || { montant: '', postes: [] };
+  const montantDe = (id) => {
+    const l = ligneDe(id);
+    return l.postes.length ? l.postes.reduce((t, po) => t + (lireMontant(po.montant) || 0), 0) : lireMontant(l.montant);
+  };
+  const majLigne = (id, f) => setLignes((x) => ({ ...x, [id]: f(ligneDe(id)) }));
+  const total = affichees.reduce((t, a) => t + (montantDe(a.id) || 0), 0);
   const totalVigueur = budgetValide?.total || 0;
-  const invalides = lignesAffichees.filter((a) => Number.isNaN(lireMontant(montants[a.id])) || lireMontant(montants[a.id]) < 0);
-  const sousAlloue = lignesAffichees.filter((a) => (lireMontant(montants[a.id]) || 0) < a.alloue);
-  const modifie = JSON.stringify(montants) !== JSON.stringify(initiales) || commentaire !== (budget.commentaire || '');
+  const invalides = affichees.filter((a) => Number.isNaN(montantDe(a.id)) || montantDe(a.id) < 0
+    || ligneDe(a.id).postes.some((po) => !po.libelle.trim() || Number.isNaN(lireMontant(po.montant))));
+  const sousAlloue = affichees.filter((a) => (montantDe(a.id) || 0) < a.alloue);
+  const modifie = JSON.stringify(lignes) !== JSON.stringify(initiales) || commentaire !== (budget.commentaire || '');
+  // Justifié par ligne (budget en vigueur) : une ligne ne descend pas en dessous.
+  const justifieLigne = Object.fromEntries(activites.flatMap((a) => (a.postes || []).map((po) => [po.cle, po.justifie + po.a_controler])));
 
   const appel = async (fn, ok) => {
     setEnCours(true);
@@ -164,7 +180,13 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
   };
   const enregistrer = (silencieux) => appel(() => api.put(`/projets/${projet.id}/budgets/${budget.id}`, {
     commentaire,
-    lignes: lignesAffichees.map((a) => ({ activite_id: a.id, montant: lireMontant(montants[a.id]) || 0 })),
+    lignes: affichees.map((a) => {
+      const l = ligneDe(a.id);
+      return {
+        activite_id: a.id, montant: montantDe(a.id) || 0,
+        postes: l.postes.map((po) => ({ cle: po.cle || null, libelle: po.libelle.trim(), montant: lireMontant(po.montant) || 0 })),
+      };
+    }),
   }), silencieux ? null : 'Budget enregistré.');
   const soumettre = async () => {
     if (modifie && !(await enregistrer(true))) return;
@@ -193,39 +215,91 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
           Les montants sont figés.
         </div>
       )}
+      {editable && (
+        <div className="pj-aide">
+          Détaillez une activité en <b>lignes budgétaires à justifier</b> (ex. pause café, déjeuner, transport) avec « ＋ ligne » :
+          son montant devient la somme de ses lignes, et chaque justificatif devra indiquer sa ligne.
+        </div>
+      )}
 
       <div className="table-wrap">
         <table className="pj-table">
           <thead>
             <tr>
-              <th>Activité</th><th>Responsable</th>
+              <th>Activité / ligne budgétaire</th><th>Responsable</th>
               <th className="n">Budget en vigueur</th><th className="n">Déjà remis</th>
               <th className="n">{editable ? 'Nouveau montant' : 'Montant proposé'}</th><th className="n">Écart</th>
             </tr>
           </thead>
           <tbody>
-            {lignesAffichees.map((a) => {
-              const m = lireMontant(montants[a.id]);
-              const ecart = (Number.isNaN(m) ? 0 : m) - (enVigueur[a.id] || 0);
+            {affichees.map((a) => {
+              const l = ligneDe(a.id);
+              const m = montantDe(a.id);
+              const vig = enVigueur[a.id];
+              const ecart = (Number.isNaN(m) ? 0 : m) - (vig?.montant || 0);
               const sous = !Number.isNaN(m) && m < a.alloue;
+              const vigPoste = Object.fromEntries((vig?.postes || []).map((po) => [po.cle, po.montant]));
               return (
-                <tr key={a.id} className={a.actif ? '' : 'pj-inactif'}>
-                  <td><strong>{a.nom}</strong>{!a.actif && <span className="pj-badge pj-b-ardoise">désactivée</span>}</td>
-                  <td className="pj-muted">{a.responsable_nom || '—'}</td>
-                  <td className="n">{enVigueur[a.id] !== undefined ? fcfa(enVigueur[a.id]) : '—'}</td>
-                  <td className="n" style={{ color: 'var(--projet-alloue)' }}>{fcfa(a.alloue)}</td>
-                  <td className="n">
-                    {editable ? (
-                      <input className={`pj-in-montant${sous || Number.isNaN(m) ? ' erreur' : ''}`} inputMode="decimal" value={montants[a.id] ?? ''}
-                        onChange={(e) => setMontants({ ...montants, [a.id]: e.target.value })} placeholder="0" aria-label={`Montant ${a.nom}`} />
-                    ) : <b>{fcfa(m)}</b>}
-                    {sous && <div className="pj-err-ligne">Inférieur au déjà remis</div>}
-                  </td>
-                  <td className={`n ${ecart > 0 ? 'pj-hausse' : ecart < 0 ? 'pj-baisse' : 'pj-muted'}`}>{ecart === 0 ? '—' : `${ecart > 0 ? '+' : ''}${fcfa(ecart)}`}</td>
-                </tr>
+                <Fragment key={a.id}>
+                  <tr className={`${a.actif ? '' : 'pj-inactif'} ${l.postes.length ? 'pj-act-mere' : ''}`}>
+                    <td>
+                      <strong>{a.nom}</strong>{!a.actif && <span className="pj-badge pj-b-ardoise">désactivée</span>}
+                      {editable && (
+                        <button type="button" className="pj-ajout-ligne" onClick={() => majLigne(a.id, (x) => ({ ...x, postes: [...x.postes, { cle: null, libelle: '', montant: '' }] }))}>
+                          ＋ ligne
+                        </button>
+                      )}
+                    </td>
+                    <td className="pj-muted">{a.responsable_nom || '—'}</td>
+                    <td className="n">{vig ? fcfa(vig.montant) : '—'}</td>
+                    <td className="n" style={{ color: 'var(--projet-alloue)' }}>{fcfa(a.alloue)}</td>
+                    <td className="n">
+                      {editable && !l.postes.length ? (
+                        <input className={`pj-in-montant${sous || Number.isNaN(m) ? ' erreur' : ''}`} inputMode="decimal" value={l.montant ?? ''}
+                          onChange={(e) => majLigne(a.id, (x) => ({ ...x, montant: e.target.value }))} placeholder="0" aria-label={`Montant ${a.nom}`} />
+                      ) : <b>{fcfa(m)}</b>}
+                      {l.postes.length > 0 && <div className="pj-muted pj-petit">somme des lignes</div>}
+                      {sous && <div className="pj-err-ligne">Inférieur au déjà remis</div>}
+                    </td>
+                    <td className={`n ${ecart > 0 ? 'pj-hausse' : ecart < 0 ? 'pj-baisse' : 'pj-muted'}`}>{ecart === 0 ? '—' : `${ecart > 0 ? '+' : ''}${fcfa(ecart)}`}</td>
+                  </tr>
+                  {l.postes.map((po, i) => {
+                    const pm = lireMontant(po.montant);
+                    const pris = po.cle ? (justifieLigne[po.cle] || 0) : 0;
+                    const sousJ = !Number.isNaN(pm) && pm < pris;
+                    const majPoste = (k, v) => majLigne(a.id, (x) => ({ ...x, postes: x.postes.map((y, j) => (j === i ? { ...y, [k]: v } : y)) }));
+                    return (
+                      <tr key={`${a.id}-${po.cle || i}`} className="pj-poste">
+                        <td colSpan={2}>
+                          <span className="pj-poste-trait">└</span>
+                          {editable ? (
+                            <input className="pj-in-libelle" value={po.libelle} maxLength={150} placeholder="Ligne budgétaire (ex. pause café)"
+                              onChange={(e) => majPoste('libelle', e.target.value)} aria-label="Libellé de la ligne" />
+                          ) : po.libelle}
+                          {pris > 0 && <span className="pj-muted pj-petit"> · justifié ou déposé {fcfa(pris)}</span>}
+                        </td>
+                        <td className="n pj-muted">{po.cle && vigPoste[po.cle] !== undefined ? fcfa(vigPoste[po.cle]) : '—'}</td>
+                        <td />
+                        <td className="n">
+                          {editable ? (
+                            <input className={`pj-in-montant pj-in-poste${sousJ || Number.isNaN(pm) ? ' erreur' : ''}`} inputMode="decimal" value={po.montant}
+                              onChange={(e) => majPoste('montant', e.target.value)} placeholder="0" aria-label={`Montant ${po.libelle}`} />
+                          ) : fcfa(pm)}
+                          {sousJ && <div className="pj-err-ligne">Inférieur au justifié</div>}
+                        </td>
+                        <td className="n">
+                          {editable && pris === 0 && (
+                            <button type="button" className="pj-suppr-ligne" title="Retirer la ligne"
+                              onClick={() => majLigne(a.id, (x) => ({ ...x, postes: x.postes.filter((_, j) => j !== i) }))}>✕</button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
               );
             })}
-            {lignesAffichees.length === 0 && (
+            {affichees.length === 0 && (
               <tr><td colSpan={6} className="pj-muted" style={{ textAlign: 'center', padding: 20 }}>Ajoutez d'abord les activités du projet.</td></tr>
             )}
           </tbody>
@@ -233,7 +307,7 @@ function BudgetEnCours({ projet, budget, activites, budgetValide, acces, devise,
             <tr>
               <td colSpan={2}>Total</td>
               <td className="n">{budgetValide ? fcfa(totalVigueur) : '—'}</td>
-              <td className="n">{fcfa(activites.reduce((s, a) => s + a.alloue, 0))}</td>
+              <td className="n">{fcfa(activites.reduce((t, a) => t + a.alloue, 0))}</td>
               <td className="n" style={{ color: 'var(--projet-budget)' }}>{fcfa(total)} {devise}</td>
               <td className="n">{budgetValide ? `${total - totalVigueur >= 0 ? '+' : ''}${fcfa(total - totalVigueur)}` : ''}</td>
             </tr>
@@ -344,7 +418,12 @@ function OngletBudget({ d, devise, onChange }) {
                       {b.motif_rejet && <div className="pj-alerte rouge">Motif du rejet : {b.motif_rejet}</div>}
                       {b.commentaire && <div className="pj-commentaire">« {b.commentaire} »</div>}
                       {b.lignes.map((l) => (
-                        <div key={l.activite_id} className="pj-kv"><span>{nomActivite[l.activite_id] || `Activité ${l.activite_id}`}</span><b>{fcfa(l.montant)}</b></div>
+                        <Fragment key={l.activite_id}>
+                          <div className="pj-kv"><span>{nomActivite[l.activite_id] || `Activité ${l.activite_id}`}</span><b>{fcfa(l.montant)}</b></div>
+                          {(l.postes || []).map((po) => (
+                            <div key={po.cle} className="pj-kv pj-kv-poste"><span>└ {po.libelle}</span><span>{fcfa(po.montant)}</span></div>
+                          ))}
+                        </Fragment>
                       ))}
                     </div>
                   )}
@@ -453,48 +532,103 @@ export default function ProjetPage() {
       </div>
 
       {onglet === 'activites' && (
-        <div className="pj-carte">
-          <div className="pj-carte-t">
-            Activités et responsables
-            {acces.gerer && <button type="button" className="btn-primary btn-auto pj-ml" onClick={() => setModale({ type: 'activite' })}>＋ Activité</button>}
-          </div>
-          {activites.length === 0 ? (
-            <div className="pj-vide-mini">{acces.gerer ? 'Ajoutez les activités du projet, puis préparez le budget.' : 'Aucune activité.'}</div>
-          ) : (
-            <div className="table-wrap">
-              <table className="pj-table">
-                <thead><tr><th>Activité</th><th>Responsable</th><th className="n">Budget validé</th><th className="n">Alloué</th><th className="n">Reste</th><th style={{ width: 150 }}>Consommation</th><th className="n">Justifié</th><th>Justification</th>{acces.gerer && <th />}</tr></thead>
-                <tbody>
-                  {activites.map((a) => {
-                    const taux = a.budget ? pct(a.alloue, a.budget) : 0;
-                    return (
-                      <tr key={a.id} className={a.actif ? '' : 'pj-inactif'}>
-                        <td><strong>{a.code && <span className="pj-code">{a.code}</span>}{a.nom}</strong>{!a.actif && <span className="pj-badge pj-b-ardoise">désactivée</span>}</td>
-                        <td>{a.responsable_nom || <span className="pj-muted">à désigner</span>}</td>
-                        <td className="n">{a.budget === null ? <span className="pj-muted">—</span> : fcfa(a.budget)}</td>
-                        <td className="n" style={{ color: 'var(--projet-alloue)' }}>{fcfa(a.alloue)}</td>
-                        <td className="n"><b>{a.reste === null ? '—' : fcfa(a.reste)}</b></td>
-                        <td>
-                          <div className="pj-jauge"><span className={taux >= 100 ? 'plein' : taux >= 80 ? 'haut' : ''} style={{ width: `${taux}%` }} /></div>
-                          <div className="pj-muted pj-petit">{a.budget ? `${taux} %` : 'pas de budget validé'} · {a.nb_remises} remise(s)</div>
-                        </td>
-                        <td className="n" style={{ color: 'var(--projet-justifie)' }}>{fcfa(a.justifie)}</td>
-                        <td>
-                          <button type="button" className={`pj-badge ${STATUT_ACT[a.statut_justification].cls} pj-badge-btn`} style={{ marginLeft: 0 }}
-                            onClick={() => setParams({ onglet: 'justificatifs', activite: String(a.id) })} title="Voir les justificatifs">
-                            {STATUT_ACT[a.statut_justification].lib}
-                          </button>
-                          {a.en_attente > 0 && <div className="pj-muted pj-petit">{fcfa(a.en_attente)} à justifier</div>}
-                        </td>
-                        {acces.gerer && <td><button type="button" className="btn-icon" title="Modifier" onClick={() => setModale({ type: 'activite', activite: a })}>✏️</button></td>}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+        <>
+          {d.remise_globale && d.remise_globale.alloue > 0 && (
+            <div className="pj-carte pj-globale">
+              <div className="pj-globale-t">◆ Remise globale au projet <small>fonds remis sans activité précise, justifiés activité par activité</small></div>
+              <div className="pj-globale-c">
+                <span>Remis <b style={{ color: 'var(--projet-alloue)' }}>{fcfa(d.remise_globale.alloue)}</b></span>
+                <span>Justifié via les activités <b style={{ color: 'var(--projet-justifie)' }}>{fcfa(d.remise_globale.justifie)}</b></span>
+                {d.remise_globale.rembourse > 0 && <span>Remboursé <b>{fcfa(d.remise_globale.rembourse)}</b></span>}
+                <span>Reste à justifier <b style={{ color: 'var(--projet-attente)' }}>{fcfa(d.remise_globale.en_attente)}</b></span>
+              </div>
             </div>
           )}
-        </div>
+          <div className="pj-carte">
+            <div className="pj-carte-t">
+              Activités et responsables
+              {d.budget_reste_a_allouer !== null && <small>reste à allouer sur le budget : {fcfa(d.budget_reste_a_allouer)} {devise}</small>}
+              {acces.gerer && <button type="button" className="btn-primary btn-auto pj-ml" onClick={() => setModale({ type: 'activite' })}>＋ Activité</button>}
+            </div>
+            {activites.length === 0 ? (
+              <div className="pj-vide-mini">{acces.gerer ? 'Ajoutez les activités du projet, puis préparez le budget.' : 'Aucune activité.'}</div>
+            ) : (
+              <div className="table-wrap">
+                <table className="pj-table">
+                  <thead>
+                    <tr>
+                      <th>Activité / ligne</th><th>Responsable</th>
+                      <th className="n" title="Budget validé par le directeur">Budget</th>
+                      <th className="n" title="Fonds remis au responsable par le journal">Remis</th>
+                      <th className="n" title="Dépenses justifiées par des pièces validées">Utilisé</th>
+                      <th style={{ width: 170 }}>Utilisation</th>
+                      <th className="n" title="Remis − utilisé − remboursé">Reste à justifier</th>
+                      <th>Justification</th>{acces.gerer && <th />}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activites.map((a) => {
+                      const base = a.budget || 0;
+                      const wJ = base ? Math.min(100, (a.justifie / base) * 100) : 0;
+                      const wR = base ? Math.min(100 - wJ, (Math.max(a.alloue - a.justifie, 0) / base) * 100) : 0;
+                      const st = STATUT_ACT[a.statut_justification] || STATUT_ACT.non_financee;
+                      return (
+                        <Fragment key={a.id}>
+                          <tr className={a.actif ? '' : 'pj-inactif'}>
+                            <td><strong>{a.code && <span className="pj-code">{a.code}</span>}{a.nom}</strong>{!a.actif && <span className="pj-badge pj-b-ardoise">désactivée</span>}</td>
+                            <td>{a.responsable_nom || <span className="pj-muted">à désigner</span>}</td>
+                            <td className="n">{a.budget === null ? <span className="pj-muted">—</span> : fcfa(a.budget)}</td>
+                            <td className="n" style={{ color: 'var(--projet-alloue)' }}>{fcfa(a.alloue)}</td>
+                            <td className="n" style={{ color: 'var(--projet-justifie)' }}><b>{fcfa(a.justifie)}</b>
+                              {a.a_controler > 0 && <div className="pj-muted pj-petit">+ {fcfa(a.a_controler)} à contrôler</div>}</td>
+                            <td>
+                              <div className="pj-jauge pj-jauge-2" title={`Utilisé ${fcfa(a.justifie)} · remis non justifié ${fcfa(Math.max(a.alloue - a.justifie, 0))} · budget ${fcfa(a.budget)}`}>
+                                <span style={{ width: `${wJ}%`, background: 'var(--projet-justifie)' }} />
+                                <span style={{ width: `${wR}%`, background: 'var(--projet-alloue)', opacity: 0.45 }} />
+                              </div>
+                              <div className="pj-muted pj-petit">
+                                {a.taux_utilisation !== null ? `${a.taux_utilisation} % du remis utilisé` : a.justifie > 0 ? 'sur la remise globale' : 'rien remis'}
+                                {a.budget ? ` · ${pct(a.justifie, a.budget)} % du budget` : ''}
+                              </div>
+                            </td>
+                            <td className="n">{a.en_attente > 0 ? <b style={{ color: 'var(--projet-attente)' }}>{fcfa(a.en_attente)}</b> : <span className="pj-muted">0</span>}
+                              {a.rembourse > 0 && <div className="pj-muted pj-petit">remboursé {fcfa(a.rembourse)}</div>}</td>
+                            <td>
+                              <button type="button" className={`pj-badge ${st.cls} pj-badge-btn`} style={{ marginLeft: 0 }}
+                                onClick={() => setParams({ onglet: 'justificatifs', activite: String(a.id) })} title="Voir les justificatifs">
+                                {st.lib}
+                              </button>
+                            </td>
+                            {acces.gerer && <td><button type="button" className="btn-icon" title="Modifier" onClick={() => setModale({ type: 'activite', activite: a })}>✏️</button></td>}
+                          </tr>
+                          {(a.postes || []).map((po) => (
+                            <tr key={po.cle} className="pj-poste">
+                              <td colSpan={2}><span className="pj-poste-trait">└</span>{po.libelle}</td>
+                              <td className="n pj-muted">{fcfa(po.budget)}</td>
+                              <td />
+                              <td className="n" style={{ color: 'var(--projet-justifie)' }}>{fcfa(po.justifie)}
+                                {po.a_controler > 0 && <div className="pj-muted pj-petit">+ {fcfa(po.a_controler)} à contrôler</div>}</td>
+                              <td>
+                                <div className="pj-jauge"><span className={po.justifie + po.a_controler >= po.budget && po.budget > 0 ? 'plein' : ''}
+                                  style={{ width: `${po.budget ? Math.min(100, ((po.justifie + po.a_controler) / po.budget) * 100) : 0}%`, background: 'var(--projet-justifie)' }} /></div>
+                              </td>
+                              <td className="n pj-muted pj-petit" colSpan={acces.gerer ? 3 : 2}>reste sur la ligne {fcfa(po.reste)}</td>
+                            </tr>
+                          ))}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div className="pj-legende">
+              <span><i style={{ background: 'var(--projet-justifie)' }} />Utilisé (justifié, pièces validées)</span>
+              <span><i style={{ background: 'var(--projet-alloue)', opacity: 0.45 }} />Remis, pas encore justifié</span>
+              <span><i style={{ background: '#f1f5f9', border: '1px solid #e2e8f0' }} />Budget non encore remis</span>
+            </div>
+          </div>
+        </>
       )}
 
       {onglet === 'budget' && <OngletBudget d={d} devise={devise} onChange={charger} />}
