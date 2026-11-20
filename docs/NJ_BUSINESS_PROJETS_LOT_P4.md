@@ -60,3 +60,16 @@
 Sauvegarde, envoi du code (backend + `frontend/dist`), `node db/migrate.js` (applique la 071), redémarrage, Ctrl+Maj+R.
 
 **Données existantes.** Les activités créées pour contourner l'absence de lignes (ex. « Pause café », « Pause déjeuner », « Transport » comme activités séparées) restent valables. Pour passer au nouveau modèle : créer l'activité mère, préparer une révision du budget avec ses lignes, puis désactiver les anciennes activités une fois leurs fonds justifiés.
+
+## 8. Complément — suppression d'un projet ou d'une activité (20/11/2026)
+
+Remarque de Franck : « on ne peut pas supprimer les projets créés ».
+
+| Action | Qui | Possible si | Sinon |
+|---|---|---|---|
+| **Supprimer un projet** (fiche → « 🗑 Supprimer ») | Direction (`projets.gerer`) | Aucun financement reçu, aucune écriture du journal (même annulée) sur le projet ou ses activités, aucune sortie en attente, aucun justificatif. Les activités et **tous** les budgets du projet (même validés) partent avec lui. | Message clair : « … ne peut pas être supprimé : 1 financement reçu, 1 écriture du journal… Clôturez-le ». |
+| **Supprimer une activité** (fenêtre de l'activité → « 🗑 Supprimer ») | Direction ou chef du projet | Mêmes conditions, et l'activité n'est dans aucun budget soumis ou validé (un brouillon suffit à la retirer). | « … Désactivez-la ». |
+
+Chaque suppression est tracée dans `audit_log` (`DELETE_PROJET`, `DELETE_ACTIVITE_PROJET`, avec le nom, les activités et les budgets supprimés). Les garde-fous en base des budgets restent actifs : seule la transaction de suppression d'un projet sans mouvement les lève.
+
+Tests : 2 scénarios ajoutés à `projets-p4` (11 au total) ; suite complète **274 / 274**. Service Worker v76. Pas de migration.

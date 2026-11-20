@@ -34,6 +34,16 @@ function ActiviteModal({ projetId, activite, onFermer, onEnregistre }) {
   const [enCours, setEnCours] = useState(false);
   useEffect(() => { api.get('/projets/utilisateurs').then((r) => { if (Array.isArray(r)) setUtilisateurs(r); }); }, []);
 
+  const supprimer = async () => {
+    if (!window.confirm(`Supprimer l'activité « ${activite.nom} » ?\n\nPossible seulement si aucune remise de fonds ni aucun justificatif ne la concerne et si elle n'est pas dans un budget soumis ou validé. Sinon, décochez « Activité active ».`)) return;
+    setEnCours(true);
+    const r = await api.delete(`/projets/${projetId}/activites/${activite.id}`);
+    setEnCours(false);
+    if (r.error) { setErreur(r.error); return; }
+    toast(r.message || 'Activité supprimée.', 'success');
+    onEnregistre();
+  };
+
   const enregistrer = async () => {
     if (!f.nom.trim()) { setErreur('Le nom de l\'activité est obligatoire.'); return; }
     setEnCours(true);
@@ -51,6 +61,7 @@ function ActiviteModal({ projetId, activite, onFermer, onEnregistre }) {
     <Modale
       titre={activite ? 'Modifier l\'activité' : 'Nouvelle activité'} onFermer={onFermer} enCours={enCours} largeur={500}
       pied={<>
+        {activite && <button type="button" className="btn-ghost pj-btn-rouge-c" onClick={supprimer} disabled={enCours} style={{ marginRight: 'auto' }}>🗑 Supprimer</button>}
         <button type="button" className="btn-ghost" onClick={onFermer} disabled={enCours}>Annuler</button>
         <button type="button" className="btn-primary" onClick={enregistrer} disabled={enCours}>{enCours ? 'Enregistrement…' : '💾 Enregistrer'}</button>
       </>}
@@ -438,6 +449,7 @@ function OngletBudget({ d, devise, onChange }) {
 }
 
 export default function ProjetPage() {
+  const toast = useToast();
   const { id } = useParams();
   const { devise } = useApp();
   const navigate = useNavigate();
@@ -454,6 +466,14 @@ export default function ProjetPage() {
     setD(r);
   }, [id]);
   useEffect(() => { charger(); }, [charger]);
+
+  const supprimerProjet = async () => {
+    if (!window.confirm(`Supprimer définitivement le projet « ${d.projet.nom} », ses activités et ses budgets ?\n\nPossible seulement si aucun financement, aucune remise de fonds et aucun justificatif ne le concerne. Sinon, clôturez-le.`)) return;
+    const r = await api.delete(`/projets/${d.projet.id}`);
+    if (r.error) { toast(r.error, 'error', 12000); return; }
+    toast(r.message || 'Projet supprimé.', 'success');
+    navigate('/projets');
+  };
 
   if (erreur) {
     return (
@@ -496,6 +516,9 @@ export default function ProjetPage() {
           {acces.chef && <span className="pj-badge pj-b-bleu">Vous êtes chef de ce projet</span>}
           {acces.modifier_projet && (
             <button type="button" className="btn-ghost" onClick={() => setModale({ type: 'projet' })}>✎ Modifier le projet</button>
+          )}
+          {acces.modifier_projet && (
+            <button type="button" className="btn-ghost pj-btn-rouge-c" onClick={supprimerProjet} title="Possible tant qu'aucun argent n'a touché le projet">🗑 Supprimer</button>
           )}
         </div>
       </div>

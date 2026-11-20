@@ -320,6 +320,8 @@ router.get   ('/projets/:id',          authGuard, tenantGuard, projCtrl.detail);
 router.put   ('/projets/:id',          authGuard, tenantGuard, projCtrl.modifierProjet);
 router.post  ('/projets/:id/activites',      authGuard, tenantGuard, projCtrl.creerActivite);
 router.put   ('/projets/:id/activites/:aid', authGuard, tenantGuard, projCtrl.modifierActivite);
+router.delete('/projets/:id',                authGuard, tenantGuard, projCtrl.supprimerProjet);
+router.delete('/projets/:id/activites/:aid', authGuard, tenantGuard, projCtrl.supprimerActivite);
 router.post  ('/projets/:id/budgets',                 authGuard, tenantGuard, projCtrl.creerBudget);
 router.put   ('/projets/:id/budgets/:bid',            authGuard, tenantGuard, projCtrl.enregistrerBudget);
 router.delete('/projets/:id/budgets/:bid',            authGuard, tenantGuard, projCtrl.supprimerBudget);

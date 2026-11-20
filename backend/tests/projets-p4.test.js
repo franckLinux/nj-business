@@ -224,3 +224,44 @@ test('Lignes figées en base une fois le budget soumis', async () => {
   const [p] = await sql(`SELECT po.id FROM projet_budget_postes po JOIN projet_budgets b ON b.id = po.budget_id WHERE b.projet_id = $1 AND b.statut = 'valide' LIMIT 1`, [S.projet]);
   await assert.rejects(sql('UPDATE projet_budget_postes SET montant = 1 WHERE id = $1', [p.id]), /BUDGET_FIGE/);
 });
+
+// ── Suppression (20/11/2026) ────────────────────────────────────────────────
+test('Suppression : refusée dès que de l\'argent a touché le projet ou l\'activité', async () => {
+  const r = await appel('DELETE', `/projets/${S.projet}`, 'dir');
+  assert.equal(r.status, 409);
+  assert.equal(r.code, 'PROJET_UTILISE');
+  assert.match(r.message, /Clôturez-le/);
+  // Le chef de projet ne supprime pas un projet (direction seulement).
+  assert.equal((await appel('DELETE', `/projets/${S.projet}`, 'chef')).status, 403);
+  // Activité avec remise : refusée.
+  assert.equal((await appel('DELETE', `/projets/${S.projet}/activites/${S.atelier}`, 'chef')).code, 'ACTIVITE_UTILISEE');
+});
+
+test('Suppression : un projet sans mouvement part avec ses activités et ses budgets, même validé', async () => {
+  const p = await appel('POST', '/projets', 'dir', { nom: 'Projet de test à supprimer', chef_projet_id: C.u.chef.id });
+  assert.equal(p.status, 201, p.message);
+  const a1 = await appel('POST', `/projets/${p.data.id}/activites`, 'chef', { nom: 'Activité test 1' });
+  const a2 = await appel('POST', `/projets/${p.data.id}/activites`, 'chef', { nom: 'Activité test 2' });
+  const b = await appel('POST', `/projets/${p.data.id}/budgets`, 'chef');
+  await appel('PUT', `/projets/${p.data.id}/budgets/${b.data.id}`, 'chef', { lignes: [
+    { activite_id: a1.data.id, postes: [{ libelle: 'Ligne A', montant: 1000 }] }, { activite_id: a2.data.id, montant: 2000 }] });
+  // Activité présente seulement dans un brouillon : supprimable.
+  const a3 = await appel('POST', `/projets/${p.data.id}/activites`, 'chef', { nom: 'Activité test 3' });
+  assert.equal((await appel('DELETE', `/projets/${p.data.id}/activites/${a3.data.id}`, 'chef')).status, 200);
+  assert.equal((await appel('POST', `/projets/${p.data.id}/budgets/${b.data.id}/soumettre`, 'chef')).status, 200);
+  assert.equal((await appel('POST', `/projets/${p.data.id}/budgets/${b.data.id}/valider`, 'dir')).status, 200);
+  // Activité dans un budget validé : refusée (désactiver).
+  assert.equal((await appel('DELETE', `/projets/${p.data.id}/activites/${a2.data.id}`, 'chef')).code, 'ACTIVITE_AU_BUDGET');
+  // Le projet entier, lui, se supprime : aucun argent ne l'a touché.
+  const del = await appel('DELETE', `/projets/${p.data.id}`, 'dir');
+  assert.equal(del.status, 200, del.message);
+  const [{ n }] = await sql(`SELECT (SELECT COUNT(*) FROM activites WHERE id = $1 OR projet_id = $1)
+                                  + (SELECT COUNT(*) FROM projet_budgets WHERE projet_id = $1) AS n`, [p.data.id]);
+  assert.equal(Number(n), 0);
+  const [log] = await sql(`SELECT action, ancienne_valeur FROM audit_log WHERE tenant_id = $1 AND entite = 'projets' AND entite_id = $2`, [C.tenant, String(p.data.id)]);
+  assert.equal(log.action, 'DELETE_PROJET');
+  assert.equal(log.ancienne_valeur.nom, 'Projet de test à supprimer');
+  // Les garde-fous restent actifs hors de cette transaction.
+  const [bv] = await sql(`SELECT id FROM projet_budgets WHERE projet_id = $1 AND statut = 'valide'`, [S.projet]);
+  await assert.rejects(sql('DELETE FROM projet_budgets WHERE id = $1', [bv.id]), /BUDGET_FIGE/);
+});

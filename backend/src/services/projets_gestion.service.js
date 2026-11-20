@@ -674,6 +674,85 @@ const deciderBudget = async (req, projetId, budgetId, { valider, motif }) => {
   }
 };
 
+// ── Suppression (20/11/2026) ────────────────────────────────────────────────
+// Un projet ou une activité se supprime tant qu'AUCUN argent ne l'a touché :
+// ni écriture du journal (financement, remise, remboursement, même annulée),
+// ni sortie en attente, ni justificatif. Sinon il reste dans l'historique :
+// on le clôture (projet) ou on le désactive (activité).
+const traces = async (ids, projetId, transaction) => {
+  const avecJustif = await justifInstalle();
+  const [r] = await q(
+    `SELECT (SELECT COUNT(*)::int FROM journal WHERE activite_id IN (:ids)) AS ecritures,
+            (SELECT COUNT(*)::int FROM mouvements_attente WHERE activite_id IN (:ids)) AS attentes,
+            ${projetId ? '(SELECT COUNT(*)::int FROM journal_imputations_projet WHERE projet_id = :p)' : '0'} AS financements,
+            ${avecJustif ? '(SELECT COUNT(*)::int FROM projet_justificatifs WHERE activite_id IN (:ids) OR projet_id IN (:ids))' : '0'} AS justificatifs`,
+    { ids, p: projetId || 0 }, transaction);
+  return r;
+};
+const raisons = (r) => [
+  r.financements && `${r.financements} financement(s) reçu(s)`,
+  r.ecritures && `${r.ecritures} écriture(s) du journal`,
+  r.attentes && `${r.attentes} sortie(s) en attente`,
+  r.justificatifs && `${r.justificatifs} justificatif(s)`,
+].filter(Boolean);
+
+const journaliser = (req, action, entite, id, valeur, t) => q(
+  `INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, ancienne_valeur)
+   VALUES (:t, :u, :a, :e, :id, CAST(:v AS jsonb)) RETURNING id`,
+  { t: req.tenantId, u: req.user.id, a: action, e: entite, id: String(id), v: JSON.stringify(valeur) }, t);
+
+/** Supprime un projet sans aucun mouvement d'argent (direction : projets.gerer). */
+const supprimerProjet = async (req, projetId) => {
+  const { projet: p, droits: d } = await chargerProjet(req, projetId);
+  if (!d.gerer) throw err(403, 'Permission requise : gérer les projets.', 'PROJET_NON_AUTORISE');
+  return sequelize.transaction(async (t) => {
+    await q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `projet_remise:${p.id}` }, t);
+    const enfants = (await q('SELECT id, nom FROM activites WHERE projet_id = :p', { p: p.id }, t)).map((a) => Number(a.id));
+    const r = await traces([p.id, ...enfants], p.id, t);
+    const motifs = raisons(r);
+    if (motifs.length) {
+      throw err(409, `« ${p.nom} » ne peut pas être supprimé : ${motifs.join(', ')}. Clôturez-le (Modifier le projet → Projet clôturé) : tout l'historique reste consultable.`, 'PROJET_UTILISE');
+    }
+    const budgets = await q('SELECT id, version, statut FROM projet_budgets WHERE projet_id = :p', { p: p.id }, t);
+    // Les budgets soumis ou validés sont figés en base : leur suppression,
+    // avec le projet entier, passe par le mode maintenance de la transaction.
+    await q("SELECT set_config('app.journal_maintenance', 'on', true)", {}, t);
+    if (await postesInstalles()) await q('DELETE FROM projet_budget_postes WHERE budget_id IN (SELECT id FROM projet_budgets WHERE projet_id = :p) RETURNING id', { p: p.id }, t);
+    await q('DELETE FROM projet_budget_lignes WHERE budget_id IN (SELECT id FROM projet_budgets WHERE projet_id = :p) RETURNING id', { p: p.id }, t);
+    await q('DELETE FROM projet_budgets WHERE projet_id = :p RETURNING id', { p: p.id }, t);
+    await q('DELETE FROM activites WHERE projet_id = :p RETURNING id', { p: p.id }, t);
+    await q('DELETE FROM activites WHERE id = :p RETURNING id', { p: p.id }, t);
+    await q("SELECT set_config('app.journal_maintenance', 'off', true)", {}, t);
+    await journaliser(req, 'DELETE_PROJET', 'projets', p.id,
+      { nom: p.nom, code: p.code, activites: enfants.length, budgets: budgets.map((b) => `v${b.version} ${b.statut}`) }, t);
+    return { supprime: true, message: `Projet « ${p.nom} » supprimé.` };
+  });
+};
+
+/** Supprime une activité sans mouvement d'argent et absente de tout budget soumis ou validé. */
+const supprimerActivite = async (req, projetId, activiteId) => {
+  const { projet: p } = await chargerProjet(req, projetId, { gerer: true });
+  return sequelize.transaction(async (t) => {
+    const [a] = await q('SELECT id, nom FROM activites WHERE id = :a AND projet_id = :p', { a: parseInt(activiteId, 10) || 0, p: p.id }, t);
+    if (!a) throw err(404, 'Activité introuvable dans ce projet.', 'ACTIVITE_INTROUVABLE');
+    const motifs = raisons(await traces([a.id], null, t));
+    if (motifs.length) {
+      throw err(409, `« ${a.nom} » ne peut pas être supprimée : ${motifs.join(', ')}. Désactivez-la : l'historique reste consultable.`, 'ACTIVITE_UTILISEE');
+    }
+    const [fige] = await q(
+      `SELECT b.version, b.statut FROM projet_budget_lignes l JOIN projet_budgets b ON b.id = l.budget_id
+        WHERE l.activite_id = :a AND b.statut <> 'brouillon' ORDER BY b.version DESC LIMIT 1`, { a: a.id }, t);
+    if (fige) {
+      throw err(409, `« ${a.nom} » figure dans le budget v${fige.version} (${fige.statut === 'valide' ? 'validé' : fige.statut}) : elle ne peut pas être supprimée. Désactivez-la, ou retirez-la d'une révision du budget.`, 'ACTIVITE_AU_BUDGET');
+    }
+    if (await postesInstalles()) await q('DELETE FROM projet_budget_postes WHERE activite_id = :a RETURNING id', { a: a.id }, t);
+    await q('DELETE FROM projet_budget_lignes WHERE activite_id = :a RETURNING id', { a: a.id }, t);
+    await q('DELETE FROM activites WHERE id = :a RETURNING id', { a: a.id }, t);
+    await journaliser(req, 'DELETE_ACTIVITE_PROJET', 'projets', a.id, { nom: a.nom, projet: p.nom }, t);
+    return { supprime: true, message: `Activité « ${a.nom} » supprimée.` };
+  });
+};
+
 /** Utilisateurs actifs de l'entreprise, pour les désignations. */
 const utilisateurs = async (req) => {
   await exigerOng(req.tenantId);
@@ -704,6 +783,6 @@ module.exports = {
   chargerProjet, chiffresActivites, formerActivite, accesProjet, exigerOng, justifInstalle,
   situationProjets, totaliser, postesInstalles,
   droits, acces, lister, detail, utilisateurs,
-  creerProjet, modifierProjet, creerActivite, modifierActivite,
+  creerProjet, modifierProjet, creerActivite, modifierActivite, supprimerProjet, supprimerActivite,
   creerBudget, enregistrerBudget, soumettreBudget, retirerBudget, supprimerBudget, deciderBudget,
 };
