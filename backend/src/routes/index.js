@@ -395,6 +395,8 @@ router.get   ('/pieces/types',              authGuard, tenantGuard, requirePermi
 router.post  ('/pieces/types',              authGuard, tenantGuard, requirePermission('pieces.edit'), createTypeRules, validate, piecesCtrl.createType);
 router.put   ('/pieces/types/:id',          authGuard, tenantGuard, requirePermission('pieces.edit'), updateTypeRules, validate, piecesCtrl.updateType);
 router.delete('/pieces/types/:id',          authGuard, tenantGuard, requirePermission('pieces.edit'), typeIdParamRule, validate, piecesCtrl.deleteType);
+// 073 : lecture d'une pièce, uniquement par l'API authentifiée (plus de /uploads public).
+router.get   ('/pieces/fichier/:pieceId',   authGuard, tenantGuard, requirePermission('pieces.view'), piecesCtrl.fichier);
 router.get   ('/pieces/:mouvementId',       authGuard, tenantGuard, requirePermission('pieces.view'), piecesCtrl.getByMouvement);
 router.post  ('/pieces/upload/:mouvementId',authGuard, tenantGuard, requirePermission('pieces.upload'), uploadRules, validate, piecesCtrl.upload);
 router.delete('/pieces/item/:pieceId',      authGuard, tenantGuard, requirePermission('pieces.upload'), piecesCtrl.deletePiece);

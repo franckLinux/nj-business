@@ -29,7 +29,8 @@
     "test:regularite-formelle": "node --test tests/regularite-formelle.test.js",
     "test:arretes-inventaires": "node --test tests/arretes-inventaires.test.js",
     "test:modules": "node --test tests/modules.test.js",
-    "test:projets": "node --test tests/projets-p1.test.js tests/projets-p2.test.js tests/projets-p3.test.js tests/projets-p4.test.js tests/projets-p5.test.js"
+    "test:projets": "node --test tests/projets-p1.test.js tests/projets-p2.test.js tests/projets-p3.test.js tests/projets-p4.test.js tests/projets-p5.test.js",
+    "test:pieces-privees": "node --test tests/pieces-privees.test.js"
   },
   "//": "Les scripts sequelize:migrate* ont été retirés : sequelize-cli est gelé sur son baseline et n'est joué nulle part dans la chaîne de déploiement. Toute migration de schéma s'écrit en SQL dans db/migrations/ — voir migrations/README.md.",
   "dependencies": {
@@ -43,7 +44,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.6.1",
     "pdfkit": "^0.15.2",
     "pg": "^8.11.3",
     "qrcode": "^1.5.4",

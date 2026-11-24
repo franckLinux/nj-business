@@ -7,8 +7,11 @@ const MAX_FILE_SIZE = storage.MAX_FILE_SIZE;
 const ALLOWED_TYPES = storage.ALLOWED_TYPES;
 
 // ── POST /api/pieces/upload/:mouvementId ──────────────────────────────────
+// 073 : le type est contrôlé sur le CONTENU du fichier (signature), et la pièce
+// est rangée dans le dossier privé ; son adresse est celle de l'API authentifiée.
 const upload = async (req, res) => {
   const { mouvementId } = req.params;
+  let stored = null;
   try {
     // Vérifier que le mouvement appartient au tenant
     const mouvement = await Mouvement.findOne({ where: { id: parseInt(mouvementId, 10), tenant_id: req.tenantId } });
@@ -26,28 +29,83 @@ const upload = async (req, res) => {
       return res.status(400).json({ error: 'Type de fichier non autorisé. (JPG, PNG, WEBP, PDF)' });
     }
 
-    const buffer = Buffer.from(data_base64, 'base64');
+    const buffer = Buffer.from(String(data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!buffer.length) {
+      return res.status(400).json({ error: 'Fichier vide.' });
+    }
     if (buffer.length > MAX_FILE_SIZE) {
       return res.status(400).json({ error: 'Fichier trop volumineux (max 5 Mo).' });
     }
+    const typeContenu = storage.typeReel(buffer);
+    if (!typeContenu) {
+      return res.status(400).json({ error: 'Le contenu du fichier n\'est pas un PDF ni une image JPG, PNG ou WEBP.' });
+    }
 
-    const stored = await storage.save(req.tenantId, mouvementId, buffer, mime_type);
+    stored = await storage.save(req.tenantId, mouvementId, buffer, typeContenu);
 
     const piece = await PieceJointe.create({
       tenant_id: req.tenantId,
       journal_id_mvt: parseInt(mouvementId, 10),
-      nom_fichier,
+      nom_fichier: nomPropre(nom_fichier, typeContenu),
       storage_path: stored.path,
-      storage_url: stored.url,
-      type_mime: mime_type,
+      storage_url: 'en-cours',
+      type_mime: typeContenu,
       taille_octets: stored.size,
       uploaded_by: req.user.id,
     });
+    await piece.update({ storage_url: storage.urlFichier(piece.id) });
     res.status(201).json(piece);
   } catch (err) {
     console.error('[Pieces] upload :', err.message);
-    res.status(500).json({ error: `Erreur upload : ${err.message}` });
+    if (stored) await storage.remove(stored.path).catch((e) => console.error('[Pieces] nettoyage après échec :', e.message));
+    res.status(500).json({ error: 'L\'envoi de la pièce a échoué. Réessayez ; si le problème persiste, contactez le cabinet.' });
   }
+};
+
+// Nom affiché : lisible, sans chemin ni caractère de contrôle.
+const nomPropre = (nom, mime) => {
+  const base = String(nom || '').split(/[\\/]/).pop().replace(/[\u0000-\u001f"<>|*?:]/g, '').trim().slice(0, 150);
+  const ext = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[mime];
+  return base || `piece.${ext}`;
+};
+
+// ── GET /api/pieces/fichier/:pieceId — 073 ────────────────────────────────
+// Seule façon de lire une pièce : jeton valide, même client, pieces.view.
+// Une pièce d'un autre client répond 404 (on ne révèle pas qu'elle existe).
+const fichier = async (req, res) => {
+  const id = parseInt(req.params.pieceId, 10);
+  if (!Number.isInteger(id) || id <= 0) return res.status(404).json({ error: 'Pièce introuvable.' });
+  let piece;
+  try {
+    piece = await PieceJointe.findOne({ where: { id, tenant_id: req.tenantId } });
+  } catch (err) {
+    console.error('[Pieces] fichier :', err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+  if (!piece) return res.status(404).json({ error: 'Pièce introuvable.' });
+  let chemin;
+  try {
+    chemin = storage.cheminComplet(piece.storage_path);
+  } catch (err) {
+    console.error(`[Pieces] chemin refusé pour la pièce ${id} :`, err.message);
+    return res.status(404).json({ error: 'Pièce introuvable.' });
+  }
+  const nom = encodeURIComponent(piece.nom_fichier || `piece-${id}`);
+  res.set({
+    'Content-Type': ALLOWED_TYPES.includes(piece.type_mime) ? piece.type_mime : 'application/octet-stream',
+    'Content-Disposition': `inline; filename*=UTF-8''${nom}`,
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+  });
+  res.sendFile(chemin, (err) => {
+    if (!err) return;
+    console.error(`[Pieces] lecture du fichier de la pièce ${id} :`, err.message);
+    if (!res.headersSent) {
+      res.removeHeader('Content-Disposition');
+      res.status(err.code === 'ENOENT' ? 404 : 500).type('application/json')
+        .send(JSON.stringify({ error: err.code === 'ENOENT' ? 'Fichier de la pièce introuvable sur le serveur.' : 'Erreur serveur.' }));
+    }
+  });
 };
 
 // ── GET /api/pieces/:mouvementId ──────────────────────────────────────────
@@ -158,4 +216,5 @@ const deleteType = async (req, res) => {
   }
 };
 
-module.exports = { upload, getByMouvement, deletePiece, getTypes, createType, updateType, deleteType };
+module.exports = {
+  fichier, upload, getByMouvement, deletePiece, getTypes, createType, updateType, deleteType };

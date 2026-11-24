@@ -96,17 +96,18 @@ app.use(['/api/activation', '/api/taches'], rateLimit({
 }));
 
 // ── Pièces jointes stockées sur disque local ──────────────────────────────
+// 073 : le dossier des pièces n'est PLUS servi en statique. Une pièce
+// justificative ne sort que par l'API authentifiée (GET /api/pieces/fichier/:id),
+// cloisonnée par client et soumise à pieces.view. Les anciens liens /uploads/…
+// répondent 404, sans jamais livrer le fichier.
 const storage = require('./src/services/storage.service');
 storage.init()
-  .then((dir) => console.log(`[Storage] Dossier des pièces jointes : ${dir}`))
+  .then((dir) => console.log(`[Storage] Dossier des pièces jointes (privé) : ${dir}`))
   .catch((err) => console.error('[Storage] Initialisation impossible :', err.message));
 
-app.use(storage.BASE_URL, express.static(storage.STORAGE_DIR, {
-  dotfiles: 'deny',
-  index: false,
-  maxAge: '1h',
-  setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff'),
-}));
+app.use(storage.BASE_URL, (req, res) => {
+  res.status(404).json({ error: 'Fichier introuvable. Les pièces s\'ouvrent depuis l\'application, une fois connecté.' });
+});
 
 // ── Initialisation automatique de la base au démarrage ────────────────────
 // Alternative à GET /api/admin/setup pour les hébergements où ce endpoint

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
-import { api, API_BASE } from '@/lib/api';
+import { api } from '@/lib/api';
 
 // Pièces jointes d'une écriture existante (C17) : consultation, ajout et
 // retrait. Lecture : pieces.view ; ajout/retrait : pieces.upload.
@@ -40,6 +40,17 @@ export default function PiecesModal({ m, modifiable, onClose }) {
     reader.readAsDataURL(file);
   };
 
+  // 073 : la pièce est lue par l'API avec le jeton (plus de lien public /uploads).
+  const ouvrir = async (p) => {
+    const w = window.open('', '_blank');
+    const r = await api.fichier(`/pieces/fichier/${p.id}`);
+    if (r.error) { if (w) w.close(); toast(r.error, 'error', 7000); return; }
+    const lien = URL.createObjectURL(r.blob);
+    if (w) w.location.href = lien;
+    else { const a = document.createElement('a'); a.href = lien; a.download = p.nom_fichier || 'piece'; a.click(); }
+    setTimeout(() => URL.revokeObjectURL(lien), 60000);
+  };
+
   const retirer = async (p) => {
     if (!window.confirm(`Retirer la pièce « ${p.nom_fichier} » ?`)) return;
     const r = await api.delete(`/pieces/item/${p.id}`);
@@ -62,7 +73,7 @@ export default function PiecesModal({ m, modifiable, onClose }) {
               : pieces.map((p) => (
                 <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6 }}>
                   <span style={{ fontSize: 18 }}>{p.type_mime === 'application/pdf' ? '📄' : '🖼️'}</span>
-                  <a href={`${API_BASE}${p.storage_url}`} target="_blank" rel="noopener noreferrer" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 600 }}>{p.nom_fichier}</a>
+                  <button type="button" className="btn-link" title="Ouvrir la pièce" onClick={() => ouvrir(p)} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13, fontWeight: 600, textAlign: 'left', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--accent)' }}>{p.nom_fichier}</button>
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{taille(p.taille_octets || 0)}</span>
                   {peutJoindre && <button className="btn-icon danger" title="Retirer" onClick={() => retirer(p)}>✕</button>}
                 </div>
