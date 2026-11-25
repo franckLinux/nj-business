@@ -64,6 +64,8 @@ const DROITS_RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'c
   'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
 const DROITS_FACTURES = ['com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler'];
 import VerificationBcPage from '@/pages/VerificationBcPage';
+import EcrituresPage from '@/pages/finance/EcrituresPage';
+import { BalancePage, GrandLivrePage } from '@/pages/finance/EtatsComptablesPages';
 import OffreFournisseurPage from '@/pages/OffreFournisseurPage';
 import { ConsultationsPage, ConsultationFormPage, ConsultationPage, ComparatifPage } from '@/pages/commercial/ConsultationsPages';
 import { FraisListePage, FraisFormPage, FraisPage } from '@/pages/commercial/FraisPages';
@@ -291,6 +293,9 @@ function AuthenticatedApp() {
         <Route path="controle/ecarts"     element={<Autorise code={PAGE_PERMS['/controle/ecarts']}><EcartsCaissePage /></Autorise>} />
         <Route path="controle/registre"   element={<Autorise code={PAGE_PERMS['/controle/registre']}><RegistreTiersPage /></Autorise>} />
         <Route path="controle/passerelle" element={<Autorise code={PAGE_PERMS['/controle/passerelle']}><PasserelleTab /></Autorise>} />
+        <Route path="finance/ecritures"   element={<Autorise code={PAGE_PERMS['/finance/ecritures']}><EcrituresPage /></Autorise>} />
+        <Route path="finance/grand-livre" element={<Autorise code={PAGE_PERMS['/finance/grand-livre']}><GrandLivrePage /></Autorise>} />
+        <Route path="finance/balance"     element={<Autorise code={PAGE_PERMS['/finance/balance']}><BalancePage /></Autorise>} />
         <Route path="config"         element={<Autorise ok={voitConfiguration(user, can)}><ConfigPage /></Autorise>} />
         <Route path="attente"        element={<Autorise code={PAGE_PERMS['/attente']}><AttentePage /></Autorise>} />
         <Route path="tenants"        element={<TenantsPage />} />

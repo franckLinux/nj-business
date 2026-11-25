@@ -541,5 +541,7 @@ router.get('/verification/bc/:jeton', rateLimit({
 
 // ── NJ COMMERCIAL (migration 050) : /api/commercial/* ─────────────────────
 router.use('/commercial', require('./commercial.routes'));
+// NJ FINANCE (lot F2, migration 075) : socle comptable sous /api/finance.
+router.use('/finance', require('./finance.routes'));
 
 module.exports = router;

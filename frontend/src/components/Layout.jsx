@@ -37,6 +37,9 @@ const TITLES = {
   '/controle/ecarts': 'Inventaire — Écarts de caisse',
   '/controle/registre': 'Clients et fournisseurs — Registre bénéficiaires Payés/Encaissés',
   '/controle/passerelle': 'Contrôles comptables — Contrôle de régularité formelle',
+  '/finance/ecritures': 'Comptabilité — Écritures',
+  '/finance/grand-livre': 'Comptabilité — Grand livre',
+  '/finance/balance': 'Comptabilité — Balance générale',
 };
 
 export default function Layout() {
