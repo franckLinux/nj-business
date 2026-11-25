@@ -156,7 +156,7 @@ export default function EcrituresPage() {
                       <td><span className="cm-code">{e.journal_code}</span></td>
                       <td className="fin-mono">{e.numero_affiche || <span className="cm-sous">—</span>}</td>
                       <td>{e.reference_piece || '—'}</td>
-                      <td className="fin-libelle">{e.libelle}{!e.equilibree && e.statut === 'brouillard' && <span className="fin-alerte-inline" title="Débit et crédit différents">⚠ déséquilibrée</span>}</td>
+                      <td className="fin-libelle">{e.libelle}{e.origine_type === 'journal' && <span className="fin-origine" title="Générée par un mouvement de caisse">caisse</span>}{e.origine_type === 'extourne' && <span className="fin-origine">extourne</span>}{!e.equilibree && e.statut === 'brouillard' && <span className="fin-alerte-inline" title="Débit et crédit différents">⚠ déséquilibrée</span>}</td>
                       <td className="fin-num">{fmtCompta(e.total_debit, { zero: '0' })}</td>
                       <td className="fin-num">{fmtCompta(e.total_credit, { zero: '0' })}</td>
                       <td><BadgeStatut statut={e.statut} extournee={Boolean(e.extournee_par_id)} /></td>
@@ -195,6 +195,7 @@ export default function EcrituresPage() {
             <div><span>Validation</span><b>{detail.valide_par_nom ? `${detail.valide_par_nom} · ${fmtDate(detail.valide_le)}` : '—'}</b></div>
           </div>
           <p className="fin-detail-libelle">{detail.libelle}</p>
+          {detail.origine_type === 'journal' && <div className="fin-bandeau fin-bandeau-gris">Écriture produite par le mouvement de caisse <b>{detail.reference_piece}</b> de NJ FINANCE : elle suit le mouvement et se valide avec l'arrêté de la caisse du mois.</div>}
           {detail.extourne_de && <div className="fin-bandeau">Extourne de l'écriture <b>{detail.extourne_de.numero_affiche}</b>. Motif : {detail.motif_extourne}</div>}
           {detail.extournee_par && <div className="fin-bandeau fin-bandeau-gris">Écriture annulée par l'extourne <b>{detail.extournee_par.numero_affiche}</b> du {fmtDate(detail.extournee_par.date_ecriture)}.</div>}
           {detail.statut === 'brouillard' && String(detail.cree_par) === String(user?.id) && valide && (

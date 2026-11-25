@@ -24,6 +24,7 @@ const ICONE = {
 const RUBRIQUES = [
   { titre: 'Saisie et validation', entrees: [
     { to: '/comptabilite/ecritures', libelle: 'Écritures', codes: ['compta.ecritures.voir'], icone: ICONE.ecritures },
+    { to: '/comptabilite/caisse', libelle: 'Écritures de caisse', codes: ['compta.ecritures.voir'], icone: ICONE.finance },
   ] },
   { titre: 'États comptables', entrees: [
     { to: '/comptabilite/grand-livre', libelle: 'Grand livre', codes: ['compta.ecritures.voir'], icone: ICONE.grandLivre },
@@ -35,6 +36,7 @@ const RUBRIQUES = [
 ];
 const TITRES = {
   '/comptabilite/ecritures': 'Comptabilité — Écritures',
+  '/comptabilite/caisse': 'Comptabilité — Écritures de caisse',
   '/comptabilite/grand-livre': 'Comptabilité — Grand livre',
   '/comptabilite/balance': 'Comptabilité — Balance générale',
   '/comptabilite/parametrage': 'Comptabilité — Exercices et journaux',

@@ -3,6 +3,7 @@
 // Règles : services/arretes_inventaires.service.js
 const fs = require('fs');
 const svc = require('../services/arretes_inventaires.service');
+const generation = require('../services/comptabilite/generation_caisse.service');
 
 const repondre = (res, err, quoi) => {
   if (err instanceof svc.ErreurArrete) {
@@ -29,7 +30,26 @@ const putArret = actionArret(svc.saisirArret, 'saisie', (l) => `Contrôle de l'a
 // POST /api/controle/arrets/:journalId/pv { mois, annee, nom_fichier, data_base64 }
 const postPvArret = actionArret(svc.deposerPvArret, 'dépôt du PV', (l) => `PV joint à l'arrêté ${l.journal_code}.`);
 // POST /api/controle/arrets/:journalId/validation { mois, annee, solde_constate?, observation? }
-const postValidationArret = actionArret(svc.validerArret, 'validation', (l) => `Arrêté ${l.journal_code} validé.`);
+// NJ FINANCE (077) : l'arrêté validé rend définitives les écritures de caisse du
+// mois. Si la comptabilisation échoue, l'arrêté reste validé ; la réponse le dit
+// et la page « Écritures de caisse » de NJ COMPTABILITÉ montre les anomalies.
+const postValidationArret = async (req, res) => {
+  let ligne;
+  try {
+    ligne = await svc.validerArret({ ...ctx(req), journalId: req.params.journalId });
+  } catch (err) { return repondre(res, err, 'validation'); }
+  let comptabilite;
+  try {
+    const r = await generation.synchroniser({ tenantId: req.tenantId, userId: req.user.id, force: true });
+    comptabilite = { validees: r.validees || 0, anomalies: (r.anomalies || []).length };
+  } catch (err) {
+    console.error('[Arrêtés & inventaires] comptabilisation après validation :', err.message);
+    comptabilite = { erreur: 'Les écritures de caisse n\'ont pas pu être mises à jour : voyez NJ COMPTABILITÉ → Écritures de caisse.' };
+  }
+  const suite = comptabilite.erreur ? ` ${comptabilite.erreur}`
+    : (comptabilite.anomalies ? ` ${comptabilite.anomalies} mouvement(s) restent à comptabiliser (comptes à compléter).` : '');
+  return res.json({ message: `Arrêté ${ligne.journal_code} validé.${suite}`, ligne, comptabilite });
+};
 // POST /api/controle/arrets/:journalId/annulation { mois, annee, motif }
 const postAnnulationArret = actionArret(svc.annulerValidationArret, 'annulation', (l) => `Validation de l'arrêté ${l.journal_code} annulée.`);
 

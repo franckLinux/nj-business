@@ -2,6 +2,7 @@
 // NJ COMPTABILITÉ — contrôleur du socle comptable (migrations 075 et 076).
 // Règles : services/comptabilite/socle.service.js
 const svc = require('../services/comptabilite/socle.service');
+const generation = require('../services/comptabilite/generation_caisse.service');
 
 const repondre = (res, err, quoi) => {
   const e = svc.traduire(err);
@@ -12,6 +13,13 @@ const repondre = (res, err, quoi) => {
 const ctx = (req) => ({ tenantId: req.tenantId, userId: req.user.id, body: req.body || {} });
 const action = (quoi, fn, statut = 200) => async (req, res) => {
   try { res.status(statut).json(await fn(req)); } catch (err) { repondre(res, err, quoi); }
+};
+
+// Les écritures de caisse sont tenues à jour avant chaque consultation (au plus
+// une fois par 30 s et par client).
+const aJour = (fn) => async (req) => {
+  await generation.synchroniser({ tenantId: req.tenantId, userId: req.user.id, force: false });
+  return fn(req);
 };
 
 module.exports = {
@@ -29,7 +37,7 @@ module.exports = {
   getComptes:         action('comptes', (req) => svc.rechercherComptes(req.tenantId, req.query.q)),
   getReferentiels:    action('référentiels', (req) => svc.referentiels(req.tenantId)),
   // Écritures
-  getEcritures:       action('écritures', (req) => svc.listerEcritures(req.tenantId, req.query)),
+  getEcritures:       action('écritures', aJour((req) => svc.listerEcritures(req.tenantId, req.query))),
   getEcriture:        action('écriture', (req) => svc.lireEcriture(req.tenantId, req.params.id)),
   postEcriture:       action('saisie d\'écriture', (req) => svc.creerEcriture(ctx(req)), 201),
   putEcriture:        action('modification d\'écriture', (req) => svc.modifierEcriture({ ...ctx(req), ecritureId: req.params.id })),
@@ -37,6 +45,8 @@ module.exports = {
   postValider:        action('validation d\'écriture', (req) => svc.validerEcriture({ ...ctx(req), ecritureId: req.params.id })),
   postExtourner:      action('extourne', (req) => svc.extournerEcriture({ ...ctx(req), ecritureId: req.params.id }), 201),
   // États
-  getBalance:         action('balance', (req) => svc.balance(req.tenantId, req.query)),
-  getGrandLivre:      action('grand livre', (req) => svc.grandLivre(req.tenantId, req.query)),
+  getBalance:         action('balance', aJour((req) => svc.balance(req.tenantId, req.query))),
+  getGrandLivre:      action('grand livre', aJour((req) => svc.grandLivre(req.tenantId, req.query))),
+  // Écritures de caisse (077) : état de la génération et contrôle de la trésorerie.
+  getEtatCaisse:      action('écritures de caisse', (req) => generation.etat({ tenantId: req.tenantId, userId: req.user.id })),
 };

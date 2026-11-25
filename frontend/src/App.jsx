@@ -68,6 +68,7 @@ import ComptabiliteLayout, { DROITS_COMPTA } from '@/components/comptabilite/Com
 import EcrituresPage from '@/pages/comptabilite/EcrituresPage';
 import { BalancePage, GrandLivrePage } from '@/pages/comptabilite/EtatsComptablesPages';
 import ParametragePage from '@/pages/comptabilite/ParametragePage';
+import EcrituresCaissePage from '@/pages/comptabilite/EcrituresCaissePage';
 import OffreFournisseurPage from '@/pages/OffreFournisseurPage';
 import { ConsultationsPage, ConsultationFormPage, ConsultationPage, ComparatifPage } from '@/pages/commercial/ConsultationsPages';
 import { FraisListePage, FraisFormPage, FraisPage } from '@/pages/commercial/FraisPages';
@@ -230,6 +231,7 @@ function AuthenticatedApp() {
       <Route path="comptabilite" element={<GardeComptabilite><ComptabiliteLayout /></GardeComptabilite>}>
         <Route index element={<EntreeComptabilite />} />
         <Route path="ecritures"   element={<AutoriseCompta codes={['compta.ecritures.voir']}><EcrituresPage /></AutoriseCompta>} />
+        <Route path="caisse"      element={<AutoriseCompta codes={['compta.ecritures.voir']}><EcrituresCaissePage /></AutoriseCompta>} />
         <Route path="grand-livre" element={<AutoriseCompta codes={['compta.ecritures.voir']}><GrandLivrePage /></AutoriseCompta>} />
         <Route path="balance"     element={<AutoriseCompta codes={['compta.ecritures.voir']}><BalancePage /></AutoriseCompta>} />
         <Route path="parametrage" element={<AutoriseCompta codes={DROITS_COMPTA}><ParametragePage /></AutoriseCompta>} />

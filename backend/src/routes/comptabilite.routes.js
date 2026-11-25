@@ -34,6 +34,7 @@ router.delete('/ecritures/:id',         ...P('compta.ecritures.saisir'),        
 router.post('/ecritures/:id/valider',   ...P('compta.ecritures.valider'),          c.postValider);
 router.post('/ecritures/:id/extourner', ...P('compta.ecritures.valider'),          c.postExtourner);
 
+router.get ('/caisse/etat',             ...P('compta.ecritures.voir'),              c.getEtatCaisse);
 router.get ('/balance',                 ...P('compta.ecritures.voir'),             c.getBalance);
 router.get ('/grand-livre',             ...P('compta.ecritures.voir'),             c.getGrandLivre);
 
