@@ -53,6 +53,10 @@ const creer = async (req, res) => {
   const { val, erreur } = lire(req.body);
   if (erreur) return res.status(400).json({ error: erreur });
   try {
+    // Réservé aux ONG / associations (25/11/2026) ; les fiches existantes d'une
+    // PME restent en base, intactes.
+    const [{ ong }] = await q('SELECT tenant_est_ong(:t) AS ong', { t: req.tenantId });
+    if (!ong) return res.status(400).json({ error: 'Les activités et projets sont réservés aux ONG et associations.' });
     const [row] = await q(
       `INSERT INTO activites (tenant_id, code, nom, type, description, budget, date_debut, date_fin)
        VALUES (:t, :code, :nom, :type, :description, :budget, :date_debut, :date_fin) RETURNING *`,

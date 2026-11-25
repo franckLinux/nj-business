@@ -341,6 +341,8 @@ const setActiviteObligatoire = async (req, res) => {
     if (!u) return res.status(404).json({ error: 'Utilisateur introuvable dans cet espace.' });
     if (u.id === req.user.id) return res.status(400).json({ error: 'Vous ne pouvez pas modifier votre propre réglage.' });
     if (u.role === 'super_admin' || u.role === 'auditeur') return res.status(400).json({ error: 'Ce compte ne saisit pas d\'opérations.' });
+    const [{ ong }] = await sequelize.query('SELECT tenant_est_ong(:t) AS ong', { replacements: { t: req.tenantId }, type: sequelize.QueryTypes.SELECT });
+    if (!ong) return res.status(400).json({ error: 'Les activités et projets sont réservés aux ONG et associations.' });
     const [{ col }] = await sequelize.query(
       "SELECT COUNT(*)::int AS col FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'activite_obligatoire'",
       { type: sequelize.QueryTypes.SELECT });

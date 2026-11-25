@@ -51,6 +51,9 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   // Projets des ONG / associations (069) : rien ne change pour une PME.
   const ctxProjets = useContexteProjets();
   const ong = Boolean(ctxProjets?.ong);
+  // Activités et projets réservés aux ONG / associations (25/11/2026) : une PME
+  // ne voit pas le choix. Contexte inconnu (premier chargement) : rien n'est masqué.
+  const sansActivites = Boolean(ctxProjets) && !ong;
   const projetsOng = ong ? (ctxProjets.projets || []) : [];
   const projetsStructures = new Set(projetsOng.filter((p) => p.activites.length > 0).map((p) => p.id));
   // Remise à une activité (plafonnée aussi par le reste du projet) ou remise
@@ -112,7 +115,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
     ? activites.filter((a) => !a.projet_id && !(a.type === 'projet' && projetsStructures.has(a.id)))
     : activites;
   const rattachementProjetFige = Boolean(mouvement && activiteProjet);
-  const activiteRequise = Boolean(user?.activite_obligatoire) && !rubriqueChoisie?.est_virement_interne
+  const activiteRequise = !sansActivites && Boolean(user?.activite_obligatoire) && !rubriqueChoisie?.est_virement_interne
     && activites.some((a) => a.actif) && !financementAffecte;
 
   // Auto-remplissage code comptable + intitulé + annotation pièces, comme onRubriqueChange().
@@ -397,7 +400,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
               <div className="field-hint">Le bailleur est le bénéficiaire / tiers indiqué plus bas.</div>
             </div>
           )}
-          {!financementAffecte && (activitesSimples.length > 0 || activitesProjet.length > 0) && (
+          {!sansActivites && !financementAffecte && (activitesSimples.length > 0 || activitesProjet.length > 0) && (
             <div className="span-2">
               <label>
                 Activité / projet{' '}

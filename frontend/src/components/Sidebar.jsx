@@ -121,7 +121,9 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         {!sansClient && (<>
         <div className="nav-sep" />
 
-        {(accesProjets?.visible || voit('/activites') || voitOngletConfig(user, can, 'activites')) && (
+        {/* Activités et projets réservés aux ONG / associations (décision du 25/11/2026) :
+            une PME n'a pas la rubrique. */}
+        {accesProjets?.ong && (accesProjets?.visible || voit('/activites') || voitOngletConfig(user, can, 'activites')) && (
         <NavGroup
           name="gestion-activite"
           label="Gestion d'activité"

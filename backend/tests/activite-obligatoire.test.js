@@ -53,7 +53,7 @@ const saisie = (qui, rubrique, extra = {}) => appel('POST', '/journal', qui, {
 });
 
 before(async () => {
-  [{ id: TENANT }] = await sql(`INSERT INTO tenants (slug, nom, initialise_le) VALUES ($1, $2, NOW()) RETURNING id`,
+  [{ id: TENANT }] = await sql(`INSERT INTO tenants (slug, nom, forme_juridique, initialise_le) VALUES ($1, $2, 'ONG', NOW()) RETURNING id`,
     [`act-oblig-${sfx}`, `ACT OBLIG ${sfx}`]);
   await sql(`INSERT INTO rubriques (tenant_id, code, intitule, type, est_virement_interne) VALUES
              ($1, 'E1', 'VENTES', 'entree', false), ($1, 'VIR', 'VIREMENT', 'entree', true)`, [TENANT]);
@@ -122,4 +122,21 @@ test('Retour au facultatif, journalisé', async () => {
   assert.equal((await saisie('cai', 'E1')).status, 201);
   const a = await sql(`SELECT action FROM audit_log WHERE tenant_id = $1 AND action LIKE 'ACTIVITE_OBLIGATOIRE%' ORDER BY id`, [TENANT]);
   assert.deepEqual(a.map((x) => x.action), ['ACTIVITE_OBLIGATOIRE_ACTIVEE', 'ACTIVITE_OBLIGATOIRE_RETIREE']);
+});
+
+test('PME : activités et projets réservés aux ONG / associations (25/11/2026)', async () => {
+  // ONG : création d'une activité possible.
+  assert.equal((await appel('POST', '/activites', 'dir', { nom: 'Atelier ONG' })).status, 201);
+  // Le même client devient une PME, avec un réglage « obligatoire » resté posé.
+  await sql(`UPDATE tenants SET forme_juridique = 'SARL' WHERE id = $1`, [TENANT]);
+  await sql('UPDATE users SET activite_obligatoire = true WHERE id = $1', [U.cai.id]);
+  assert.equal((await saisie('cai', 'E1')).status, 201, 'jamais exigée pour une PME');
+  assert.equal((await appel('GET', '/auth/me', 'cai')).data.activite_obligatoire, false);
+  let r = await appel('PUT', `/users/${U.cai.id}/activite-obligatoire`, 'dir', { obligatoire: true });
+  assert.equal(r.status, 400); assert.match(r.message, /réservés aux ONG/);
+  r = await appel('POST', '/activites', 'dir', { nom: 'Atelier PME' });
+  assert.equal(r.status, 400); assert.match(r.message, /réservés aux ONG/);
+  // Les fiches existantes restent en base.
+  const [{ n }] = await sql('SELECT count(*)::int AS n FROM activites WHERE tenant_id = $1', [TENANT]);
+  assert.equal(n, 2);
 });

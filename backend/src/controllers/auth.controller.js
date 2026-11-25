@@ -19,7 +19,8 @@ const login = async (req, res) => {
               t.nom AS tenant_nom, t.slug AS tenant_slug, t.devise,
               -- to_jsonb : sans erreur si la migration 023 n'est pas encore jouée
               to_jsonb(t)->>'type_compte' AS type_compte, to_jsonb(t)->>'demo_expire_le' AS demo_expire_le,
-              (to_jsonb(u)->>'activite_obligatoire')::boolean IS TRUE AS activite_obligatoire
+              -- Réservé aux ONG / associations (25/11/2026)
+              ((to_jsonb(u)->>'activite_obligatoire')::boolean IS TRUE AND u.tenant_id IS NOT NULL AND tenant_est_ong(u.tenant_id) IS TRUE) AS activite_obligatoire
        FROM users u
        LEFT JOIN tenants t ON t.id = u.tenant_id
        WHERE u.username = $1
@@ -117,7 +118,8 @@ const me = async (req, res) => {
       `SELECT u.id, u.username, u.role, u.tenant_id, u.derniere_connexion,
               t.nom AS tenant_nom, t.slug AS tenant_slug, t.devise, t.logo_url,
               to_jsonb(t)->>'type_compte' AS type_compte, to_jsonb(t)->>'demo_expire_le' AS demo_expire_le,
-              (to_jsonb(u)->>'activite_obligatoire')::boolean IS TRUE AS activite_obligatoire
+              -- Réservé aux ONG / associations (25/11/2026)
+              ((to_jsonb(u)->>'activite_obligatoire')::boolean IS TRUE AND u.tenant_id IS NOT NULL AND tenant_est_ong(u.tenant_id) IS TRUE) AS activite_obligatoire
        FROM users u
        LEFT JOIN tenants t ON t.id = u.tenant_id
        WHERE u.id = $1`,

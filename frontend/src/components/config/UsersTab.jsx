@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
+import { useContexteProjets } from '@/lib/projets';
 import PermissionsAssignModal from '@/components/PermissionsAssignModal';
 import AffectationsModal from '@/components/AffectationsModal';
 import { SessionsOuvertes } from '@/components/SessionsOuvertes';
@@ -244,7 +245,9 @@ export default function UsersTab() {
   const canDelete = can('users.delete');
   const showActions = canEdit || canDelete;
   // Activité / projet obligatoire (039) : exigé par le directeur, personne par personne.
-  const canActivite = can('activites.edit');
+  // Réservé aux ONG / associations (25/11/2026) : sans objet pour une PME.
+  const ctxProjets = useContexteProjets();
+  const canActivite = can('activites.edit') && Boolean(ctxProjets?.ong);
   const [activiteEnCours, setActiviteEnCours] = useState(null);
   const onActiviteObligatoire = async (u) => {
     const obligatoire = !u.activite_obligatoire;

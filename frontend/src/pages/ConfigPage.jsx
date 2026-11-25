@@ -11,6 +11,7 @@ import RolesTab from '@/components/config/RolesTab';
 import ActivitesTab from '@/components/config/ActivitesTab';
 import FacturationTab from '@/pages/finance/FacturationTab';
 import { voitOngletConfig } from '@/lib/acces';
+import { useContexteProjets } from '@/lib/projets';
 
 // Reprend loadConfig()/switchTab() de legacy/js/app.js (l. 3913-3948).
 // Les 6 onglets (+ Rôles : super_admin, ou directeur via roles.edit — décision
@@ -43,7 +44,9 @@ export default function ConfigPage() {
 
   // Seuls les onglets sur lesquels la personne peut agir sont affichés
   // (voir lib/acces.js) : plus d'onglets inutiles ni de « Permission requise ».
-  const visibles = TABS.filter((t) => voitOngletConfig(user, can, t.id));
+  // Activités / projets : réservés aux ONG et associations (25/11/2026).
+  const ctxProjets = useContexteProjets();
+  const visibles = TABS.filter((t) => voitOngletConfig(user, can, t.id) && !(t.id === 'activites' && ctxProjets && !ctxProjets.ong));
   const tabs = voitRoles ? [...visibles, { id: 'roles', label: '🎭 Rôles', Comp: RolesTab }] : visibles;
   const courant = tabs.find((t) => t.id === active) || tabs[0];
   const ActiveComp = courant?.Comp;

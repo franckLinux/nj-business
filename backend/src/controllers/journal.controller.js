@@ -13,15 +13,18 @@ const ecartsSvc = require('../services/ecarts_caisse.service');
 // Réglage PERSONNEL (users.activite_obligatoire), posé par le directeur.
 // Exemptés : virements internes. Sans activité active dans le client : sans
 // effet. to_jsonb : neutre tant que la migration 039 n'est pas jouée.
+// Activités et projets réservés aux ONG / associations (25/11/2026) : jamais
+// exigé pour une PME, même si le réglage avait été posé avant.
 const exigerActivite = async (req, rubriqueCode, activiteId) => {
   if (activiteId) return;
   const [r] = await sequelize.query(
     `SELECT (to_jsonb(u)->>'activite_obligatoire')::boolean IS TRUE AS obligatoire,
             EXISTS (SELECT 1 FROM rubriques rb WHERE rb.tenant_id = :t AND rb.code = :code AND rb.est_virement_interne) AS virement,
-            EXISTS (SELECT 1 FROM activites a WHERE a.tenant_id = :t AND a.actif) AS a_des_activites
+            EXISTS (SELECT 1 FROM activites a WHERE a.tenant_id = :t AND a.actif) AS a_des_activites,
+            tenant_est_ong(:t) AS ong
        FROM users u WHERE u.id = :u`,
     { replacements: { u: req.user.id, t: req.tenantId, code: String(rubriqueCode || '') }, type: sequelize.QueryTypes.SELECT });
-  if (r?.obligatoire && !r.virement && r.a_des_activites) {
+  if (r?.obligatoire && r.ong && !r.virement && r.a_des_activites) {
     const err = new Error('Activité / projet obligatoire : choisissez l\'activité ou le projet concerné par cette opération.');
     err.status = 400; err.code = 'ACTIVITE_OBLIGATOIRE';
     throw err;
