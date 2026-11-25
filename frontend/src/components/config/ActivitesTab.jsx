@@ -136,7 +136,7 @@ export default function ActivitesTab() {
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>Activités et projets</h3>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, maxWidth: 620 }}>
             Classez vos opérations par secteur d'activité ou par projet. Le choix est <b>facultatif</b> dans le formulaire de saisie ;
-            les totaux sont visibles dans <b>Reporting → Suivi par activité</b>.
+            les totaux sont visibles dans <b>Gestion d'activité → Suivi par activité</b>.
           </p>
         </div>
         {canEdit && <button className="btn-add" onClick={() => setModal('new')}>+ Ajouter</button>}

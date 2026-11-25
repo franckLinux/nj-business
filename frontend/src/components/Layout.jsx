@@ -20,10 +20,10 @@ const TITLES = {
   '/previsions': 'Prévisions de dépenses',
   '/appel-fonds': 'Demande de fonds',
   '/compte-emploi': "Compte d'emploi",
-  '/activites': 'Suivi par activité',
-  '/projets': 'Projets',
-  '/projets/a-controler': 'Justificatifs à contrôler',
-  '/projets/bilan': 'Bilan des activités',
+  '/activites': "Gestion d'activité — Suivi par activité",
+  '/projets': "Gestion d'activité — Projets",
+  '/projets/a-controler': "Gestion d'activité — Justificatifs à contrôler",
+  '/projets/bilan': "Gestion d'activité — Bilan des activités",
   '/config': 'Configuration',
   '/tenants': 'Clients (Tenants)',
   '/permissions': 'Gestion des permissions',
@@ -31,12 +31,12 @@ const TITLES = {
   '/plateforme': 'Administration plateforme',
   '/validation-directe': 'Validation directe des prospects',
   '/attente': 'Dépenses en attente',
-  '/controle/pieces': 'Contrôle comptable — Rapport',
-  '/controle/regularite': 'Contrôle comptable — Contrôle de substance',
-  '/controle/arretes': 'Contrôle comptable — Arrêtés de caisse & inventaires',
-  '/controle/ecarts': 'Contrôle comptable — Écarts de caisse',
-  '/controle/registre': 'Contrôle comptable — Registre bénéficiaires Payés/Encaissés',
-  '/controle/passerelle': 'Contrôle comptable — Contrôle de régularité formelle',
+  '/controle/pieces': 'Contrôles comptables — Rapport',
+  '/controle/regularite': 'Contrôles comptables — Contrôle de substance',
+  '/controle/arretes': 'Inventaire — Arrêtés de caisse & inventaires',
+  '/controle/ecarts': 'Inventaire — Écarts de caisse',
+  '/controle/registre': 'Clients et fournisseurs — Registre bénéficiaires Payés/Encaissés',
+  '/controle/passerelle': 'Contrôles comptables — Contrôle de régularité formelle',
 };
 
 export default function Layout() {
@@ -86,7 +86,7 @@ export default function Layout() {
   }, [user, activeTenantId, openTenantSelector, pageSansClient]);
 
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
-  let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? 'Projets' : 'Tableau de bord');
+  let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? "Gestion d'activité — Projets" : 'Tableau de bord');
   if (location.pathname.startsWith('/journal/')) {
     const j = journaux.find((x) => String(x.id) === String(params.id));
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';

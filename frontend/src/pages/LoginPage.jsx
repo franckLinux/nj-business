@@ -83,8 +83,8 @@ export default function LoginPage() {
           <div className="njb-login-modules">
             <p className="njb-surtitre">Module disponible</p>
             <div className="njb-login-module">
-              <NjMarque taille={36} fond="#243655" module titre="NJ CAISSE PRO" />
-              <div><b>NJ CAISSE PRO</b><span>Trésorerie, budget, contrôle comptable</span></div>
+              <NjMarque taille={36} fond="#243655" module titre="NJ FINANCE" />
+              <div><b>NJ FINANCE</b><span>Caisse, gestion d'activité, contrôle comptable</span></div>
             </div>
           </div>
           <p className="njb-login-pied">Cabinet Expert-Comptable · Zone CEMAC</p>

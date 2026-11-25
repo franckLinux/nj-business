@@ -82,7 +82,7 @@ export function RubriqueModal({ rubrique, defaultType, onClose, onSaved, simple 
 
           {simple ? (
             <div style={{ marginTop: 12, background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1e3a8a', borderRadius: 8, padding: '8px 12px', fontSize: 12 }}>
-              Le code comptable de la rubrique sera défini par le comptable (Contrôle comptable → Contrôle de régularité formelle).
+              Le code comptable de la rubrique sera défini par le comptable (Reporting et états financiers → Contrôle de régularité formelle).
             </div>
           ) : (<>
           <label>Code comptable
@@ -207,7 +207,7 @@ export default function RubriquesTab() {
       <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Rubriques</h3>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 18 }}>
         {peutGerer
-          ? 'Le code comptable est facultatif. Une fois validé par le cabinet (menu Contrôle comptable → Contrôle de régularité formelle), il ne change plus qu\'après une nouvelle validation.'
+          ? 'Le code comptable est facultatif. Une fois validé par le cabinet (menu Reporting et états financiers → Contrôle de régularité formelle), il ne change plus qu\'après une nouvelle validation.'
           : 'Vous pouvez ajouter les rubriques utiles à votre saisie. Leur code comptable est défini par le comptable.'}
       </p>
       <Section titre="Entrées" avecNature={ong} liste={rubriques.entrees || []} type="entree" canEdit={peutGerer} canAdd={peutAjouter} onAdd={(t) => setModal({ type: t })} onEdit={setModal} onDelete={onDelete} />

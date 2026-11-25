@@ -839,7 +839,7 @@ const lireFacture = async (ctx, id) => {
     tolerance: p.tolerance,
     avoirs: avoirs.map((a) => ({ ...a, id: Number(a.id), total_ttc: Number(a.total_ttc) })),
     net_a_payer: d.type === 'facture' ? m2(Number(d.total_ttc) - credite) : null,
-    reglement: 'Les règlements se saisissent dans NJ CAISSE PRO (dépense portant ce numéro de facture). Aucune écriture comptable n\'est générée ici.',
+    reglement: 'Les règlements se saisissent dans NJ FINANCE (dépense portant ce numéro de facture). Aucune écriture comptable n\'est générée ici.',
     ...(await annexes(ctx, 'facture', d)),
     droits: { ...(await droitsCircuit(ctx, 'facture', d)), avoir: d.type === 'facture' && d.statut === 'valide' && ctx.peut('com.factures_fourn.saisir') },
   };

@@ -59,7 +59,7 @@ export function FacturesFournPage() {
   return (
     <div className="cm-page">
       <Entete titre="Factures fournisseurs"
-        description="Chaque facture se rapproche des réceptions : quantités et prix sont comparés à la commande. Validée, elle devient bon à payer ; le règlement se saisit dans NJ CAISSE PRO." />
+        description="Chaque facture se rapproche des réceptions : quantités et prix sont comparés à la commande. Validée, elle devient bon à payer ; le règlement se saisit dans NJ FINANCE." />
       <div className="cm-onglets" role="tablist">
         {saisit && <button type="button" role="tab" aria-selected={vue === 'a_facturer'} onClick={() => setVue('a_facturer')}>À facturer</button>}
         <button type="button" role="tab" aria-selected={vue === 'facture'} onClick={() => setVue('facture')}>Factures</button>

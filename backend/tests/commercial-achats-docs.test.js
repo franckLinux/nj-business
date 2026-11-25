@@ -237,7 +237,7 @@ test('Facture rapprochée : écart de prix au-delà de la tolérance motivé ; d
   const v = await appel('POST', `/commercial/factures-fournisseurs/${c.data.id}/validation`, 'cpt2', {});
   assert.equal(v.status, 200, v.message);
   assert.equal(v.data.statut, 'valide');
-  assert.match(v.data.reglement, /NJ CAISSE PRO/);
+  assert.match(v.data.reglement, /NJ FINANCE/);
   R.ff = c.data.id; R.ffl1 = c.data.lignes.find((l) => l.reception_ligne_id === R.rl1).id;
   // Même pièce du fournisseur : refusée.
   const dbl = await appel('POST', '/commercial/factures-fournisseurs', 'cpt', { fournisseur_id: R.fou, reference_fournisseur: 'fa-2026-118', date_facture: '2026-11-02', lignes: [] });

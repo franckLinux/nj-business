@@ -203,7 +203,7 @@ export default function TableauBordPage() {
       </div>
       <BlocStock agence={agence} magasin={magasin} devise={devise} />
       <p className="cm-aide">Pièces sur la période : {t.pieces.bons_avec_proforma} bon(s) avec proforma, {t.pieces.demandes_avec_pieces} demande(s) avec justificatifs.
-        Réceptions, retours et factures fournisseurs se suivent dans leurs écrans ; les règlements se saisissent dans NJ CAISSE PRO.</p>
+        Réceptions, retours et factures fournisseurs se suivent dans leurs écrans ; les règlements se saisissent dans NJ FINANCE.</p>
     </div>
   );
 }

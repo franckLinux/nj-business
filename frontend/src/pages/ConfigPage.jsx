@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useApp } from '@/context/AppContext';
 import EntiteTab from '@/components/config/EntiteTab';
@@ -29,6 +29,11 @@ export default function ConfigPage() {
   const location = useLocation();
   const voitRoles = user?.role === 'super_admin' || can('roles.edit');
   const [active, setActive] = useState(location.state?.onglet || 'entite');
+  // NJ FINANCE (F1) : « Gestion d'activité → Fiches des activités » ouvre
+  // l'onglet Activités, y compris quand la Configuration est déjà affichée.
+  useEffect(() => {
+    if (location.state?.onglet) setActive(location.state.onglet);
+  }, [location.key, location.state?.onglet]);
   // Arrivée depuis l'initialisation des caisses : étapes suivantes proposées.
   const [bienvenue, setBienvenue] = useState(Boolean(location.state?.bienvenue));
   const demo = user?.type_compte === 'demo';
