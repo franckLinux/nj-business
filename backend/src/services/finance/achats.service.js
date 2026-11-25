@@ -28,6 +28,7 @@
 // Reste à payer = TTC − avoirs validés − règlements (sorties non annulées).
 const crypto = require('node:crypto');
 const { sequelize } = require('../../models');
+const extractions = require('./extractions.service');
 const socle = require('../comptabilite/socle.service');
 const generation = require('../comptabilite/generation_caisse.service');
 const config = require('./config.service');
@@ -41,6 +42,7 @@ class ErreurAchat extends Error {
 }
 const CONFLITS = new Set(['FACTURE_INTANGIBLE', 'REGLEMENT_DEPASSE', 'PERIODE_FERMEE', 'EXERCICE_CLOS', 'ECRITURE_INTANGIBLE']);
 const traduire = (err) => {
+  if (err instanceof extractions.ErreurExtraction) return new ErreurAchat(err.status, err.message, err.doublon ? { doublon: err.doublon } : undefined);
   if (err instanceof ErreurAchat) return err;
   if (err instanceof socle.ErreurFinance || err instanceof config.ErreurConfig) return new ErreurAchat(err.status, err.message);
   const code = err?.original?.code || err?.parent?.code;
@@ -311,6 +313,7 @@ const lire = async (tenantId, origine, idBrut, sensBrut = 'fournisseur') => {
     const [{ reste }] = await Q('SELECT fin_facture_reste(\'fin\', :fid) AS reste', { fid });
     return { origine: 'fin', sens, facture: { ...f, identite_emetteur: undefined, statut_libelle: f.type === 'proforma' && f.statut === 'validee' ? 'Émise' : STATUTS[f.statut] },
       lignes, avoirs,
+      piece_lue: f.sens === 'fournisseur' ? await extractions.pourFacture(tenantId, fid) : null,
       reglements: f.type === 'facture' ? await affectationsDe(tenantId, 'fin', fid) : [],
       hors_caisse: f.type === 'facture' ? await horsCaisseDe(tenantId, 'fin', fid) : [],
       reste: f.statut === 'validee' && f.type === 'facture' ? mt(Math.max(cts(reste), 0)) : null,
@@ -478,6 +481,11 @@ const creer = ({ tenantId, userId, body, sens = 'fournisseur' }) => enTransactio
       origineId: s.origineId, categorieId: s.cat.id, activiteId: s.activiteId, objet: s.objet, observations: s.observations,
       ht: mt(s.ht), tva: mt(s.tva), ttc: mt(s.ttc), userId }, { transaction });
   await ecrireLignes(transaction, tenantId, f.id, s.lignes);
+  // Lot F7 : facture saisie à partir d'une pièce lue (et vérifiée par la personne qui l'enregistre).
+  if (body.extraction_id) {
+    if (s.sens !== 'fournisseur') throw new ErreurAchat(400, 'La lecture automatique concerne les factures fournisseurs.');
+    await extractions.rattacher(transaction, tenantId, body.extraction_id, f.id);
+  }
   if (body.soumettre) await X(`UPDATE fin_factures SET statut = 'a_valider', soumis_par = :userId, soumis_le = NOW() WHERE id = :fid`,
     { userId, fid: f.id }, { transaction });
   return { id: String(f.id) };
@@ -516,6 +524,7 @@ const supprimer = ({ tenantId, id: idBrut, sens = 'fournisseur' }) => enTransact
   const fid = id(idBrut, 'Facture');
   const f = await verrouiller(tenantId, fid, transaction, sens);
   if (!['brouillon', 'a_valider'].includes(f.statut)) throw new ErreurAchat(409, 'Une facture validée ne se supprime pas : annulez-la avec un motif.');
+  await extractions.liberer(transaction, fid);      // la pièce lue redevient « à vérifier »
   await X('DELETE FROM fin_factures WHERE id = :fid', { fid }, { transaction });
   return { supprimee: true };
 });

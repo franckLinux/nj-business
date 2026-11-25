@@ -46,6 +46,14 @@ router.get   ('/achats/referentiels',         ...VOIR_ACHATS, c.getAchatsRef);
 router.get   ('/achats/echeancier',           ...VOIR_ACHATS, c.getEcheancier);
 router.get   ('/achats/ouvertes',             ...FACTURES_OUVERTES, c.getOuvertes);
 router.get   ('/achats/sorties-disponibles',  ...AFFECTER, c.getSorties);
+// Lot F7 : import et lecture automatique (la facture elle-même se crée par POST /achats, permission de saisie).
+const IMPORTER = P('finance.achats.importer');
+const PIECE_LUE = [authGuard, tenantGuard, requireAnyPermission('finance.achats.importer', 'finance.achats.voir')];
+router.get   ('/achats/extractions',          ...IMPORTER, c.getExtractions);
+router.post  ('/achats/extractions',          ...IMPORTER, c.postExtraction);
+router.get   ('/achats/extractions/:id',      ...IMPORTER, c.getExtraction);
+router.get   ('/achats/extractions/:id/fichier', ...PIECE_LUE, c.getExtractionFichier);
+router.post  ('/achats/extractions/:id/abandonner', ...IMPORTER, c.postExtractionAbandon);
 router.get   ('/achats',                      ...VOIR_ACHATS, c.getAchats);
 router.post  ('/achats',                      ...SAISIR, c.postAchat);
 router.get   ('/achats/:origine(fin|com_ff)/:id', ...VOIR_ACHATS, c.getAchat);

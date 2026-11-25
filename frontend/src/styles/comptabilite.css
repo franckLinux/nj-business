@@ -208,3 +208,38 @@
 .fin-segments { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin-bottom: 12px; background: #f1f5f9; border-radius: 10px; }
 .fin-segments button { border: 0; background: none; padding: 7px 14px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
 .fin-segments button.actif { background: #fff; color: var(--brand); box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+
+/* ── NJ FINANCE lot F7 : import et lecture automatique des factures ─────── */
+.fin-pastille-rouge-plein { background: #fee2e2; color: #991b1b; }
+.fin-depot { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 28px 16px; margin: 4px 0 18px;
+  border: 2px dashed var(--border, #cbd5e1); border-radius: 12px; background: var(--surface, #fff); text-align: center; cursor: pointer;
+  transition: border-color .15s, background .15s; }
+.fin-depot:hover, .fin-depot.survol, .fin-depot:focus-within { border-color: var(--accent, #2563eb); background: #f8fbff; }
+.fin-depot input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.fin-depot-icone { font-size: 30px; line-height: 1; }
+.fin-depot-envoi { font-size: 12.5px; color: var(--accent, #2563eb); font-weight: 600; }
+.cm-btn.cm-petit { padding: 5px 10px; font-size: 12.5px; }
+.fin-actions-ligne { white-space: nowrap; text-align: right; }
+.fin-actions-ligne > * + * { margin-left: 6px; }
+/* Saisie à partir d'une pièce lue : la pièce à côté du formulaire. */
+.fin-saisie-lue { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 42%); gap: 18px; align-items: start; }
+.fin-saisie-lue > .fin-piece-lue { position: sticky; top: 12px; }
+.fin-piece-lue { border: 1px solid var(--border, #e2e8f0); border-radius: 12px; background: #f8fafc; overflow: hidden; }
+.fin-piece-lue-tete { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border, #e2e8f0); background: #fff; font-size: 13px; }
+.fin-piece-lue iframe, .fin-piece-lue img { display: block; width: 100%; height: calc(100vh - 140px); min-height: 420px; border: 0; object-fit: contain; background: #fff; }
+.fin-lecture { border-left: 4px solid var(--accent, #2563eb); }
+.fin-lecture ul { margin: 6px 0 0; padding-left: 18px; }
+.fin-lecture li { margin: 2px 0; }
+.fin-confiance { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 11px; font-weight: 700; vertical-align: 1px; }
+.fin-confiance-haute { background: #dcfce7; color: #166534; }
+.fin-confiance-moyenne { background: #fef3c7; color: #92400e; }
+.fin-confiance-basse { background: #fee2e2; color: #991b1b; }
+.fin-lu-a-verifier input, .fin-lu-a-verifier select { border-color: #f59e0b !important; background: #fffbeb; }
+@media (max-width: 1100px) {
+  .fin-saisie-lue { grid-template-columns: 1fr; }
+  .fin-saisie-lue > .fin-piece-lue { position: static; }
+  .fin-piece-lue iframe, .fin-piece-lue img { height: 70vh; }
+}
+
+.fin-actions-ligne a.cm-btn, .fin-depot + * a.cm-btn { text-decoration: none; }
+.cm-page.fin-page-large { max-width: none; }

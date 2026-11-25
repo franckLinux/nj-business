@@ -30,6 +30,7 @@ export const PAGE_PERMS = {
   // NJ FINANCE (F6, 080) : achats.
   '/finance/achats':            'finance.achats.voir',
   '/finance/achats/nouvelle':   'finance.achats.saisir',
+  '/finance/achats/lecture':    'finance.achats.importer',   // F7 (082)
   '/finance/achats/echeancier': 'finance.achats.voir',
   // NJ FINANCE (F8, 081) : ventes et facturation.
   '/finance/ventes':            'finance.ventes.voir',

@@ -41,6 +41,7 @@ const TITLES = {
   '/finance/dettes': 'Achats — Dettes fournisseurs',
   '/finance/achats': 'Achats — Tableau des achats',
   '/finance/achats/nouvelle': 'Achats — Nouvelle facture',
+  '/finance/achats/lecture': 'Achats — Import et lecture automatique',
   '/finance/achats/echeancier': 'Achats — Échéancier fournisseurs',
   '/finance/ventes': 'Facturation',
   '/finance/ventes/nouvelle': 'Facturation — Nouveau document',

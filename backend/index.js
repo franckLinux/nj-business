@@ -232,6 +232,10 @@ Promise.race([
   console.log(`║  → http://localhost:${PORT}               ║`);
   console.log(`║  ENV: ${(process.env.NODE_ENV||'development').padEnd(32)}║`);
   console.log('╚════════════════════════════════════════╝\n');
+  // NJ FINANCE lot F7 : relire les factures restées « en cours » de lecture.
+  require('./src/services/finance/extractions.service').reprendre()
+    .then((n) => { if (n) console.log(`[NJ FINANCE] ${n} facture(s) remise(s) en lecture.`); })
+    .catch((err) => console.error('[NJ FINANCE] Reprise des lectures impossible :', err.message));
 }));
 
 module.exports = app;

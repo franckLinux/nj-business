@@ -6,9 +6,13 @@ const config = require('../services/finance/config.service');
 const socle = require('../services/comptabilite/socle.service');
 const achats = require('../services/finance/achats.service');
 const facturesPdf = require('../services/finance/factures_pdf.service');
+const extractions = require('../services/finance/extractions.service');
 const journalCtrl = require('./journal.controller');
 
 const repondre = (res, err, quoi) => {
+  if (err instanceof extractions.ErreurExtraction) {
+    return res.status(err.status).json({ error: err.message, ...(err.doublon ? { doublon: err.doublon } : {}) });
+  }
   const e = err instanceof config.ErreurConfig ? err : tiers.traduire(config.traduire(err));
   if (e instanceof config.ErreurConfig) return res.status(e.status).json({ error: e.message });
   if (e instanceof tiers.ErreurTiers) return res.status(e.status).json({ error: e.message, ...(e.doublon ? { doublon: e.doublon } : {}) });
@@ -96,6 +100,21 @@ module.exports = {
       if (err instanceof facturesPdf.ErreurPdf) return res.status(err.status).json({ error: err.message });
       return repondre(res, err, 'PDF de facture');
     }
+  },
+  // Lot F7 : import et lecture automatique des factures fournisseurs.
+  postExtraction:      action('dépôt de facture à lire', async (req) => extractions.deposer(ctx(req)), 202),
+  getExtractions:      action('lectures de factures', (req) => extractions.lister(req.tenantId, req.query)),
+  getExtraction:       action('lecture de facture', (req) => extractions.lire(req.tenantId, req.params.id)),
+  postExtractionAbandon: action('abandon de lecture', (req) => extractions.abandonner({ ...ctx(req), id: req.params.id })),
+  getExtractionFichier: async (req, res) => {
+    try {
+      const f = await extractions.fichier(req.tenantId, req.params.id);
+      res.setHeader('Content-Type', f.mime);
+      res.setHeader('Content-Disposition', `inline; filename="${f.nom.replace(/[^\w.\- ()]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(f.nom)}`);
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.sendFile(f.chemin, (err) => { if (err && !res.headersSent) repondre(res, err, 'pièce lue'); else if (err) console.error('[NJ FINANCE] envoi de pièce :', err.message); });
+    } catch (err) { return repondre(res, err, 'pièce lue'); }
   },
   deleteReglement: action('retrait de règlement', (req) => achats.retirerReglement({ ...ctx(req), id: req.params.id })),
 };

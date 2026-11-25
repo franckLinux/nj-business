@@ -71,6 +71,7 @@ import ParametragePage from '@/pages/comptabilite/ParametragePage';
 import EcrituresCaissePage from '@/pages/comptabilite/EcrituresCaissePage';
 import { EtatTiersPage, TiersFichePage, TiersListePage } from '@/pages/finance/TiersPages';
 import { AchatFichePage, AchatSaisiePage, AchatsListePage, EcheancierPage } from '@/pages/finance/AchatsPages';
+import LectureFacturesPage from '@/pages/finance/LectureFacturesPage';
 import OffreFournisseurPage from '@/pages/OffreFournisseurPage';
 import { ConsultationsPage, ConsultationFormPage, ConsultationPage, ComparatifPage } from '@/pages/commercial/ConsultationsPages';
 import { FraisListePage, FraisFormPage, FraisPage } from '@/pages/commercial/FraisPages';
@@ -334,6 +335,7 @@ function AuthenticatedApp() {
         <Route path="finance/dettes"    element={<Autorise code={PAGE_PERMS['/finance/dettes']}><EtatTiersPage key="f" sens="fournisseur" /></Autorise>} />
         <Route path="finance/achats"                 element={<Autorise code={PAGE_PERMS['/finance/achats']}><AchatsListePage /></Autorise>} />
         <Route path="finance/achats/nouvelle"        element={<Autorise code={PAGE_PERMS['/finance/achats/nouvelle']}><AchatSaisiePage key="n" /></Autorise>} />
+        <Route path="finance/achats/lecture"         element={<Autorise code={PAGE_PERMS['/finance/achats/lecture']}><LectureFacturesPage /></Autorise>} />
         <Route path="finance/achats/echeancier"      element={<Autorise code={PAGE_PERMS['/finance/achats/echeancier']}><EcheancierPage /></Autorise>} />
         <Route path="finance/achats/fin/:id/modifier" element={<Autorise code={PAGE_PERMS['/finance/achats/nouvelle']}><AchatSaisiePage key="m" /></Autorise>} />
         <Route path="finance/achats/:origine/:id"    element={<Autorise code={PAGE_PERMS['/finance/achats']}><AchatFichePage /></Autorise>} />

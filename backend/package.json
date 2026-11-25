@@ -34,6 +34,7 @@
   },
   "//": "Les scripts sequelize:migrate* ont été retirés : sequelize-cli est gelé sur son baseline et n'est joué nulle part dans la chaîne de déploiement. Toute migration de schéma s'écrit en SQL dans db/migrations/ — voir migrations/README.md.",
   "dependencies": {
+    "@tesseract.js-data/fra": "^1.0.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
@@ -45,10 +46,12 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "nodemailer": "^10.6.1",
+    "pdfjs-dist": "^3.11.174",
     "pdfkit": "^0.15.2",
     "pg": "^8.11.3",
     "qrcode": "^1.5.4",
     "sequelize": "^6.37.8",
+    "tesseract.js": "^5.1.1",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

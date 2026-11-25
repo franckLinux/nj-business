@@ -97,6 +97,7 @@ export function AchatsListePage({ sens = 'fournisseur' }) {
         <div className="cm-actions">
           <button type="button" className="cm-btn cm-secondaire" disabled={!d?.factures?.length} onClick={exporter}>Exporter</button>
           {can(C.perms.saisir) && sens === 'client' && <Link className="cm-btn cm-secondaire" to="/finance/ventes/nouvelle?type=proforma">+ Proforma</Link>}
+          {sens === 'fournisseur' && can('finance.achats.importer') && <Link className="cm-btn cm-secondaire" to="/finance/achats/lecture">📄 Importer une facture</Link>}
           {can(C.perms.saisir) && <Link className="cm-btn cm-primaire" to={`${C.base}/nouvelle`}>+ Nouvelle facture</Link>}
         </div>
       </div>
@@ -191,6 +192,8 @@ export function AchatSaisiePage({ sens = 'fournisseur' }) {
   const [erreur, setErreur] = useState('');
   const [doublon, setDoublon] = useState(null);
   const [enCours, setEnCours] = useState(false);
+  const [lecture, setLecture] = useState(null);     // lot F7 : pièce lue automatiquement
+  const [apercu, setApercu] = useState(null);       // { url, mime } de la pièce, lue avec le jeton
 
   useEffect(() => {
     (async () => {
@@ -221,12 +224,44 @@ export function AchatSaisiePage({ sens = 'fournisseur' }) {
             prix_unitaire: String(Number(l.prix_unitaire)), remise_pct: '', taxe_id: l.taxe_id || '', compte: l.compte })) });
         return;
       }
+      const eid = sens === 'fournisseur' ? params.get('extraction') : null;
+      if (eid) {
+        const e = await api.get(`/finance/achats/extractions/${eid}`);
+        if (e?.error) { setErreur(e.error); return; }
+        if (e.statut !== 'a_verifier') {
+          setErreur(e.statut === 'utilisee' ? 'Cette pièce a déjà servi à une facture.' : 'Cette lecture n\'est plus à vérifier : reprenez-la depuis « Import et lecture automatique ».');
+          return;
+        }
+        setLecture(e);
+        const c = e.champs || {};
+        const taux = c.taux_tva?.valeur;
+        const taxe = taux === 0 ? '' : (e.taxe_proposee?.id || tva);
+        const lues = c.lignes?.valeur?.length ? c.lignes.valeur : [];
+        setF({ type: 'facture', extraction_id: eid, tiers_id: c.fournisseur?.valeur?.id || '', reference: c.reference?.valeur || '',
+          date_facture: c.date_facture?.valeur || aujourdhui(), date_echeance: c.date_echeance?.valeur || '', conditions_paiement: '',
+          categorie_id: r.categories.find((x) => x.code === 'FOURN')?.id || r.categories[0]?.id || '', objet: '', observations: '', activite_id: '',
+          lignes: lues.length ? lues.map((l) => ({ ...ligneVide(taxe), designation: l.designation, quantite: String(l.quantite), prix_unitaire: String(l.prix_unitaire) }))
+            : [ligneVide(taxe)] });
+        return;
+      }
       setF({ type: sens === 'client' && params.get('type') === 'proforma' ? 'proforma' : 'facture', tiers_id: params.get('tiers') || '', reference: '',
         date_facture: aujourdhui(), date_echeance: '', conditions_paiement: '',
         categorie_id: r.categories.find((c) => c.code === (sens === 'client' ? 'PRESTA' : 'FOURN'))?.id || r.categories[0]?.id || '', objet: '', observations: '', activite_id: '',
         lignes: [ligneVide(tva)] });
     })();
   }, [id, params, C, sens]);
+
+  // La pièce lue s'affiche à côté du formulaire (fichier privé, lu avec le jeton).
+  useEffect(() => {
+    if (!lecture) return undefined;
+    let url = null; let fini = false;
+    api.fichier(`/finance/achats/extractions/${lecture.id}/fichier`).then((x) => {
+      if (fini) return;
+      if (x.error) { setApercu({ erreur: x.error }); return; }
+      url = URL.createObjectURL(x.blob); setApercu({ url, mime: x.type || lecture.mime });
+    });
+    return () => { fini = true; if (url) URL.revokeObjectURL(url); };
+  }, [lecture]);
 
   const totaux = useMemo(() => {
     if (!f || !ref) return { ht: 0, taxe: 0 };
@@ -254,6 +289,16 @@ export function AchatSaisiePage({ sens = 'fournisseur' }) {
         taxe_id: p.taxe_id || l.taxe_id, compte: p.compte || l.compte } : {}) })) }));
   };
   const fournisseur = ref.tiers.find((t) => t.id === String(f.tiers_id));
+  // Lot F7 : niveau de confiance d'un champ lu, tant que la valeur proposée n'a pas été changée.
+  const champsLus = lecture?.champs || {};
+  const lu = (cle, valeur) => {
+    const c = champsLus[cle];
+    if (!lecture || !c) return null;
+    const proposee = cle === 'fournisseur' ? c.valeur?.id : c.valeur;
+    if (proposee === null || proposee === undefined || String(proposee) !== String(valeur ?? '')) return null;
+    return <span className={`fin-confiance fin-confiance-${c.confiance}`} title="Valeur lue sur la pièce">lu · {c.confiance}</span>;
+  };
+  const aVerifier = (cle, valeur) => (lu(cle, valeur) && champsLus[cle].confiance !== 'haute' ? 'fin-lu-a-verifier' : undefined);
   const categorie = ref.categories.find((c) => c.id === String(f.categorie_id));
   const proforma = f.type === 'proforma';
   const echeanceAuto = !f.date_facture ? '' : f.type === 'facture' && fournisseur ? ajouterJours(f.date_facture, fournisseur.delai)
@@ -279,7 +324,7 @@ export function AchatSaisiePage({ sens = 'fournisseur' }) {
       : sens === 'client' ? 'Le numéro (FAC-…) est attribué à la validation, qui passe aussi l\'écriture de vente. Une autre personne que vous doit valider.'
         : 'Le numéro interne est attribué à la validation, qui passe aussi l\'écriture d\'achat. Une autre personne que vous doit valider.';
   return (
-    <div className="cm-page fin-page">
+    <div className={`cm-page fin-page${lecture ? ' fin-page-large' : ''}`}>
       <Link to={id ? C.action(id) : C.base} className="fin-lien">‹ {id ? 'Retour au document' : C.titreListe}</Link>
       <div className="cm-entete">
         <div>
@@ -287,13 +332,15 @@ export function AchatSaisiePage({ sens = 'fournisseur' }) {
           <p>{intro}</p>
         </div>
       </div>
+      <div className={lecture ? 'fin-saisie-lue' : undefined}><div>
       {f.motif_renvoi && <div className="fin-bandeau">Renvoyée au brouillon : {f.motif_renvoi}</div>}
       <Erreur message={erreur} />
+      {lecture && <CarteLecture lecture={lecture} totaux={totaux} fournisseurChoisi={Boolean(f.tiers_id)} />}
       {doublon && <div className="fin-bandeau">Pièce déjà enregistrée : <Link to={`/finance/achats/${doublon.origine}/${doublon.id}`}>ouvrir la facture existante</Link></div>}
       <section className="fin-carte">
         <div className="cm-grille">
-          <Champ label={C.tiers} requis id="a-tiers" aide={fournisseur ? `Délai de paiement : ${fournisseur.delai} jours` : <Link to="/finance/tiers">Créer un {C.tiers.toLowerCase()}</Link>}>
-            <select id="a-tiers" value={f.tiers_id} disabled={avoir} onChange={set('tiers_id')}>
+          <Champ label={C.tiers} requis id="a-tiers" aide={<>{fournisseur ? `Délai de paiement : ${fournisseur.delai} jours` : <Link to="/config" state={{ onglet: sens === 'client' ? 'clients' : 'fournisseurs' }}>Créer un {C.tiers.toLowerCase()}</Link>}{lu('fournisseur', f.tiers_id)}</>}>
+            <select id="a-tiers" className={aVerifier('fournisseur', f.tiers_id)} value={f.tiers_id} disabled={avoir} onChange={set('tiers_id')}>
               <option value="">— choisir —</option>
               {ref.tiers.map((t) => <option key={t.id} value={t.id}>{t.nom}{t.nui ? ` · ${t.nui}` : ''}</option>)}
             </select>
@@ -301,14 +348,14 @@ export function AchatSaisiePage({ sens = 'fournisseur' }) {
           {sens === 'client' ? (
             <Champ label="Référence du client" id="a-ref" aide="Son bon de commande, facultatif"><input id="a-ref" value={f.reference} maxLength={60} onChange={set('reference')} /></Champ>
           ) : (
-            <Champ label={avoir ? "Référence de l'avoir du fournisseur" : 'Référence de la facture du fournisseur'} requis id="a-ref" aide="Numéro porté sur la pièce reçue">
-              <input id="a-ref" value={f.reference} maxLength={60} onChange={set('reference')} />
+            <Champ label={avoir ? "Référence de l'avoir du fournisseur" : 'Référence de la facture du fournisseur'} requis id="a-ref" aide={<>Numéro porté sur la pièce reçue{lu('reference', f.reference)}</>}>
+              <input id="a-ref" className={aVerifier('reference', f.reference)} value={f.reference} maxLength={60} onChange={set('reference')} />
             </Champ>
           )}
-          <Champ label={avoir ? "Date de l'avoir" : proforma ? 'Date de la proforma' : 'Date de la facture'} requis id="a-date"><input id="a-date" type="date" value={f.date_facture} onChange={set('date_facture')} /></Champ>
+          <Champ label={avoir ? "Date de l'avoir" : proforma ? 'Date de la proforma' : 'Date de la facture'} requis id="a-date" aide={lu('date_facture', f.date_facture)}><input id="a-date" className={aVerifier('date_facture', f.date_facture)} type="date" value={f.date_facture} onChange={set('date_facture')} /></Champ>
           {!avoir && (
-            <Champ label={proforma ? 'Valable jusqu\'au' : 'Échéance'} id="a-ech" aide={echeanceAuto && !f.date_echeance ? `Par défaut : ${fmtDate(echeanceAuto)}` : undefined}>
-              <input id="a-ech" type="date" value={f.date_echeance} min={f.date_facture} onChange={set('date_echeance')} />
+            <Champ label={proforma ? 'Valable jusqu\'au' : 'Échéance'} id="a-ech" aide={echeanceAuto && !f.date_echeance ? `Par défaut : ${fmtDate(echeanceAuto)}` : lu('date_echeance', f.date_echeance)}>
+              <input id="a-ech" className={aVerifier('date_echeance', f.date_echeance)} type="date" value={f.date_echeance} min={f.date_facture} onChange={set('date_echeance')} />
             </Champ>
           )}
           <Champ label="Catégorie" requis id="a-cat" aide={categorie ? `${categorie.type_achat ? `${ref.types_achat[categorie.type_achat]} · ` : ''}compte par défaut ${categorie.compte_defaut}` : undefined}>
@@ -379,7 +426,47 @@ export function AchatSaisiePage({ sens = 'fournisseur' }) {
         <button type="button" className={`cm-btn ${proforma ? 'cm-primaire' : 'cm-secondaire'}`} disabled={enCours} onClick={() => enregistrer(false)}>Enregistrer{proforma ? '' : ' le brouillon'}</button>
         {!proforma && <button type="button" className="cm-btn cm-primaire" disabled={enCours} onClick={() => enregistrer(true)}>Enregistrer et soumettre à validation</button>}
       </div>
+      </div>
+      {lecture && (
+        <aside className="fin-piece-lue" aria-label="Pièce lue">
+          <div className="fin-piece-lue-tete"><b>{lecture.fichier_nom}</b>
+            {apercu?.url && <a href={apercu.url} target="_blank" rel="noopener noreferrer">Agrandir</a>}</div>
+          {!apercu && <div className="loading-msg">Chargement de la pièce…</div>}
+          {apercu?.erreur && <Erreur message={apercu.erreur} />}
+          {apercu?.url && (/pdf/.test(apercu.mime)
+            ? <iframe title="Pièce lue" src={`${apercu.url}#navpanes=0&view=FitH`} />
+            : <img alt="Pièce lue" src={apercu.url} />)}
+        </aside>
+      )}
+      </div>
     </div>
+  );
+}
+
+// Lot F7 : ce qui a été lu, ce qui reste à vérifier.
+const MOTEURS_LECTURE = { texte_pdf: 'texte du PDF', ocr_image: 'photo lue par OCR', ocr_pdf: 'PDF scanné lu par OCR' };
+function CarteLecture({ lecture, totaux, fournisseurChoisi }) {
+  const c = lecture.champs || {};
+  const ttcLu = c.total_ttc?.valeur;
+  const ttcSaisi = (totaux.ht + totaux.taxe) / 100;
+  const ecart = ttcLu !== null && ttcLu !== undefined && Math.abs(ttcLu - ttcSaisi) > 1;
+  const alertes = [...(c.alertes || [])];
+  if (!fournisseurChoisi) {
+    alertes.unshift(`Fournisseur non reconnu${c.fournisseur?.nui_lu ? ` (NIU lu : ${c.fournisseur.nui_lu})` : ''}${c.fournisseur?.nom_lu ? `, en-tête : « ${c.fournisseur.nom_lu} »` : ''} : choisissez-le, ou créez-le dans Configuration → Fournisseurs.`);
+  }
+  return (
+    <section className="fin-carte fin-lecture">
+      <h3 className="fin-titre-section">Lu sur la pièce — à vérifier avant d'enregistrer</h3>
+      <p className="cm-sous">Lecture : {MOTEURS_LECTURE[lecture.moteur] || '—'}
+        {lecture.confiance_ocr !== null && lecture.confiance_ocr !== undefined ? ` · netteté ${Math.round(lecture.confiance_ocr)} %` : ''}.
+        Les champs encadrés en orange sont à contrôler en priorité sur la pièce affichée à droite.</p>
+      <p>Totaux lus : HT <b>{ttcLu !== undefined && c.total_ht?.valeur !== null ? fmtCompta(c.total_ht?.valeur) : '—'}</b>
+        {' · '}TVA <b>{c.total_tva?.valeur !== null && c.total_tva?.valeur !== undefined ? fmtCompta(c.total_tva.valeur) : '—'}</b>
+        {' · '}TTC <b>{ttcLu !== null && ttcLu !== undefined ? fmtCompta(ttcLu) : '—'}</b>
+        {c.total_ttc && <span className={`fin-confiance fin-confiance-${c.total_ttc.confiance}`}>{c.total_ttc.confiance}</span>}</p>
+      {ecart && <div className="fin-bandeau">Le total TTC saisi ({fmtCompta(ttcSaisi, { zero: '0' })}) diffère du total lu sur la pièce ({fmtCompta(ttcLu)}) : corrigez les lignes ou la taxe.</div>}
+      {alertes.length > 0 && <ul>{alertes.map((a) => <li key={a}>{a}</li>)}</ul>}
+    </section>
   );
 }
 
@@ -681,6 +768,7 @@ export function AchatFichePage({ sens = 'fournisseur' }) {
             {f.origine_numero && <span>Sur la facture {f.origine_numero}</span>}
             {f.proforma_numero && <span>Issue de la proforma <Link to={`/finance/ventes/${f.proforma_id}`}>{f.proforma_numero}</Link></span>}
             {f.facture_issue_id && <span>Facturée : <Link to={`/finance/ventes/${f.facture_issue_id}`}>{f.facture_issue_numero}</Link></span>}
+            {d.piece_lue && <span>📎 <button type="button" className="cm-lien" onClick={() => ouvrirFichier(api, `/finance/achats/extractions/${d.piece_lue.id}/fichier`, d.piece_lue.fichier_nom, d.piece_lue.mime, toast)}>Pièce du fournisseur</button></span>}
           </div>
         </div>
         <div className="cm-actions">
