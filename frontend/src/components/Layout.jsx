@@ -33,7 +33,7 @@ const TITLES = {
   '/attente': 'Dépenses en attente',
   '/controle/pieces': 'Contrôles comptables — Rapport',
   '/controle/regularite': 'Contrôles comptables — Contrôle de substance',
-  '/controle/arretes': 'Inventaire — Arrêtés de caisse & inventaires',
+  '/controle/arretes': 'Caisse — Arrêtés de caisse & inventaires',
   '/controle/ecarts': 'Inventaire — Écarts de caisse',
   '/controle/registre': 'Clients et fournisseurs — Registre bénéficiaires Payés/Encaissés',
   '/controle/passerelle': 'Contrôles comptables — Contrôle de régularité formelle',

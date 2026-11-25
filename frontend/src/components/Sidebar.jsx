@@ -87,7 +87,8 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
 
         {/* NJ FINANCE (lot F1, 25/11/2026) : menu en rubriques — Tableau de bord,
             Clients et fournisseurs, Configuration, Gestion d'activité, Caisse,
-            Inventaire, Reporting et états financiers. Achats et Ventes viendront
+            Inventaire, Reporting et états financiers. L'arrêt et l'inventaire
+            de caisse restent dans Caisse (décision du 25/11/2026). Achats et Ventes viendront
             avec leurs lots. Les adresses et les droits des pages ne changent pas. */}
         {!sansClient && voit('/controle/registre') && (
           <NavLink to="/controle/registre" className={navClass} title="Registre bénéficiaires Payés/Encaissés">
@@ -196,14 +197,6 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             )}
           </NavLink>
           )}
-        </NavGroup>
-
-        {(voit('/controle/arretes') || voit('/controle/ecarts')) && (
-        <NavGroup
-          name="inventaire"
-          label="Inventaire"
-          icon={<svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>}
-        >
           {voit('/controle/arretes') && (
           <NavLink to="/controle/arretes" className={subClass}>
             {/* 046 : validation des arrêtés de caisse et des inventaires (PV scanné). */}
@@ -211,6 +204,14 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             Arrêtés &amp; inventaires
           </NavLink>
           )}
+        </NavGroup>
+
+        {voit('/controle/ecarts') && (
+        <NavGroup
+          name="inventaire"
+          label="Inventaire"
+          icon={<svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>}
+        >
           {voit('/controle/ecarts') && (
           <NavLink to="/controle/ecarts" className={subClass}>
             {/* 061 : registre des écarts de caisse (constat, destination, régularisation). */}
