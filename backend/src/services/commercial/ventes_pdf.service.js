@@ -211,4 +211,6 @@ const rendreLivraison = async (o) => {
   return fin;
 };
 
-module.exports = { rendreDevis, rendreLivraison, decimales };
+module.exports = { rendreDevis, rendreLivraison, decimales,
+  // Briques de mise en page, réutilisées par les factures de NJ FINANCE (lot F8).
+  nouveauDoc, entete, boites, tableau, zoneSignature, finaliser, lignesClient };

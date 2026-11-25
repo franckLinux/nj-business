@@ -42,6 +42,9 @@ const TITLES = {
   '/finance/achats': 'Achats — Factures fournisseurs',
   '/finance/achats/nouvelle': 'Achats — Nouvelle facture',
   '/finance/achats/echeancier': 'Achats — Échéancier',
+  '/finance/ventes': 'Ventes et facturation — Factures clients',
+  '/finance/ventes/nouvelle': 'Ventes et facturation — Nouveau document',
+  '/finance/ventes/echeancier': 'Ventes et facturation — Échéancier clients',
   '/controle/passerelle': 'Contrôles comptables — Contrôle de régularité formelle',
 };
 
@@ -94,7 +97,8 @@ export default function Layout() {
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
   let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? "Gestion d'activité — Projets"
     : location.pathname.startsWith('/finance/tiers/') ? 'Clients et fournisseurs — Fiche'
-      : location.pathname.startsWith('/finance/achats/') ? 'Achats — Facture fournisseur' : 'Tableau de bord');
+      : location.pathname.startsWith('/finance/achats/') ? 'Achats — Facture fournisseur'
+        : location.pathname.startsWith('/finance/ventes/') ? 'Ventes et facturation — Document client' : 'Tableau de bord');
   if (location.pathname.startsWith('/journal/')) {
     const j = journaux.find((x) => String(x.id) === String(params.id));
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';

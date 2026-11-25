@@ -31,6 +31,10 @@ export const PAGE_PERMS = {
   '/finance/achats':            'finance.achats.voir',
   '/finance/achats/nouvelle':   'finance.achats.saisir',
   '/finance/achats/echeancier': 'finance.achats.voir',
+  // NJ FINANCE (F8, 081) : ventes et facturation.
+  '/finance/ventes':            'finance.ventes.voir',
+  '/finance/ventes/nouvelle':   'finance.ventes.facturer',
+  '/finance/ventes/echeancier': 'finance.ventes.voir',
 };
 
 // Onglets de la page Configuration.

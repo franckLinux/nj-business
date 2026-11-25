@@ -13,15 +13,15 @@ import { fmtCompta, fmtDate } from '@/pages/comptabilite/commun';
  * @param {object} p.choix            { [cle]: montant saisi }
  * @param {function} p.onChoix        (nouveauChoix, affectations[]) => void
  */
-export default function FacturesARegler({ tiersId, montant, choix, onChoix }) {
+export default function FacturesARegler({ tiersId, montant, choix, onChoix, sens = 'fournisseur' }) {
   const [factures, setFactures] = useState(null);
   useEffect(() => {
     let annule = false;
     setFactures(null);
     if (!tiersId || !navigator.onLine) return undefined;
-    api.get(`/finance/achats/ouvertes?tiers_id=${tiersId}`).then((r) => { if (!annule) setFactures(Array.isArray(r) ? r : []); });
+    api.get(`/finance/${sens === 'client' ? 'ventes' : 'achats'}/ouvertes?tiers_id=${tiersId}`).then((r) => { if (!annule) setFactures(Array.isArray(r) ? r : []); });
     return () => { annule = true; };
-  }, [tiersId]);
+  }, [tiersId, sens]);
   if (!factures || factures.length === 0) return null;
   const total = Object.values(choix).reduce((t, v) => t + (Number(String(v).replace(',', '.')) || 0), 0);
   const maj = (cle, valeur) => {
@@ -37,8 +37,9 @@ export default function FacturesARegler({ tiersId, montant, choix, onChoix }) {
   };
   return (
     <div className="span-2 fin-reglement-caisse">
-      <b>Cette sortie règle-t-elle des factures de ce fournisseur ?</b>
-      <div className="field-hint">La part réglée sera portée au compte du fournisseur (et non en charge : la facture l'a déjà comptée).</div>
+      <b>{sens === 'client' ? 'Cette entrée règle-t-elle des factures de ce client ?' : 'Cette sortie règle-t-elle des factures de ce fournisseur ?'}</b>
+      <div className="field-hint">{sens === 'client' ? 'La part réglée sera portée au compte du client (et non en produit : la facture l\'a déjà compté).'
+        : 'La part réglée sera portée au compte du fournisseur (et non en charge : la facture l\'a déjà comptée).'}</div>
       <table>
         <tbody>
           {factures.map((f) => (
@@ -53,7 +54,7 @@ export default function FacturesARegler({ tiersId, montant, choix, onChoix }) {
           ))}
         </tbody>
       </table>
-      {total > (Number(montant) || 0) && <div className="field-hint" style={{ color: '#b91c1c' }}>Le total réglé ({fmtCompta(total)}) dépasse le montant de la sortie.</div>}
+      {total > (Number(montant) || 0) && <div className="field-hint" style={{ color: '#b91c1c' }}>Le total réglé ({fmtCompta(total)}) dépasse le montant du mouvement.</div>}
     </div>
   );
 }

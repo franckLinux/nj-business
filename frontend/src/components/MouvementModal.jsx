@@ -37,7 +37,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   // NJ FINANCE F6 : factures fournisseurs réglées par cette sortie (reliées après l'enregistrement).
   const [reglementChoix, setReglementChoix] = useState({});
   const [reglements, setReglements] = useState([]);
-  useEffect(() => { setReglementChoix({}); setReglements([]); }, [tiersId]);
+  useEffect(() => { setReglementChoix({}); setReglements([]); }, [tiersId, type]);
   const [tiersListe, setTiersListe] = useState([]);
   const [nouvelleRubrique, setNouvelleRubrique] = useState(false);
   const peutAjouterRubrique = !mouvement && (can('rubriques.create') || can('rubriques.edit'));
@@ -206,8 +206,8 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       return;
     }
     const totalRegle = reglements.reduce((t, r) => t + (Number(String(r.montant).replace(',', '.')) || 0), 0);
-    if (!mouvement && type === 'sortie' && totalRegle > montantNum) {
-      setErreur('Le total des factures réglées dépasse le montant de la sortie.');
+    if (!mouvement && totalRegle > montantNum) {
+      setErreur('Le total des factures réglées dépasse le montant du mouvement.');
       return;
     }
     // C16 : pièce obligatoire manquante → avertissement et confirmation
@@ -289,7 +289,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       toast(`${isUrgent ? '🔴' : '🟡'} ${w.message}`, isUrgent ? 'error' : 'warning', 6000);
     }
 
-    if (!mouvement && type === 'sortie' && reglements.length && res.id) {
+    if (!mouvement && reglements.length && res.id) {
       const rg = await api.post('/finance/reglements', { mouvement_id: res.id, affectations: reglements });
       if (rg?.error) toast(`Sortie enregistrée, mais le règlement n'a pas pu être relié : ${rg.error} Reliez-le depuis la facture (Achats).`, 'warning', 10000);
       else toast(`Règlement relié à ${reglements.length} facture(s).`, 'success');
@@ -499,8 +499,8 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
               value={tiersChoisi ? `${tiersChoisi.compte_effectif}${tiersChoisi.compte_collectif ? ' (collectif)' : ''}` : ''}
               title={tiersChoisi ? `Tiers du registre : ${tiersChoisi.nom}` : 'Choisissez un bénéficiaire du registre (nom ou NUI)'} />
           </div>
-          {!mouvement && type === 'sortie' && tiersId && can('finance.reglements.affecter') && (
-            <FacturesARegler tiersId={tiersId} montant={parseFloat(montant) || 0} choix={reglementChoix}
+          {!mouvement && (type === 'sortie' || type === 'entree') && tiersId && can('finance.reglements.affecter') && (
+            <FacturesARegler key={type} sens={type === 'entree' ? 'client' : 'fournisseur'} tiersId={tiersId} montant={parseFloat(montant) || 0} choix={reglementChoix}
               onChoix={(c, a) => { setReglementChoix(c); setReglements(a); }} />
           )}
           <div>

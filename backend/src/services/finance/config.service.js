@@ -92,6 +92,7 @@ const TYPES_ACHAT = { marchandises: 'Achats de marchandises', autres: 'Autres ac
 const DOCUMENTS = {
   facture_client: { libelle: 'Factures clients', prefixe: 'FAC' },
   avoir_client: { libelle: 'Avoirs clients', prefixe: 'AVC' },
+  proforma: { libelle: 'Proformas clients', prefixe: 'PRO' },
   facture_fournisseur: { libelle: 'Factures fournisseurs (n° interne)', prefixe: 'FFR' },
   avoir_fournisseur: { libelle: 'Avoirs fournisseurs (n° interne)', prefixe: 'AVF' },
 };

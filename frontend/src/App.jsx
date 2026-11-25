@@ -337,6 +337,12 @@ function AuthenticatedApp() {
         <Route path="finance/achats/echeancier"      element={<Autorise code={PAGE_PERMS['/finance/achats/echeancier']}><EcheancierPage /></Autorise>} />
         <Route path="finance/achats/fin/:id/modifier" element={<Autorise code={PAGE_PERMS['/finance/achats/nouvelle']}><AchatSaisiePage key="m" /></Autorise>} />
         <Route path="finance/achats/:origine/:id"    element={<Autorise code={PAGE_PERMS['/finance/achats']}><AchatFichePage /></Autorise>} />
+        {/* NJ FINANCE F8 (081) : ventes et facturation, mêmes écrans (sens client). */}
+        <Route path="finance/ventes"                 element={<Autorise code={PAGE_PERMS['/finance/ventes']}><AchatsListePage key="v" sens="client" /></Autorise>} />
+        <Route path="finance/ventes/nouvelle"        element={<Autorise code={PAGE_PERMS['/finance/ventes/nouvelle']}><AchatSaisiePage key="vn" sens="client" /></Autorise>} />
+        <Route path="finance/ventes/echeancier"      element={<Autorise code={PAGE_PERMS['/finance/ventes/echeancier']}><EcheancierPage key="ve" sens="client" /></Autorise>} />
+        <Route path="finance/ventes/:id/modifier"    element={<Autorise code={PAGE_PERMS['/finance/ventes/nouvelle']}><AchatSaisiePage key="vm" sens="client" /></Autorise>} />
+        <Route path="finance/ventes/:id"             element={<Autorise code={PAGE_PERMS['/finance/ventes']}><AchatFichePage key="vf" sens="client" /></Autorise>} />
         <Route path="config"         element={<Autorise ok={voitConfiguration(user, can)}><ConfigPage /></Autorise>} />
         <Route path="attente"        element={<Autorise code={PAGE_PERMS['/attente']}><AttentePage /></Autorise>} />
         <Route path="tenants"        element={<TenantsPage />} />
