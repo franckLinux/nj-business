@@ -121,6 +121,30 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         {!sansClient && (<>
         <div className="nav-sep" />
 
+        {/* NJ FINANCE F6 (080) : achats — factures fournisseurs de toutes origines, règlements. */}
+        {voit('/finance/achats') && (
+        <NavGroup
+          name="achats"
+          label="Achats"
+          icon={<svg viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" /><line x1="3" y1="6" x2="21" y2="6" /><path d="M16 10a4 4 0 0 1-8 0" /></svg>}
+        >
+          <NavLink to="/finance/achats" className={({ isActive }) => subClass({ isActive: isActive || /^\/finance\/achats\/(fin|com_ff)\//.test(location.pathname) })} end>
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" /></svg>
+            Factures fournisseurs
+          </NavLink>
+          {can('finance.achats.saisir') && (
+          <NavLink to="/finance/achats/nouvelle" className={subClass}>
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            Nouvelle facture
+          </NavLink>
+          )}
+          <NavLink to="/finance/achats/echeancier" className={subClass}>
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></svg>
+            Échéancier
+          </NavLink>
+        </NavGroup>
+        )}
+
         {/* Activités et projets réservés aux ONG / associations (décision du 25/11/2026) :
             une PME n'a pas la rubrique. */}
         {accesProjets?.ong && (accesProjets?.visible || voit('/activites') || voitOngletConfig(user, can, 'activites')) && (

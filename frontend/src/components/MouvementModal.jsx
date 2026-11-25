@@ -5,6 +5,7 @@ import { api, API_BASE } from '@/lib/api';
 import { syncManager } from '@/lib/syncManager';
 import { RubriqueModal } from '@/components/config/RubriquesTab';
 import { useContexteProjets, natureAffectee, libelleNature } from '@/lib/projets';
+import FacturesARegler from '@/components/finance/FacturesARegler';
 
 // Reprend #modal-mouvement de legacy/index.html + openModalMouvement/saveMouvement
 // de legacy/js/app.js (l. 1239-1467), y compris les pièces jointes
@@ -33,6 +34,10 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
   // le téléphone et apporte son compte tiers. Sans choix, le serveur retrouve
   // le tiers de même NUI (ou de même nom) à l'enregistrement.
   const [tiersId, setTiersId] = useState(mouvement?.tiers_id ? Number(mouvement.tiers_id) : null);
+  // NJ FINANCE F6 : factures fournisseurs réglées par cette sortie (reliées après l'enregistrement).
+  const [reglementChoix, setReglementChoix] = useState({});
+  const [reglements, setReglements] = useState([]);
+  useEffect(() => { setReglementChoix({}); setReglements([]); }, [tiersId]);
   const [tiersListe, setTiersListe] = useState([]);
   const [nouvelleRubrique, setNouvelleRubrique] = useState(false);
   const peutAjouterRubrique = !mouvement && (can('rubriques.create') || can('rubriques.edit'));
@@ -200,6 +205,11 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       setErreur(`Budget de l'activité « ${activiteProjet.nom} » dépassé : il reste ${(activiteProjet.reste || 0).toLocaleString('fr-FR')} ${devise}.`);
       return;
     }
+    const totalRegle = reglements.reduce((t, r) => t + (Number(String(r.montant).replace(',', '.')) || 0), 0);
+    if (!mouvement && type === 'sortie' && totalRegle > montantNum) {
+      setErreur('Le total des factures réglées dépasse le montant de la sortie.');
+      return;
+    }
     // C16 : pièce obligatoire manquante → avertissement et confirmation
     // explicite (l'écriture n'est pas bloquée).
     if (!mouvement && type === 'sortie' && piecesHint?.obligatoires?.length && fichiers.length === 0) {
@@ -268,6 +278,7 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
     if (res.en_attente) {
       onSaved();
       toast(`⏳ ${res.message}`, 'warning', 8000);
+      if (reglements.length) toast('Les factures se relieront à cette sortie depuis Achats, une fois la dépense approuvée.', '', 8000);
       return;
     }
     if (res.error) { setErreur(res.error); return; }
@@ -276,6 +287,12 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
       const w = res.budget_warning;
       const isUrgent = w.taux >= 95;
       toast(`${isUrgent ? '🔴' : '🟡'} ${w.message}`, isUrgent ? 'error' : 'warning', 6000);
+    }
+
+    if (!mouvement && type === 'sortie' && reglements.length && res.id) {
+      const rg = await api.post('/finance/reglements', { mouvement_id: res.id, affectations: reglements });
+      if (rg?.error) toast(`Sortie enregistrée, mais le règlement n'a pas pu être relié : ${rg.error} Reliez-le depuis la facture (Achats).`, 'warning', 10000);
+      else toast(`Règlement relié à ${reglements.length} facture(s).`, 'success');
     }
 
     if (fichiers.length > 0 && res.id) {
@@ -482,6 +499,10 @@ export default function MouvementModal({ journal, mouvement, onClose, onSaved })
               value={tiersChoisi ? `${tiersChoisi.compte_effectif}${tiersChoisi.compte_collectif ? ' (collectif)' : ''}` : ''}
               title={tiersChoisi ? `Tiers du registre : ${tiersChoisi.nom}` : 'Choisissez un bénéficiaire du registre (nom ou NUI)'} />
           </div>
+          {!mouvement && type === 'sortie' && tiersId && can('finance.reglements.affecter') && (
+            <FacturesARegler tiersId={tiersId} montant={parseFloat(montant) || 0} choix={reglementChoix}
+              onChoix={(c, a) => { setReglementChoix(c); setReglements(a); }} />
+          )}
           <div>
             <label>Code comptable</label>
             <input type="text" placeholder="Auto depuis rubrique" style={{ fontFamily: 'monospace' }} readOnly value={codeComptable} />

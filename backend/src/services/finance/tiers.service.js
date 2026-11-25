@@ -50,8 +50,10 @@ const mt = (c) => (c / 100).toFixed(2);
 const MODES = { '': '—', especes: 'Espèces', cheque: 'Chèque', virement: 'Virement', mobile_money: 'Mobile money', carte: 'Carte', compensation: 'Compensation' };
 const SENS = { client: ['client', 'mixte'], fournisseur: ['fournisseur', 'mixte'] };
 
-// Comptes de tiers suivis : 40 (fournisseurs) et 41 (clients).
-const COMPTES_TIERS = `(l.compte LIKE '40%' OR l.compte LIKE '41%')`;
+// Comptes de tiers suivis : 40 et 481 (fournisseurs, d'exploitation et
+// d'investissement — lot F6) et 41 (clients).
+const COMPTES_TIERS = `(l.compte LIKE '40%' OR l.compte LIKE '41%' OR l.compte LIKE '481%')`;
+const FOURN = `(l.compte LIKE '40%' OR l.compte LIKE '481%')`;
 const filtreStatut = (brouillard) => (brouillard ? '' : `AND e.statut = 'validee'`);
 
 // Soldes par tiers depuis les écritures (centimes) : clients = 41 (D − C), fournisseurs = 40 (C − D).
@@ -59,7 +61,7 @@ const soldesParTiers = async (tenantId, { au = null, brouillard = false, tiersId
   const rows = await Q(
     `SELECT l.tiers_id,
             coalesce(sum(l.debit)  FILTER (WHERE l.compte LIKE '41%'), 0) AS d41, coalesce(sum(l.credit) FILTER (WHERE l.compte LIKE '41%'), 0) AS c41,
-            coalesce(sum(l.debit)  FILTER (WHERE l.compte LIKE '40%'), 0) AS d40, coalesce(sum(l.credit) FILTER (WHERE l.compte LIKE '40%'), 0) AS c40,
+            coalesce(sum(l.debit)  FILTER (WHERE ${FOURN}), 0) AS d40, coalesce(sum(l.credit) FILTER (WHERE ${FOURN}), 0) AS c40,
             max(e.date_ecriture)::text AS dernier
        FROM fin_ecriture_lignes l JOIN fin_ecritures e ON e.id = l.ecriture_id
       WHERE l.tenant_id = :tenantId AND l.tiers_id IS NOT NULL AND ${COMPTES_TIERS} ${filtreStatut(brouillard)}

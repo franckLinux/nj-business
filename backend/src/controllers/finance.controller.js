@@ -4,11 +4,14 @@
 const tiers = require('../services/finance/tiers.service');
 const config = require('../services/finance/config.service');
 const socle = require('../services/comptabilite/socle.service');
+const achats = require('../services/finance/achats.service');
 
 const repondre = (res, err, quoi) => {
   const e = err instanceof config.ErreurConfig ? err : tiers.traduire(config.traduire(err));
   if (e instanceof config.ErreurConfig) return res.status(e.status).json({ error: e.message });
   if (e instanceof tiers.ErreurTiers) return res.status(e.status).json({ error: e.message, ...(e.doublon ? { doublon: e.doublon } : {}) });
+  const a = achats.traduire(err);
+  if (a instanceof achats.ErreurAchat) return res.status(a.status).json({ error: a.message, ...(a.doublon ? { doublon: a.doublon } : {}) });
   console.error(`[NJ FINANCE] ${quoi} :`, err.message);
   return res.status(500).json({ error: 'Erreur serveur.' });
 };
@@ -32,4 +35,21 @@ module.exports = {
   postInitConfig:  action('paramétrage par défaut', (req) => config.initialiser(ctx(req))),
   putSequence:     action('numérotation', (req) => config.definirSequence(ctx(req))),
   enregistrer: (fn, statut = 200) => action('configuration', (req) => fn({ ...ctx(req), id: req.params.id || null }), statut),
+  // Achats (lot F6)
+  getAchatsRef:    action('référentiels des achats', (req) => achats.referentiels(req.tenantId)),
+  getAchats:       action('liste des achats', (req) => achats.lister(req.tenantId, req.query)),
+  getAchat:        action('facture fournisseur', (req) => achats.lire(req.tenantId, req.params.origine, req.params.id)),
+  postAchat:       action('saisie de facture', (req) => achats.creer(ctx(req)), 201),
+  putAchat:        action('modification de facture', (req) => achats.modifier({ ...ctx(req), id: req.params.id })),
+  deleteAchat:     action('suppression de facture', (req) => achats.supprimer({ ...ctx(req), id: req.params.id })),
+  postSoumettre:   action('soumission de facture', (req) => achats.soumettre({ ...ctx(req), id: req.params.id })),
+  postRenvoyer:    action('renvoi de facture', (req) => achats.renvoyer({ ...ctx(req), id: req.params.id })),
+  postValider:     action('validation de facture', (req) => achats.valider({ ...ctx(req), id: req.params.id })),
+  postAnnuler:     action('annulation de facture', (req) => achats.annuler({ ...ctx(req), id: req.params.id })),
+  postImputer:     action('imputation de facture', (req) => achats.imputer({ ...ctx(req), id: req.params.id })),
+  getEcheancier:   action('échéancier', (req) => achats.echeancier(req.tenantId)),
+  getOuvertes:     action('factures à payer', (req) => achats.facturesOuvertes(req.tenantId, req.query)),
+  getSorties:      action('sorties disponibles', (req) => achats.sortiesDisponibles(req.tenantId, req.query)),
+  postReglement:   action('règlement', (req) => achats.reglerParCaisse(ctx(req)), 201),
+  deleteReglement: action('retrait de règlement', (req) => achats.retirerReglement({ ...ctx(req), id: req.params.id })),
 };

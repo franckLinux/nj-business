@@ -27,6 +27,10 @@ export const PAGE_PERMS = {
   '/finance/tiers':    'finance.tiers.voir',
   '/finance/creances': 'finance.tiers.voir',
   '/finance/dettes':   'finance.tiers.voir',
+  // NJ FINANCE (F6, 080) : achats.
+  '/finance/achats':            'finance.achats.voir',
+  '/finance/achats/nouvelle':   'finance.achats.saisir',
+  '/finance/achats/echeancier': 'finance.achats.voir',
 };
 
 // Onglets de la page Configuration.

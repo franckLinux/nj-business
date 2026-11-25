@@ -153,7 +153,7 @@ const DONNEES_METIER = [
   ['projet_budgets', 'budget(s) de projet'], ['journal_imputations_projet', 'financement(s) imputé(s) à un projet'],
   ['projet_justificatifs', 'justificatif(s) de projet'],
   // NJ FINANCE (075) : écritures comptables.
-  ['fin_ecritures', 'écriture(s) comptable(s)'],
+  ['fin_ecritures', 'écriture(s) comptable(s)'], ['fin_factures', 'facture(s) NJ FINANCE'],
 ];
 const LIENS_COMMERCIAUX = [
   ['prospects', 'fiche prospect / espace de démonstration'], ['abonnements', 'abonnement(s)'],

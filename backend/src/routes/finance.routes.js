@@ -35,4 +35,28 @@ for (const [chemin, fn] of [['categories', config.enregistrerCategorie], ['famil
   router.put (`/config/${chemin}/:id`, ...CONFIG, c.enregistrer(fn));
 }
 
+// Achats (lot F6) : factures fournisseurs NJ FINANCE + factures validées de NJ COMMERCIAL.
+const VOIR_ACHATS = P('finance.achats.voir');
+const SAISIR = P('finance.achats.saisir');
+const VALIDER = P('finance.achats.valider');
+const AFFECTER = P('finance.reglements.affecter');
+// La caisse relie une sortie aux factures à la saisie : la liste des factures ouvertes lui suffit.
+const FACTURES_OUVERTES = [authGuard, tenantGuard, requireAnyPermission('finance.achats.voir', 'finance.reglements.affecter')];
+router.get   ('/achats/referentiels',         ...VOIR_ACHATS, c.getAchatsRef);
+router.get   ('/achats/echeancier',           ...VOIR_ACHATS, c.getEcheancier);
+router.get   ('/achats/ouvertes',             ...FACTURES_OUVERTES, c.getOuvertes);
+router.get   ('/achats/sorties-disponibles',  ...AFFECTER, c.getSorties);
+router.get   ('/achats',                      ...VOIR_ACHATS, c.getAchats);
+router.post  ('/achats',                      ...SAISIR, c.postAchat);
+router.get   ('/achats/:origine(fin|com_ff)/:id', ...VOIR_ACHATS, c.getAchat);
+router.put   ('/achats/fin/:id',              ...SAISIR, c.putAchat);
+router.delete('/achats/fin/:id',              ...SAISIR, c.deleteAchat);
+router.post  ('/achats/fin/:id/soumettre',    ...SAISIR, c.postSoumettre);
+router.post  ('/achats/fin/:id/renvoyer',     ...VALIDER, c.postRenvoyer);
+router.post  ('/achats/fin/:id/valider',      ...VALIDER, c.postValider);
+router.post  ('/achats/fin/:id/annuler',      ...VALIDER, c.postAnnuler);
+router.post  ('/achats/com_ff/:id/imputer',   ...VALIDER, c.postImputer);   // l'écriture d'achat est validée à l'imputation
+router.post  ('/reglements',                  ...AFFECTER, c.postReglement);
+router.delete('/reglements/:id',              ...AFFECTER, c.deleteReglement);
+
 module.exports = router;

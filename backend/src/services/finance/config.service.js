@@ -341,6 +341,6 @@ const initialiser = ({ tenantId, userId }) => enTransaction(async (transaction) 
 });
 
 module.exports = {
-  ErreurConfig, traduire, TYPES_ACHAT, DOCUMENTS, etat, initialiser, prochainNumero, definirSequence,
+  ErreurConfig, traduire, TYPES_ACHAT, DOCUMENTS, etat, initialiser, prochainNumero, definirSequence, premierDetail,
   enregistrerCategorie, enregistrerFamille, enregistrerPrestation, enregistrerMode, enregistrerTaxe,
 };

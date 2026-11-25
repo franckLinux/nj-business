@@ -88,22 +88,39 @@ const arretsValides = async (tenantId) => new Map((await Q(
   { tenantId })).map((a) => [`${a.journal_id}:${a.mois}:${a.annee}`, a.valide_par]));
 
 // Écriture attendue pour un mouvement : { lignes, empreinte } ou { anomalie }.
-const attendue = (m, compteVirements) => {
+// `reglements` (lot F6) : parts de la sortie affectées à des factures
+// fournisseurs [{ compte, tiers_id, montant (centimes) }]. Ces parts vont au
+// compte du fournisseur (401 / 481) et non au compte de charge de la rubrique :
+// la charge a déjà été constatée par la facture (pas de double comptage). Une
+// contre-passation reprend les parts du mouvement annulé, en sens inverse.
+const attendue = (m, compteVirements, reglements = []) => {
   const net = cts(m.entree) - cts(m.sortie);
   if (net === 0) return { vide: true };
   if (!m.journal_id) return { anomalie: 'mouvement sans journal de caisse (ancienne saisie) : rattachez-le à une caisse' };
+  const montant = Math.abs(net);
+  const regle = Math.min(montant, reglements.reduce((t, r) => t + r.montant, 0));
   const treso = norm(m.ctreso);
   const contre = m.virement ? norm(compteVirements) : (norm(m.ccorrige) || norm(m.cvalide));
   const manque = [];
   if (!treso) manque.push(`compte de trésorerie de la caisse ${m.jcode}`);
-  if (!contre) manque.push(m.virement ? 'compte des virements internes' : `compte validé de la rubrique ${m.rubrique_code}`);
+  if (!contre && regle < montant) manque.push(m.virement ? 'compte des virements internes' : `compte validé de la rubrique ${m.rubrique_code}`);
   if (manque.length) return { anomalie: `${manque.join(' et ')} manquant` };
-  const montant = Math.abs(net);
   const libelle = [norm(m.intitule), norm(m.beneficiaire)].filter(Boolean).join(' — ').slice(0, 300) || `Mouvement ${m.jcode}-${m.numero}`;
   const lTreso = { compte: treso, debit: net > 0 ? montant : 0, credit: net > 0 ? 0 : montant, tiers_id: null, activite_id: null, libelle };
-  const lContre = { compte: contre, debit: net > 0 ? 0 : montant, credit: net > 0 ? montant : 0,
-    tiers_id: m.tiers_id || null, activite_id: m.activite_id || null, libelle };
-  const lignes = net > 0 ? [lTreso, lContre] : [lContre, lTreso];
+  const contreparties = [];
+  // Parts réglant des factures, regroupées par compte et fournisseur.
+  const groupes = new Map();
+  for (const r of reglements) {
+    const k = `${r.compte}|${r.tiers_id}`;
+    groupes.set(k, { compte: r.compte, tiers_id: r.tiers_id, montant: (groupes.get(k)?.montant || 0) + r.montant });
+  }
+  for (const g of [...groupes.values()].sort((a, b) => (`${a.compte}|${a.tiers_id}`).localeCompare(`${b.compte}|${b.tiers_id}`))) {
+    contreparties.push({ compte: g.compte, montant: g.montant, tiers_id: g.tiers_id, activite_id: null });
+  }
+  if (montant - regle > 0) contreparties.push({ compte: contre, montant: montant - regle, tiers_id: m.tiers_id || null, activite_id: m.activite_id || null });
+  const lContre = contreparties.map((c) => ({ compte: c.compte, debit: net > 0 ? 0 : c.montant, credit: net > 0 ? c.montant : 0,
+    tiers_id: c.tiers_id ? String(c.tiers_id) : null, activite_id: c.activite_id || null, libelle }));
+  const lignes = net > 0 ? [lTreso, ...lContre] : [...lContre, lTreso];
   const entete = { date: m.date, reference_piece: `${m.jcode}-${m.numero ?? m.id}`.slice(0, 60), libelle };
   // Empreinte des seules données comptables (date, journal, comptes, sens, montants,
   // tiers, activité) : changer le libellé d'un mouvement ne refait pas l'écriture.
@@ -166,6 +183,24 @@ const extourner = async (tenantId, e, userId, motif, transaction) => {
   await X('UPDATE fin_ecritures SET extournee_par_id = :x WHERE id = :id', { x: x.id, id: e.id }, { transaction });
 };
 
+// Règlements de factures fournisseurs (lot F6) : mouvement → parts affectées.
+const reglementsParMouvement = async (tenantId) => {
+  const rows = await Q(
+    `SELECT a.mouvement_id, a.montant, coalesce(f.compte_tiers, i.compte_tiers) AS compte, coalesce(f.tiers_id, c.fournisseur_id) AS tiers_id
+       FROM fin_reglement_affectations a
+       LEFT JOIN fin_factures f ON a.facture_type = 'fin' AND f.id = a.facture_id
+       LEFT JOIN com_factures_fournisseurs c ON a.facture_type = 'com_ff' AND c.id = a.facture_id
+       LEFT JOIN fin_imputations_externes i ON i.com_ff_id = c.id
+      WHERE a.tenant_id = :tenantId ORDER BY a.id`, { tenantId });
+  const parMouvement = new Map();
+  for (const r of rows) {
+    const k = String(r.mouvement_id);
+    if (!parMouvement.has(k)) parMouvement.set(k, []);
+    parMouvement.get(k).push({ compte: norm(r.compte), tiers_id: String(r.tiers_id), montant: cts(r.montant) });
+  }
+  return parMouvement;
+};
+
 // ── Synchronisation ─────────────────────────────────────────────────────────
 const derniereSync = new Map();   // tenantId → horodatage (limite les synchronisations automatiques)
 
@@ -206,6 +241,7 @@ const synchroniserSousVerrou = async (tenantId, userId) => {
   const [t] = await Q('SELECT coalesce(compte_virements, \'\') AS cv FROM tenants WHERE id = :tenantId', { tenantId });
   const arrets = await arretsValides(tenantId);
   const mouvements = await Q(`${SQL_MOUVEMENTS} ORDER BY j.date, j.id`, { tenantId, debut, fin });
+  const reglements = await reglementsParMouvement(tenantId);
   const actives = new Map((await Q(
     `SELECT e.id, e.origine_id, e.statut, e.origine_empreinte, e.journal_id, e.date_ecriture, e.reference_piece, e.libelle, e.valide_par,
             p.statut AS periode_statut
@@ -219,7 +255,7 @@ const synchroniserSousVerrou = async (tenantId, userId) => {
     libelle: m.intitule, montant: mt(Math.abs(cts(m.entree) - cts(m.sortie))), motif: texte });
 
   for (const m of mouvements) {
-    const att = attendue(m, t?.cv);
+    const att = attendue(m, t?.cv, reglements.get(String(m.annulation_de_id || m.id)) || []);
     const e = actives.get(String(m.id));
     actives.delete(String(m.id));
     const validePar = m.journal_id ? arrets.get(cleArret(m.journal_id, m.date)) || null : null;
@@ -346,4 +382,4 @@ const etat = async ({ tenantId, userId }) => {
   };
 };
 
-module.exports = { synchroniser, etat, attendue };
+module.exports = { synchroniser, etat, attendue, assurerExercices };
