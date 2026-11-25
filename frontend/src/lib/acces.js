@@ -48,6 +48,8 @@ export const CONFIG_TABS = {
   rubriques: { voir: 'rubriques.view',      gerer: ['rubriques.edit', 'rubriques.create'] },
   pieces:    { voir: 'pieces.view',         gerer: ['pieces.edit'] },
   activites: { voir: 'activites.view',      gerer: ['activites.edit'] },
+  // NJ FINANCE F5 (079) : paramétrage de la facturation.
+  facturation: { voir: 'finance.config.facturation', gerer: ['finance.config.facturation'] },
   // La passerelle comptable a quitté la Configuration (041) : menu « Contrôle comptable ».
 };
 

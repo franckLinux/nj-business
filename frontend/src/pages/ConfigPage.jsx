@@ -9,6 +9,7 @@ import RubriquesTab from '@/components/config/RubriquesTab';
 import PiecesTab from '@/components/config/PiecesTab';
 import RolesTab from '@/components/config/RolesTab';
 import ActivitesTab from '@/components/config/ActivitesTab';
+import FacturationTab from '@/pages/finance/FacturationTab';
 import { voitOngletConfig } from '@/lib/acces';
 
 // Reprend loadConfig()/switchTab() de legacy/js/app.js (l. 3913-3948).
@@ -22,6 +23,8 @@ const TABS = [
   { id: 'rubriques', label: '📋 Rubriques', Comp: RubriquesTab },
   { id: 'pieces', label: '📎 Pièces justificatives', Comp: PiecesTab },
   { id: 'activites', label: '🎯 Activités / projets', Comp: ActivitesTab },
+  // NJ FINANCE F5 (079) : catégories, prestations, modes de règlement, taxes, numérotation.
+  { id: 'facturation', label: '🧾 Facturation', Comp: FacturationTab },
 ];
 
 export default function ConfigPage() {

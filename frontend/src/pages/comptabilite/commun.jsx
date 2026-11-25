@@ -64,7 +64,7 @@ export function Erreur({ message }) {
 }
 
 // Choix d'un compte du plan (détail uniquement pour la saisie).
-export function ChampCompte({ valeur, onChange, id, disabled, autoFocus }) {
+export function ChampCompte({ valeur, onChange, id, disabled, autoFocus, url = '/comptabilite/comptes' }) {
   const [liste, setListe] = useState([]);
   const [ouvert, setOuvert] = useState(false);
   const [actif, setActif] = useState(-1);
@@ -79,7 +79,7 @@ export function ChampCompte({ valeur, onChange, id, disabled, autoFocus }) {
     clearTimeout(minuterie.current);
     if (!v.trim()) { setOuvert(false); return; }
     minuterie.current = setTimeout(async () => {
-      const r = await api.get(`/comptabilite/comptes?q=${encodeURIComponent(v.trim())}`);
+      const r = await api.get(`${url}?q=${encodeURIComponent(v.trim())}`);
       setListe(Array.isArray(r) ? r : []); setOuvert(Array.isArray(r) && r.length > 0); setActif(-1);
     }, 220);
   };

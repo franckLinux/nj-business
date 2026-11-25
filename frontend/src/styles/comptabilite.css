@@ -142,3 +142,10 @@
 .fin-def b { text-align: right; font-weight: 600; }
 .fin-sous-titre { margin: 14px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
 .fin-kpi small a { color: #2563eb; font-weight: 600; }
+
+/* NJ FINANCE F5 — Configuration → Facturation */
+.fin-section-tete { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin: 10px 0 12px; }
+.fin-section-tete p { margin: 0; font-size: 13px; color: var(--text-muted); max-width: 680px; line-height: 1.45; }
+.fin-groupe-gauche { text-align: left !important; font-size: 13px; color: var(--brand); background: #f8fafc; }
+.fin-apercu { grid-column: 1 / -1; padding: 10px 12px; border-radius: 8px; background: #eff6ff; color: #1e3a8a; font-size: 14px; }
+.fin-config .fin-bandeau { margin: 12px 0 4px; }
