@@ -244,7 +244,21 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
           badgeTitre="Dépenses en attente et dépassements de budget"
           icon={<svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="3" /><line x1="6" y1="12" x2="6.01" y2="12" /><line x1="18" y1="12" x2="18.01" y2="12" /></svg>}
         >
-          <div className="nav-deep-label">Journaux</div>
+          {/* Caisse Pro (organisation de Franck, 25/11/2026) : Prévision, Saisies, Reporting. */}
+          {(voit('/previsions') || voit('/appel-fonds')) && <div className="nav-deep-label">Prévision</div>}
+          {voit('/previsions') && (
+          <NavLink to="/previsions" className={subClass}>
+            <svg viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" /></svg>
+            Prévisions de dépenses
+          </NavLink>
+          )}
+          {voit('/appel-fonds') && (
+          <NavLink to="/appel-fonds" className={subClass}>
+            <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="3" /></svg>
+            Demande de fonds
+          </NavLink>
+          )}
+          <div className="nav-deep-label">Saisies</div>
           <div id="nav-journaux-section">
             {journaux.length === 0 ? (
               <div className="sidebar-empty-journaux">Aucun journal — voir Configuration</div>
@@ -264,18 +278,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             )}
           </NavLink>
           )}
-          {voit('/previsions') && (
-          <NavLink to="/previsions" className={subClass}>
-            <svg viewBox="0 0 24 24"><line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" /></svg>
-            Prévisions de dépenses
-          </NavLink>
-          )}
-          {voit('/appel-fonds') && (
-          <NavLink to="/appel-fonds" className={subClass}>
-            <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="3" /></svg>
-            Demande de fonds
-          </NavLink>
-          )}
+          {(voit('/budget') || voit('/compte-emploi') || voit('/journaux-recap')) && <div className="nav-deep-label">Reporting</div>}
           {voit('/budget') && (
           <NavLink
             to="/budget"
@@ -293,16 +296,10 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             )}
           </NavLink>
           )}
-          {voit('/controle/arretes') && (
-          <NavLink to="/controle/arretes" className={subClass}>
-            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-            Arrêts de caisse et contrôles physiques
-          </NavLink>
-          )}
-          {voit('/controle/ecarts') && (
-          <NavLink to="/controle/ecarts" className={subClass}>
-            <svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
-            Écarts de caisse
+          {voit('/compte-emploi') && (
+          <NavLink to="/compte-emploi" className={subClass}>
+            <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>
+            Compte d'emploi
           </NavLink>
           )}
           {voit('/journaux-recap') && (
@@ -314,7 +311,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         </NavGroup>
 
         {/* 7. CONTRÔLE : contrôles financiers et comptables existants, regroupés. */}
-        {(voit('/controle/passerelle') || voit('/controle/regularite') || voit('/controle/registre') || voit('/controle/arretes')
+        {(voit('/controle/passerelle') || voit('/controle/regularite') || voit('/controle/registre') || voit('/controle/arretes') || voit('/controle/ecarts')
           || can('finance.achats.valider') || can('finance.ventes.valider') || accesProjets?.visible) && (
         <NavGroup
           name="controle"
@@ -355,7 +352,13 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
           {voit('/controle/arretes') && (
           <NavLink to="/controle/arretes" className={subClass}>
             <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-            Opérations de caisse (arrêtés)
+            Arrêts de caisse et contrôles physiques
+          </NavLink>
+          )}
+          {voit('/controle/ecarts') && (
+          <NavLink to="/controle/ecarts" className={subClass}>
+            <svg viewBox="0 0 24 24"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+            Écarts de caisse
           </NavLink>
           )}
           {voit('/budget') && (
@@ -380,7 +383,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         )}
 
         {/* 8. REPORTING : états et rapports existants. Balance et grand livre : module NJ COMPTABILITÉ. */}
-        {(voit('/journaux-recap') || voit('/budget') || voit('/compte-emploi') || voit('/finance/creances') || voit('/finance/dettes')) && (
+        {(voit('/journaux-recap') || voit('/budget') || voit('/finance/creances') || voit('/finance/dettes')) && (
         <NavGroup
           name="reporting-etats"
           label="Reporting"
@@ -408,12 +411,6 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
           <NavLink to="/projets/bilan" className={subClass}>
             <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
             Bilan des projets
-          </NavLink>
-          )}
-          {voit('/compte-emploi') && (
-          <NavLink to="/compte-emploi" className={subClass}>
-            <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>
-            Compte d'emploi
           </NavLink>
           )}
           {voit('/finance/creances') && (
