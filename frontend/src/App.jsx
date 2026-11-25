@@ -69,6 +69,7 @@ import EcrituresPage from '@/pages/comptabilite/EcrituresPage';
 import { BalancePage, GrandLivrePage } from '@/pages/comptabilite/EtatsComptablesPages';
 import ParametragePage from '@/pages/comptabilite/ParametragePage';
 import EcrituresCaissePage from '@/pages/comptabilite/EcrituresCaissePage';
+import { EtatTiersPage, TiersFichePage, TiersListePage } from '@/pages/finance/TiersPages';
 import OffreFournisseurPage from '@/pages/OffreFournisseurPage';
 import { ConsultationsPage, ConsultationFormPage, ConsultationPage, ComparatifPage } from '@/pages/commercial/ConsultationsPages';
 import { FraisListePage, FraisFormPage, FraisPage } from '@/pages/commercial/FraisPages';
@@ -326,6 +327,10 @@ function AuthenticatedApp() {
         <Route path="controle/ecarts"     element={<Autorise code={PAGE_PERMS['/controle/ecarts']}><EcartsCaissePage /></Autorise>} />
         <Route path="controle/registre"   element={<Autorise code={PAGE_PERMS['/controle/registre']}><RegistreTiersPage /></Autorise>} />
         <Route path="controle/passerelle" element={<Autorise code={PAGE_PERMS['/controle/passerelle']}><PasserelleTab /></Autorise>} />
+        <Route path="finance/tiers"     element={<Autorise code={PAGE_PERMS['/finance/tiers']}><TiersListePage /></Autorise>} />
+        <Route path="finance/tiers/:id" element={<Autorise code={PAGE_PERMS['/finance/tiers']}><TiersFichePage /></Autorise>} />
+        <Route path="finance/creances"  element={<Autorise code={PAGE_PERMS['/finance/creances']}><EtatTiersPage key="c" sens="client" /></Autorise>} />
+        <Route path="finance/dettes"    element={<Autorise code={PAGE_PERMS['/finance/dettes']}><EtatTiersPage key="f" sens="fournisseur" /></Autorise>} />
         <Route path="config"         element={<Autorise ok={voitConfiguration(user, can)}><ConfigPage /></Autorise>} />
         <Route path="attente"        element={<Autorise code={PAGE_PERMS['/attente']}><AttentePage /></Autorise>} />
         <Route path="tenants"        element={<TenantsPage />} />

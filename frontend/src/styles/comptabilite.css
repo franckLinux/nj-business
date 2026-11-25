@@ -121,3 +121,24 @@
 .fin-ligne-ecart td { background: #fff7ed; }
 .fin-origine { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 6px; background: #eff6ff; color: #1d4ed8; font-size: 11px; font-weight: 700; }
 .fin-carte-tete > .fin-badge { align-self: flex-start; }
+
+/* NJ FINANCE — Clients et fournisseurs (078) */
+.fin-onglets { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin: 4px 0 14px; }
+.fin-onglets button { background: none; border: 0; border-bottom: 3px solid transparent; padding: 9px 14px; font-weight: 700; font-size: 13.5px; color: var(--text-muted); cursor: pointer; }
+.fin-onglets button.actif { color: var(--brand); border-bottom-color: #2563eb; }
+.fin-type { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
+.fin-type-client { background: #e0f2fe; color: #075985; }
+.fin-type-fournisseur { background: #fef3c7; color: #92400e; }
+.fin-type-mixte { background: #ede9fe; color: #5b21b6; }
+.fin-fiche-tete { display: flex; align-items: center; gap: 16px; margin: 10px 0 16px; flex-wrap: wrap; }
+.fin-avatar { width: 54px; height: 54px; border-radius: 14px; background: linear-gradient(135deg, #243655, #2563eb); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 18px; }
+.fin-fiche-id { flex: 1; min-width: 240px; }
+.fin-fiche-id h2 { margin: 0 0 6px; color: var(--brand); }
+.fin-fiche-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; color: var(--text-muted); }
+.fin-fiche-grille { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+.fin-fiche-grille .fin-carte h3 { margin: 0 0 10px; font-size: 15px; color: var(--brand); }
+.fin-def { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px dashed #eef2f7; font-size: 13px; }
+.fin-def span { color: var(--text-muted); }
+.fin-def b { text-align: right; font-weight: 600; }
+.fin-sous-titre { margin: 14px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.fin-kpi small a { color: #2563eb; font-weight: 600; }

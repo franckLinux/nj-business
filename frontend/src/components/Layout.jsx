@@ -35,7 +35,10 @@ const TITLES = {
   '/controle/regularite': 'Contrôles comptables — Contrôle de substance',
   '/controle/arretes': 'Caisse — Arrêtés de caisse & inventaires',
   '/controle/ecarts': 'Inventaire — Écarts de caisse',
-  '/controle/registre': 'Clients et fournisseurs — Registre bénéficiaires Payés/Encaissés',
+  '/controle/registre': 'Contrôles comptables — Registre bénéficiaires Payés/Encaissés',
+  '/finance/tiers': 'Clients et fournisseurs',
+  '/finance/creances': 'Clients et fournisseurs — Créances clients',
+  '/finance/dettes': 'Clients et fournisseurs — Dettes fournisseurs',
   '/controle/passerelle': 'Contrôles comptables — Contrôle de régularité formelle',
 };
 
@@ -86,7 +89,8 @@ export default function Layout() {
   }, [user, activeTenantId, openTenantSelector, pageSansClient]);
 
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
-  let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? "Gestion d'activité — Projets" : 'Tableau de bord');
+  let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? "Gestion d'activité — Projets"
+    : location.pathname.startsWith('/finance/tiers/') ? 'Clients et fournisseurs — Fiche' : 'Tableau de bord');
   if (location.pathname.startsWith('/journal/')) {
     const j = journaux.find((x) => String(x.id) === String(params.id));
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';

@@ -23,6 +23,10 @@ export const PAGE_PERMS = {
   '/controle/arretes':    'controle.view',   // 046 : arrêtés de caisse & inventaires (PV)
   '/controle/ecarts':     'controle.view',   // 061 : registre des écarts de caisse
   '/controle/passerelle': ['controle.view', 'passerelle.view'],
+  // NJ FINANCE (F4, 078) : clients et fournisseurs.
+  '/finance/tiers':    'finance.tiers.voir',
+  '/finance/creances': 'finance.tiers.voir',
+  '/finance/dettes':   'finance.tiers.voir',
 };
 
 // Onglets de la page Configuration.

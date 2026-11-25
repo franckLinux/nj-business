@@ -90,11 +90,25 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             Inventaire, Reporting et états financiers. L'arrêt et l'inventaire
             de caisse restent dans Caisse (décision du 25/11/2026). Achats et Ventes viendront
             avec leurs lots. Les adresses et les droits des pages ne changent pas. */}
-        {!sansClient && voit('/controle/registre') && (
-          <NavLink to="/controle/registre" className={navClass} title="Registre bénéficiaires Payés/Encaissés">
-            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-            Clients et fournisseurs
+        {!sansClient && voit('/finance/tiers') && (
+        <NavGroup
+          name="tiers"
+          label="Clients et fournisseurs"
+          icon={<svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>}
+        >
+          <NavLink to="/finance/tiers" className={({ isActive }) => subClass({ isActive: isActive || /^\/finance\/tiers\//.test(location.pathname) })} end>
+            <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>
+            Fiches clients et fournisseurs
           </NavLink>
+          <NavLink to="/finance/creances" className={subClass}>
+            <svg viewBox="0 0 24 24"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18" /><polyline points="17 6 23 6 23 12" /></svg>
+            Créances clients
+          </NavLink>
+          <NavLink to="/finance/dettes" className={subClass}>
+            <svg viewBox="0 0 24 24"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6" /><polyline points="17 18 23 18 23 12" /></svg>
+            Dettes fournisseurs
+          </NavLink>
+        </NavGroup>
         )}
 
         {voitConfiguration(user, can) && (
@@ -222,7 +236,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         </NavGroup>
         )}
 
-        {(voit('/journaux-recap') || voit('/compte-emploi') || voit('/controle/passerelle') || voit('/controle/regularite')) && (
+        {(voit('/journaux-recap') || voit('/compte-emploi') || voit('/controle/passerelle') || voit('/controle/regularite') || voit('/controle/registre')) && (
         <NavGroup
           name="reporting-etats"
           label="Reporting et états financiers"
@@ -240,7 +254,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             Compte d'emploi
           </NavLink>
           )}
-          {(voit('/controle/passerelle') || voit('/controle/regularite')) && <div className="nav-deep-label">Contrôles comptables</div>}
+          {(voit('/controle/passerelle') || voit('/controle/regularite') || voit('/controle/registre')) && <div className="nav-deep-label">Contrôles comptables</div>}
           {voit('/controle/passerelle') && (
           <NavLink to="/controle/passerelle" className={subClass}>
             <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
@@ -254,6 +268,12 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
             {/* 26/10/2026 : ex-« Contrôle de régularité formelle », renommé « Contrôle de substance ». */}
             Contrôle de substance
+          </NavLink>
+          )}
+          {voit('/controle/registre') && (
+          <NavLink to="/controle/registre" className={subClass}>
+            <svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /><line x1="9" y1="7" x2="16" y2="7" /><line x1="9" y1="11" x2="14" y2="11" /></svg>
+            Registre bénéficiaires Payés/Encaissés
           </NavLink>
           )}
         </NavGroup>
