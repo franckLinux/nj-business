@@ -25,7 +25,7 @@ export default function AccueilPage() {
 
   // Système de modules absent côté serveur : NJ CAISSE PRO seul, comme avant.
   const tous = systemeInstalle(user) ? user.modules : [{
-    code: 'caisse', nom: 'NJ FINANCE', description: 'Gestion financière : caisse, gestion d\'activité, contrôle comptable',
+    code: 'caisse', nom: 'NJ FINANCE', description: 'Gestion financière : caisse, gestion d\'activité, achats, ventes et reporting',
     statut: 'operationnel', route_accueil: '/', actif: true,
   }];
   const actifs = systemeInstalle(user) ? modulesActifs(user) : tous;

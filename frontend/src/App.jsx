@@ -64,8 +64,10 @@ const DROITS_RECEPTIONS = ['com.receptions.saisir', 'com.receptions.valider', 'c
   'com.bc.preparer', 'com.bc.emettre', 'com.da.voir_tout', 'com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.stock.journal'];
 const DROITS_FACTURES = ['com.factures_fourn.voir', 'com.factures_fourn.saisir', 'com.factures_fourn.valider', 'com.factures_fourn.annuler'];
 import VerificationBcPage from '@/pages/VerificationBcPage';
-import EcrituresPage from '@/pages/finance/EcrituresPage';
-import { BalancePage, GrandLivrePage } from '@/pages/finance/EtatsComptablesPages';
+import ComptabiliteLayout, { DROITS_COMPTA } from '@/components/comptabilite/ComptabiliteLayout';
+import EcrituresPage from '@/pages/comptabilite/EcrituresPage';
+import { BalancePage, GrandLivrePage } from '@/pages/comptabilite/EtatsComptablesPages';
+import ParametragePage from '@/pages/comptabilite/ParametragePage';
 import OffreFournisseurPage from '@/pages/OffreFournisseurPage';
 import { ConsultationsPage, ConsultationFormPage, ConsultationPage, ComparatifPage } from '@/pages/commercial/ConsultationsPages';
 import { FraisListePage, FraisFormPage, FraisPage } from '@/pages/commercial/FraisPages';
@@ -139,6 +141,27 @@ function GardeCommercial({ children }) {
   return children;
 }
 
+// NJ COMPTABILITÉ (076) : module à part, relié à NJ FINANCE.
+function GardeComptabilite({ children }) {
+  const { user } = useApp();
+  if (utiliseAccueil(user) && systemeInstalle(user) && !moduleActif(user, 'comptabilite')) {
+    return <Navigate to="/accueil" replace />;
+  }
+  return children;
+}
+function AutoriseCompta({ codes, children }) {
+  const { user, can } = useApp();
+  if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
+  return codes.some((c) => can(c)) ? children : <Navigate to="/comptabilite" replace />;
+}
+function EntreeComptabilite() {
+  const { user, can } = useApp();
+  if (user && user.role !== 'super_admin' && user.permissions === undefined) return null;
+  if (can('compta.ecritures.voir')) return <Navigate to="/comptabilite/ecritures" replace />;
+  if (DROITS_COMPTA.some((c) => can(c))) return <Navigate to="/comptabilite/parametrage" replace />;
+  return <div className="cm-page"><div className="cm-note">Aucun droit dans NJ COMPTABILITÉ : demandez l'accès à votre directeur.</div></div>;
+}
+
 // Entrée du module (lot 1) : le tableau de bord pour qui le voit, sinon ses
 // expressions de besoin, sinon la mise en route du paramétrage.
 function EntreeCommercial() {
@@ -204,6 +227,14 @@ function AuthenticatedApp() {
       <Route path="accueil" element={utiliseAccueil(user) ? <AccueilPage /> : <Navigate to="/" replace />} />
       {/* 064 : configuration centrale de l'entreprise, hors de tout module (socle NJ BUSINESS). */}
       <Route path="entreprise" element={<GardeEntreprise><EntreprisePage /></GardeEntreprise>} />
+      <Route path="comptabilite" element={<GardeComptabilite><ComptabiliteLayout /></GardeComptabilite>}>
+        <Route index element={<EntreeComptabilite />} />
+        <Route path="ecritures"   element={<AutoriseCompta codes={['compta.ecritures.voir']}><EcrituresPage /></AutoriseCompta>} />
+        <Route path="grand-livre" element={<AutoriseCompta codes={['compta.ecritures.voir']}><GrandLivrePage /></AutoriseCompta>} />
+        <Route path="balance"     element={<AutoriseCompta codes={['compta.ecritures.voir']}><BalancePage /></AutoriseCompta>} />
+        <Route path="parametrage" element={<AutoriseCompta codes={DROITS_COMPTA}><ParametragePage /></AutoriseCompta>} />
+        <Route path="*" element={<Navigate to="/comptabilite" replace />} />
+      </Route>
       <Route path="commercial" element={<GardeCommercial><CommercialLayout /></GardeCommercial>}>
         <Route index element={<EntreeCommercial />} />
         {/* Configuration : une page à onglets ; les anciennes adresses y mènent. */}
@@ -293,9 +324,6 @@ function AuthenticatedApp() {
         <Route path="controle/ecarts"     element={<Autorise code={PAGE_PERMS['/controle/ecarts']}><EcartsCaissePage /></Autorise>} />
         <Route path="controle/registre"   element={<Autorise code={PAGE_PERMS['/controle/registre']}><RegistreTiersPage /></Autorise>} />
         <Route path="controle/passerelle" element={<Autorise code={PAGE_PERMS['/controle/passerelle']}><PasserelleTab /></Autorise>} />
-        <Route path="finance/ecritures"   element={<Autorise code={PAGE_PERMS['/finance/ecritures']}><EcrituresPage /></Autorise>} />
-        <Route path="finance/grand-livre" element={<Autorise code={PAGE_PERMS['/finance/grand-livre']}><GrandLivrePage /></Autorise>} />
-        <Route path="finance/balance"     element={<Autorise code={PAGE_PERMS['/finance/balance']}><BalancePage /></Autorise>} />
         <Route path="config"         element={<Autorise ok={voitConfiguration(user, can)}><ConfigPage /></Autorise>} />
         <Route path="attente"        element={<Autorise code={PAGE_PERMS['/attente']}><AttentePage /></Autorise>} />
         <Route path="tenants"        element={<TenantsPage />} />

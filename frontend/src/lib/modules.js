@@ -13,6 +13,7 @@ export const systemeInstalle = (user) => Array.isArray(user?.modules);
  * La PERSONNE a-t-elle de quoi travailler dans ce module ? (050)
  *   • NJ CAISSE PRO : tous les rôles sauf « collaborateur » (aucun droit de caisse) ;
  *   • NJ COMMERCIAL : au moins une permission com.* ;
+ *   • NJ COMPTABILITÉ : au moins une permission compta.* ;
  * Le serveur reste seul juge : chaque route exige sa permission.
  */
 export const accesModule = (user, code) => {
@@ -22,6 +23,8 @@ export const accesModule = (user, code) => {
   if (m && m.membre === false) return false;
   if (code === 'caisse') return user?.role !== 'collaborateur';
   if (code === 'commercial') return Array.isArray(user?.permissions) && user.permissions.some((p) => p.startsWith('com.'));
+  // 076 : NJ COMPTABILITÉ, au moins une permission compta.*
+  if (code === 'comptabilite') return Array.isArray(user?.permissions) && user.permissions.some((p) => p.startsWith('compta.'));
   return true;
 };
 

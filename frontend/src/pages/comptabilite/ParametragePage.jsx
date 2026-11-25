@@ -1,4 +1,4 @@
-// NJ FINANCE — Configuration → Comptabilité (lot F2) : exercices, périodes,
+// NJ COMPTABILITÉ — Paramétrage (075, 076) : exercices, périodes,
 // journaux comptables. Les règles sont garanties côté serveur (migration 075).
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
@@ -15,11 +15,11 @@ const libellePeriode = (p) => {
 const STATUT_PERIODE = { ouverte: 'Ouverte', verrouillee: 'Verrouillée', cloturee: 'Clôturée' };
 const TYPES = { an: 'À-nouveaux', od: 'Opérations diverses', achats: 'Achats', ventes: 'Ventes', tresorerie: 'Trésorerie', inventaire: 'Inventaire' };
 
-export default function ComptabiliteTab() {
+export default function ParametragePage() {
   const { can } = useApp();
   const toast = useToast();
-  const gere = can('finance.config.comptabilite');
-  const verrouille = can('finance.periodes.verrouiller');
+  const gere = can('compta.parametrage');
+  const verrouille = can('compta.periodes.verrouiller');
   const [exercices, setExercices] = useState(null);
   const [journaux, setJournaux] = useState(null);
   const [erreur, setErreur] = useState('');
@@ -29,7 +29,7 @@ export default function ComptabiliteTab() {
   const [enCours, setEnCours] = useState(false);
 
   const charger = useCallback(async () => {
-    const [e, j] = await Promise.all([api.get('/finance/exercices'), api.get('/finance/journaux-comptables')]);
+    const [e, j] = await Promise.all([api.get('/comptabilite/exercices'), api.get('/comptabilite/journaux-comptables')]);
     if (e?.error || j?.error) { setErreur(e?.error || j?.error); return; }
     setErreur(''); setExercices(e); setJournaux(j);
     setOuvert((o) => o ?? e[0]?.id ?? null);
@@ -37,13 +37,13 @@ export default function ComptabiliteTab() {
   useEffect(() => { charger(); }, [charger]);
 
   const nouvelExercice = async () => {
-    const p = await api.get('/finance/exercices/proposition');
+    const p = await api.get('/comptabilite/exercices/proposition');
     if (p?.error) { toast(p.error, 'error'); return; }
     setFormEx(p);
   };
   const creerExercice = async () => {
     setEnCours(true);
-    const r = await api.post('/finance/exercices', formEx);
+    const r = await api.post('/comptabilite/exercices', formEx);
     setEnCours(false);
     if (r?.error) { toast(r.error, 'error'); return; }
     toast(`Exercice ${formEx.code} créé (${r.nb_periodes} périodes).`, 'success');
@@ -52,14 +52,14 @@ export default function ComptabiliteTab() {
   const changerPeriode = async (p, statut) => {
     if (statut === 'verrouillee' && p.nb_brouillard > 0
       && !window.confirm(`${p.nb_brouillard} écriture(s) au brouillard sur ${libellePeriode(p)} : elles ne pourront plus être ni modifiées ni validées tant que la période sera verrouillée. Verrouiller quand même ?`)) return;
-    const r = await api.put(`/finance/periodes/${p.id}/statut`, { statut });
+    const r = await api.put(`/comptabilite/periodes/${p.id}/statut`, { statut });
     if (r?.error) { toast(r.error, 'error'); return; }
     toast(`${libellePeriode(p)} : période ${statut === 'verrouillee' ? 'verrouillée' : 'rouverte'}.`, 'success');
     charger();
   };
   const initialiser = async () => {
     setEnCours(true);
-    const r = await api.post('/finance/journaux-comptables/initialiser', {});
+    const r = await api.post('/comptabilite/journaux-comptables/initialiser', {});
     setEnCours(false);
     if (r?.error) { toast(r.error, 'error'); return; }
     toast(r.crees.length ? `${r.crees.length} journal(aux) créé(s) : ${r.crees.map((x) => x.code).join(', ')}.` : 'Tous les journaux existent déjà.', 'success');
@@ -68,18 +68,25 @@ export default function ComptabiliteTab() {
   const enregistrerJournal = async () => {
     setEnCours(true);
     const r = formJ.id
-      ? await api.put(`/finance/journaux-comptables/${formJ.id}`, { intitule: formJ.intitule, actif: formJ.actif })
-      : await api.post('/finance/journaux-comptables', formJ);
+      ? await api.put(`/comptabilite/journaux-comptables/${formJ.id}`, { intitule: formJ.intitule, actif: formJ.actif })
+      : await api.post('/comptabilite/journaux-comptables', formJ);
     setEnCours(false);
     if (r?.error) { toast(r.error, 'error'); return; }
     toast('Journal enregistré.', 'success');
     setFormJ(null); charger();
   };
 
-  if (erreur) return <Erreur message={erreur} />;
+  if (erreur) return <div className="cm-page"><Erreur message={erreur} /></div>;
   if (!exercices || !journaux) return <div className="loading-msg">Chargement…</div>;
 
   return (
+    <div className="cm-page fin-page">
+    <div className="cm-entete">
+      <div>
+        <h2>Paramétrage comptable</h2>
+        <p>Exercices, périodes et journaux comptables. Ils servent aussi aux écritures que NJ FINANCE produit pour ses opérations.</p>
+      </div>
+    </div>
     <div className="fin-config">
       <section className="fin-carte">
         <div className="fin-carte-tete">
@@ -201,6 +208,7 @@ export default function ComptabiliteTab() {
           </div>
         </Tiroir>
       )}
+    </div>
     </div>
   );
 }

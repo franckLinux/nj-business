@@ -1,6 +1,6 @@
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import NjMarque from './NjMarque';
-import { utiliseAccueil } from '@/lib/modules';
+import { moduleActif, utiliseAccueil } from '@/lib/modules';
 import { peutGererProspects } from '@/lib/acces';
 import { useApp } from '@/context/AppContext';
 import NavGroup from './NavGroup';
@@ -222,7 +222,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         </NavGroup>
         )}
 
-        {(voit('/journaux-recap') || voit('/compte-emploi') || voit('/controle/passerelle') || voit('/controle/regularite') || voit('/finance/ecritures')) && (
+        {(voit('/journaux-recap') || voit('/compte-emploi') || voit('/controle/passerelle') || voit('/controle/regularite')) && (
         <NavGroup
           name="reporting-etats"
           label="Reporting et états financiers"
@@ -240,21 +240,6 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             Compte d'emploi
           </NavLink>
           )}
-          {voit('/finance/ecritures') && <>
-          <div className="nav-deep-label">Comptabilité</div>
-          <NavLink to="/finance/ecritures" className={subClass}>
-            <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z" /><line x1="4" y1="10" x2="20" y2="10" /><line x1="12" y1="10" x2="12" y2="20" /></svg>
-            Écritures
-          </NavLink>
-          <NavLink to="/finance/grand-livre" className={subClass}>
-            <svg viewBox="0 0 24 24"><path d="M2 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2z" /><path d="M22 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z" /></svg>
-            Grand livre
-          </NavLink>
-          <NavLink to="/finance/balance" className={subClass}>
-            <svg viewBox="0 0 24 24"><path d="M12 3v18" /><path d="M5 7h14" /><path d="M5 7l-3 7a3 3 0 0 0 6 0z" /><path d="M19 7l-3 7a3 3 0 0 0 6 0z" /></svg>
-            Balance
-          </NavLink>
-          </>}
           {(voit('/controle/passerelle') || voit('/controle/regularite')) && <div className="nav-deep-label">Contrôles comptables</div>}
           {voit('/controle/passerelle') && (
           <NavLink to="/controle/passerelle" className={subClass}>
@@ -272,6 +257,19 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
           </NavLink>
           )}
         </NavGroup>
+        )}
+
+        {/* 076 : NJ COMPTABILITÉ, module relié — les écritures des opérations de
+            NJ FINANCE s'y consultent, s'y valident et s'y arrêtent. */}
+        {(utiliseAccueil(user) ? moduleActif(user, 'comptabilite') : isAdmin && activeTenantId) && (
+          <>
+            <div className="nav-sep" />
+            <NavLink to="/comptabilite" className={navClass} title="Écritures, grand livre, balance : module NJ COMPTABILITÉ">
+              <svg viewBox="0 0 24 24"><path d="M2 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2z" /><path d="M22 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z" /></svg>
+              <span style={{ flex: 1 }}>NJ COMPTABILITÉ</span>
+              <span aria-hidden="true">›</span>
+            </NavLink>
+          </>
         )}
 
         </>)}

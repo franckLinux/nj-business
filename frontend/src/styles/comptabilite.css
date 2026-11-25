@@ -1,4 +1,4 @@
-/* NJ FINANCE — écrans comptables (lot F2). S'appuie sur commercial.css (cm-*). */
+/* NJ COMPTABILITÉ — écrans comptables (075, 076). S'appuie sur commercial.css (cm-*). */
 .fin-page .cm-entete { margin-bottom: 14px; }
 .fin-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fin-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
@@ -74,7 +74,7 @@
 .fin-report td { background: #f8fafc; font-style: italic; color: #475569; }
 .fin-ligne-brouillard td { color: #64748b; background: repeating-linear-gradient(135deg, #fff, #fff 8px, #f8fafc 8px, #f8fafc 16px); }
 
-/* Configuration → Comptabilité */
+/* Paramétrage */
 .fin-config { display: flex; flex-direction: column; gap: 18px; }
 .fin-carte { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
 .fin-carte-tete { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }

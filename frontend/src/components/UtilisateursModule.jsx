@@ -10,7 +10,7 @@ import { useToast } from '@/context/ToastContext';
 import { api } from '@/lib/api';
 import '@/styles/utilisateurs-module.css';
 
-const NOMS_MODULES = { caisse: 'NJ FINANCE', commercial: 'NJ COMMERCIAL' };
+const NOMS_MODULES = { caisse: 'NJ FINANCE', commercial: 'NJ COMMERCIAL', comptabilite: 'NJ COMPTABILITÉ' };
 export const nomModule = (code) => NOMS_MODULES[code] || code;
 const dateHeure = (d) => (d ? new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Jamais');
 

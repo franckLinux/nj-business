@@ -29,7 +29,7 @@ const { sequelize, Permission, TenantPermission } = require('../models');
 // Groupe d'une permission = module NJ BUSINESS auquel elle appartient. Toutes
 // les permissions historiques (journal, budget, contrôle…) forment « caisse ».
 // 064 : les permissions « entreprise » forment le SOCLE, indépendant des modules.
-const GROUPE = `CASE WHEN p.module IN ('commercial', 'dsf', 'revis', 'cg') THEN p.module
+const GROUPE = `CASE WHEN p.module IN ('commercial', 'comptabilite', 'dsf', 'revis', 'cg') THEN p.module
                      WHEN p.module = 'entreprise' THEN 'socle' ELSE 'caisse' END`;
 const SQL_BASE = `
   WITH u AS (
@@ -169,7 +169,7 @@ const MODULES_SOCLE = new Set(['entreprise', 'users', 'roles', 'plateforme']);
 /** Module NJ BUSINESS d'une permission, pour le contrôle d'accès ('socle' : aucun). */
 const groupeDe = (moduleCatalogue) => {
   if (!moduleCatalogue || MODULES_SOCLE.has(moduleCatalogue)) return 'socle';
-  return ['commercial', 'dsf', 'revis', 'cg'].includes(moduleCatalogue) ? moduleCatalogue : 'caisse';
+  return ['commercial', 'comptabilite', 'dsf', 'revis', 'cg'].includes(moduleCatalogue) ? moduleCatalogue : 'caisse';
 };
 let cacheModulesPerm = null;
 const modulesDesPermissions = async () => {

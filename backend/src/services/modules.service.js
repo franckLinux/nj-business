@@ -341,6 +341,16 @@ const PREPARATIONS = {
          SELECT $1, code FROM permissions WHERE module = 'commercial' ON CONFLICT DO NOTHING`, [tenantId]);
     }
   },
+  // 076 : NJ COMPTABILITÉ — un client à plafond de droits reçoit les droits compta.*
+  // (les rôles système directeur / comptable les portent déjà).
+  comptabilite: async (client, tenantId) => {
+    const { rows: plafond } = await client.query('SELECT 1 FROM tenant_permissions WHERE tenant_id = $1 LIMIT 1', [tenantId]);
+    if (plafond[0]) {
+      await client.query(
+        `INSERT INTO tenant_permissions (tenant_id, permission_code)
+         SELECT $1, code FROM permissions WHERE module = 'comptabilite' ON CONFLICT DO NOTHING`, [tenantId]);
+    }
+  },
 };
 
 module.exports = {

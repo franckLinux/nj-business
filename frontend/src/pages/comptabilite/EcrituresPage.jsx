@@ -1,4 +1,4 @@
-// NJ FINANCE — Reporting et états financiers → Comptabilité → Écritures (lot F2).
+// NJ COMPTABILITÉ — Écritures (075, 076).
 // Liste filtrable, saisie d'OD / à-nouveaux au brouillard, validation (jamais
 // par l'auteur), extourne d'une écriture validée. Règles garanties en base (075).
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -28,17 +28,17 @@ export default function EcrituresPage() {
   const [extourne, setExtourne] = useState(null);
   const [enCours, setEnCours] = useState(false);
   const recherche = useDiffere(filtres.recherche, 300);
-  const saisit = can('finance.ecritures.saisir');
-  const valide = can('finance.ecritures.valider');
+  const saisit = can('compta.ecritures.saisir');
+  const valide = can('compta.ecritures.valider');
 
   useEffect(() => { if (!exerciceId && courant) setExerciceId(String(courant.id)); }, [courant, exerciceId]);
-  useEffect(() => { (async () => { const r = await api.get('/finance/referentiels'); if (!r?.error) setRef(r); })(); }, []);
+  useEffect(() => { (async () => { const r = await api.get('/comptabilite/referentiels'); if (!r?.error) setRef(r); })(); }, []);
 
   const charger = useCallback(async () => {
     if (!exerciceId) return;
     const q = new URLSearchParams({ exercice_id: exerciceId, page: String(page), taille: '50' });
     for (const [k, v] of Object.entries({ ...filtres, recherche })) if (v) q.set(k, v);
-    const r = await api.get(`/finance/ecritures?${q}`);
+    const r = await api.get(`/comptabilite/ecritures?${q}`);
     if (r?.error) { setErreur(r.error); return; }
     setErreur(''); setDonnees(r);
   }, [exerciceId, page, filtres.journal_id, filtres.statut, filtres.date_du, filtres.date_au, recherche]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -46,7 +46,7 @@ export default function EcrituresPage() {
   useEffect(() => { setPage(1); }, [exerciceId, filtres.journal_id, filtres.statut, filtres.date_du, filtres.date_au, recherche]);
 
   const ouvrir = async (id) => {
-    const r = await api.get(`/finance/ecritures/${id}`);
+    const r = await api.get(`/comptabilite/ecritures/${id}`);
     if (r?.error) { toast(r.error, 'error'); return; }
     setDetail(r);
   };
@@ -72,16 +72,16 @@ export default function EcrituresPage() {
     return r;
   };
   const valider = async (e) => {
-    const r = await action(() => api.post(`/finance/ecritures/${e.id}/valider`, {}), (x) => `Écriture validée sous le n° ${x.numero} du journal ${e.journal_code}.`);
+    const r = await action(() => api.post(`/comptabilite/ecritures/${e.id}/valider`, {}), (x) => `Écriture validée sous le n° ${x.numero} du journal ${e.journal_code}.`);
     if (r) ouvrir(e.id);
   };
   const supprimer = async (e) => {
     if (!window.confirm('Supprimer définitivement ce brouillard ?')) return;
-    const r = await action(() => api.delete(`/finance/ecritures/${e.id}`), () => 'Brouillard supprimé.');
+    const r = await action(() => api.delete(`/comptabilite/ecritures/${e.id}`), () => 'Brouillard supprimé.');
     if (r) setDetail(null);
   };
   const extourner = async () => {
-    const r = await action(() => api.post(`/finance/ecritures/${extourne.id}/extourner`, { date_ecriture: extourne.date, motif: extourne.motif }), () => 'Extourne passée et validée.');
+    const r = await action(() => api.post(`/comptabilite/ecritures/${extourne.id}/extourner`, { date_ecriture: extourne.date, motif: extourne.motif }), () => 'Extourne passée et validée.');
     if (r) { setExtourne(null); ouvrir(r.id); }
   };
 
@@ -95,7 +95,7 @@ export default function EcrituresPage() {
 
   if (errEx) return <div className="cm-page"><Erreur message={errEx} /></div>;
   if (!exercices) return <div className="loading-msg">Chargement…</div>;
-  if (!exercices.length) return <div className="cm-page"><SansExercice peutParametrer={can('finance.config.comptabilite')} /></div>;
+  if (!exercices.length) return <div className="cm-page"><SansExercice peutParametrer={can('compta.parametrage')} /></div>;
 
   const set = (k) => (e) => setFiltres((f) => ({ ...f, [k]: e.target.value }));
   return (
@@ -108,7 +108,7 @@ export default function EcrituresPage() {
         <div className="cm-actions">
           <button type="button" className="cm-btn cm-secondaire" onClick={exporter} disabled={!donnees?.ecritures?.length}>Exporter</button>
           {saisit && <button type="button" className="cm-btn cm-primaire" onClick={nouveau} disabled={!ref?.journaux?.length}
-            title={ref?.journaux?.length ? '' : 'Créez d\'abord les journaux comptables (Configuration → Comptabilité)'}>+ Nouvelle écriture</button>}
+            title={ref?.journaux?.length ? '' : 'Créez d\'abord les journaux comptables (Paramétrage)'}>+ Nouvelle écriture</button>}
         </div>
       </div>
 
@@ -274,7 +274,7 @@ function FormulaireEcriture({ form, setForm, ref_, onFermer, onEnregistre }) {
         debit: lireMontant(l.debit) || 0, credit: lireMontant(l.credit) || 0 })),
     };
     setEnCours(true);
-    const r = form.id ? await api.put(`/finance/ecritures/${form.id}`, corps) : await api.post('/finance/ecritures', corps);
+    const r = form.id ? await api.put(`/comptabilite/ecritures/${form.id}`, corps) : await api.post('/comptabilite/ecritures', corps);
     setEnCours(false);
     if (r?.error) { setErreur(r.error); return; }
     toast(totaux.ecart === 0 ? 'Écriture enregistrée au brouillard.' : 'Brouillard enregistré : il reste déséquilibré et ne pourra pas être validé en l\'état.', totaux.ecart === 0 ? 'success' : 'warning');

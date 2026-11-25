@@ -8,7 +8,6 @@ import PlanComptableTab from '@/components/config/PlanComptableTab';
 import RubriquesTab from '@/components/config/RubriquesTab';
 import PiecesTab from '@/components/config/PiecesTab';
 import RolesTab from '@/components/config/RolesTab';
-import ComptabiliteTab from '@/pages/finance/ComptabiliteTab';
 import ActivitesTab from '@/components/config/ActivitesTab';
 import { voitOngletConfig } from '@/lib/acces';
 
@@ -23,7 +22,6 @@ const TABS = [
   { id: 'rubriques', label: '📋 Rubriques', Comp: RubriquesTab },
   { id: 'pieces', label: '📎 Pièces justificatives', Comp: PiecesTab },
   { id: 'activites', label: '🎯 Activités / projets', Comp: ActivitesTab },
-  { id: 'comptabilite', label: '📘 Comptabilité', Comp: ComptabiliteTab },
 ];
 
 export default function ConfigPage() {

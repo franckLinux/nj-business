@@ -16,5 +16,4 @@ UPDATE modules
        description = 'Gestion financière : caisse, gestion d''activité, contrôle comptable et états financiers',
        updated_at = NOW()
  WHERE code = 'caisse'
-   AND (nom IS DISTINCT FROM 'NJ FINANCE'
-        OR description IS DISTINCT FROM 'Gestion financière : caisse, gestion d''activité, contrôle comptable et états financiers');
+   AND nom = 'NJ CAISSE PRO';   -- une seule fois : la 076 précise ensuite la description

@@ -23,10 +23,6 @@ export const PAGE_PERMS = {
   '/controle/arretes':    'controle.view',   // 046 : arrêtés de caisse & inventaires (PV)
   '/controle/ecarts':     'controle.view',   // 061 : registre des écarts de caisse
   '/controle/passerelle': ['controle.view', 'passerelle.view'],
-  // NJ FINANCE (F2, 075) : comptabilité en partie double.
-  '/finance/ecritures':   'finance.ecritures.voir',
-  '/finance/grand-livre': 'finance.ecritures.voir',
-  '/finance/balance':     'finance.ecritures.voir',
 };
 
 // Onglets de la page Configuration.
@@ -48,8 +44,6 @@ export const CONFIG_TABS = {
   rubriques: { voir: 'rubriques.view',      gerer: ['rubriques.edit', 'rubriques.create'] },
   pieces:    { voir: 'pieces.view',         gerer: ['pieces.edit'] },
   activites: { voir: 'activites.view',      gerer: ['activites.edit'] },
-  // NJ FINANCE (F2) : exercices, périodes, journaux comptables.
-  comptabilite: { voir: 'finance.ecritures.voir', gerer: ['finance.config.comptabilite', 'finance.periodes.verrouiller'] },
   // La passerelle comptable a quitté la Configuration (041) : menu « Contrôle comptable ».
 };
 

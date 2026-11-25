@@ -19,7 +19,7 @@ export const MODULE_META = {
   passerelle: { label: 'Passerelle comptable', color: '#ecfeff', text: '#0e7490' },
   controle: { label: 'Contrôle comptable', color: '#f0fdfa', text: '#0f766e' },
   commercial: { label: 'NJ COMMERCIAL', color: '#eef2ff', text: '#3730a3' },
-  finance: { label: 'NJ FINANCE — Comptabilité', color: '#f0fdf4', text: '#166534' },
+  comptabilite: { label: 'NJ COMPTABILITÉ', color: '#f0fdf4', text: '#166534' },
 };
 
 // NJ COMMERCIAL : un seul module en base, présenté en quatre blocs (configuration,

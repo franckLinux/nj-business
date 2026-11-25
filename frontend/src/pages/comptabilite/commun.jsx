@@ -1,9 +1,9 @@
-// NJ FINANCE — briques communes des écrans comptables (lot F2).
+// NJ COMPTABILITÉ — briques communes des écrans comptables (075, 076).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import '@/styles/commercial.css';
-import '@/styles/finance.css';
+import '@/styles/comptabilite.css';
 
 // Montant comptable : séparateur de milliers, deux décimales seulement si utiles.
 export const fmtCompta = (v, { zero = '' } = {}) => {
@@ -35,7 +35,7 @@ export function useExercices() {
   const [exercices, setExercices] = useState(null);
   const [erreur, setErreur] = useState('');
   const charger = useCallback(async () => {
-    const r = await api.get('/finance/exercices');
+    const r = await api.get('/comptabilite/exercices');
     if (r?.error) { setErreur(r.error); setExercices([]); return; }
     setErreur(''); setExercices(Array.isArray(r) ? r : []);
   }, []);
@@ -51,9 +51,9 @@ export function SansExercice({ peutParametrer }) {
     <div className="fin-vide">
       <div className="fin-vide-icone" aria-hidden="true">📘</div>
       <h3>Aucun exercice comptable</h3>
-      <p>La comptabilité de NJ FINANCE commence par un exercice et ses journaux comptables.</p>
+      <p>La comptabilité commence par un exercice et ses journaux comptables.</p>
       {peutParametrer
-        ? <Link className="cm-btn cm-primaire" to="/config" state={{ onglet: 'comptabilite' }}>Paramétrer la comptabilité</Link>
+        ? <Link className="cm-btn cm-primaire" to="/comptabilite/parametrage">Paramétrer la comptabilité</Link>
         : <p className="cm-sous">Demandez au comptable ou au directeur de créer l'exercice.</p>}
     </div>
   );
@@ -79,7 +79,7 @@ export function ChampCompte({ valeur, onChange, id, disabled, autoFocus }) {
     clearTimeout(minuterie.current);
     if (!v.trim()) { setOuvert(false); return; }
     minuterie.current = setTimeout(async () => {
-      const r = await api.get(`/finance/comptes?q=${encodeURIComponent(v.trim())}`);
+      const r = await api.get(`/comptabilite/comptes?q=${encodeURIComponent(v.trim())}`);
       setListe(Array.isArray(r) ? r : []); setOuvert(Array.isArray(r) && r.length > 0); setActif(-1);
     }, 220);
   };

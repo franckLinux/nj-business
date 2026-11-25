@@ -1,12 +1,12 @@
 'use strict';
-// NJ FINANCE — contrôleur du socle comptable (lot F2, migration 075).
-// Règles : services/finance/comptabilite.service.js
-const svc = require('../services/finance/comptabilite.service');
+// NJ COMPTABILITÉ — contrôleur du socle comptable (migrations 075 et 076).
+// Règles : services/comptabilite/socle.service.js
+const svc = require('../services/comptabilite/socle.service');
 
 const repondre = (res, err, quoi) => {
   const e = svc.traduire(err);
   if (e instanceof svc.ErreurFinance) return res.status(e.status).json({ error: e.message });
-  console.error(`[NJ FINANCE] ${quoi} :`, err.message);
+  console.error(`[NJ COMPTABILITÉ] ${quoi} :`, err.message);
   return res.status(500).json({ error: 'Erreur serveur.' });
 };
 const ctx = (req) => ({ tenantId: req.tenantId, userId: req.user.id, body: req.body || {} });

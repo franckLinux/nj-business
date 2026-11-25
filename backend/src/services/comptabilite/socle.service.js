@@ -1,5 +1,7 @@
 'use strict';
-// NJ FINANCE — lot F2 : socle comptable (migration 075).
+// NJ COMPTABILITÉ — socle comptable (migrations 075 et 076, lot F2 de NJ FINANCE).
+// Les tables sont partagées : NJ FINANCE y écrira les écritures de ses opérations
+// (lots suivants) ; le module NJ COMPTABILITÉ en donne l'accès.
 //
 // Exercices et périodes, journaux comptables, écritures en partie double
 // (brouillard → validée, extourne), grand livre et balance.

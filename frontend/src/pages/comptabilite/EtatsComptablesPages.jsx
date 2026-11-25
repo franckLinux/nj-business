@@ -1,4 +1,4 @@
-// NJ FINANCE — Reporting et états financiers → Comptabilité : Balance et Grand livre (lot F2).
+// NJ COMPTABILITÉ — États comptables : Balance et Grand livre (075, 076).
 // Écritures VALIDÉES par défaut ; le brouillard peut être inclus pour une lecture provisoire.
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '@/lib/api';
@@ -64,10 +64,10 @@ function BandeauPeriode({ d }) {
 export function BalancePage() {
   const { can } = useApp();
   const { exercices, courant, erreur: errEx } = useExercices();
-  const e = useEtat('/finance/balance', exercices, courant);
+  const e = useEtat('/comptabilite/balance', exercices, courant);
   if (errEx) return <div className="cm-page"><Erreur message={errEx} /></div>;
   if (!exercices) return <div className="loading-msg">Chargement…</div>;
-  if (!exercices.length) return <div className="cm-page"><SansExercice peutParametrer={can('finance.config.comptabilite')} /></div>;
+  if (!exercices.length) return <div className="cm-page"><SansExercice peutParametrer={can('compta.parametrage')} /></div>;
   const d = e.donnees;
   const exporter = () => exporterExcel(`Balance_${d.exercice.code}`,
     ['Compte', 'Intitulé', 'Report débit', 'Report crédit', 'Débit', 'Crédit', 'Solde débiteur', 'Solde créditeur'],
@@ -124,10 +124,10 @@ export function BalancePage() {
 export function GrandLivrePage() {
   const { can } = useApp();
   const { exercices, courant, erreur: errEx } = useExercices();
-  const e = useEtat('/finance/grand-livre', exercices, courant);
+  const e = useEtat('/comptabilite/grand-livre', exercices, courant);
   if (errEx) return <div className="cm-page"><Erreur message={errEx} /></div>;
   if (!exercices) return <div className="loading-msg">Chargement…</div>;
-  if (!exercices.length) return <div className="cm-page"><SansExercice peutParametrer={can('finance.config.comptabilite')} /></div>;
+  if (!exercices.length) return <div className="cm-page"><SansExercice peutParametrer={can('compta.parametrage')} /></div>;
   const d = e.donnees;
   const solde = (v) => { const n = Number(v); return n === 0 ? '0' : `${fmtCompta(Math.abs(n))} ${n > 0 ? 'D' : 'C'}`; };
   const exporter = () => exporterExcel(`Grand_livre_${d.exercice.code}`,
