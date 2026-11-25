@@ -183,8 +183,10 @@ const SQL_FIN = `
          f.date_facture::text AS date_facture, f.date_echeance::text AS date_echeance, f.objet,
          f.total_ht, f.total_taxes, f.total_ttc, f.statut, c.libelle AS categorie, f.facture_origine_id::text AS origine_id,
          CASE WHEN f.statut = 'validee' AND f.type = 'facture' THEN fin_facture_reste('fin', f.id) END AS reste,
-         true AS impute, f.cree_le
+         true AS impute, f.cree_le, c.type_achat, a.nom AS activite,
+         (SELECT string_agg(DISTINCT l.compte, ', ') FROM fin_facture_lignes l WHERE l.facture_id = f.id) AS comptes
     FROM fin_factures f JOIN registre_tiers t ON t.id = f.tiers_id JOIN fin_categories c ON c.id = f.categorie_id
+    LEFT JOIN activites a ON a.id = f.activite_id
    WHERE f.tenant_id = :tenantId AND f.sens = :sens`;
 const SQL_COM = `
   SELECT 'com_ff', cf.id::text, cf.type, cf.numero, cf.reference_fournisseur, cf.fournisseur_id::text, t.nom,
@@ -192,9 +194,11 @@ const SQL_COM = `
          cf.total_ht, cf.total_taxes, cf.total_ttc,
          CASE cf.statut WHEN 'valide' THEN 'validee' ELSE 'annulee' END, c.libelle, cf.facture_origine_id::text,
          CASE WHEN cf.statut = 'valide' AND cf.type = 'facture' THEN fin_facture_reste('com_ff', cf.id) END,
-         i.id IS NOT NULL, cf.cree_le
+         i.id IS NOT NULL, cf.cree_le, coalesce(c.type_achat, 'marchandises'), a.nom,
+         coalesce(nullif(i.compte, ''), c.compte_defaut)
     FROM com_factures_fournisseurs cf JOIN registre_tiers t ON t.id = cf.fournisseur_id
     LEFT JOIN fin_imputations_externes i ON i.com_ff_id = cf.id LEFT JOIN fin_categories c ON c.id = i.categorie_id
+    LEFT JOIN activites a ON a.id = i.activite_id
    WHERE cf.tenant_id = :tenantId AND (cf.statut = 'valide' OR (cf.statut = 'annule' AND cf.valide_le IS NOT NULL))`;
 const sqlListe = (sens) => (sens === 'client' ? SQL_FIN : `${SQL_FIN} UNION ALL ${SQL_COM}`);
 
@@ -222,6 +226,7 @@ const lister = async (tenantId, q = {}, sensBrut = 'fournisseur') => {
   const filtre = String(q.filtre || '');
   const liste = rows.filter((r) => (!q.tiers_id || r.tiers_id === String(q.tiers_id))
     && (!q.origine || r.origine === q.origine)
+    && (!q.type || r.type_achat === q.type)
     && (!q.du || r.date_facture >= q.du) && (!q.au || r.date_facture <= q.au)
     && (!rech || [r.numero, r.reference, r.tiers_nom, r.objet].some((v) => String(v || '').toLowerCase().includes(rech)))
     && (!filtre
@@ -230,7 +235,8 @@ const lister = async (tenantId, q = {}, sensBrut = 'fournisseur') => {
       || (filtre === 'a_payer' && r.reste !== null && cts(r.reste) > 0)
       || (filtre === 'echues' && r.echue)
       || (filtre === 'annulees' && r.statut === 'annulee')
-      || (filtre === 'factures' && r.type !== 'proforma')
+      || (filtre === 'factures' && r.type === 'facture')
+      || (filtre === 'avoirs' && r.type === 'avoir')
       || (filtre === 'proformas' && r.type === 'proforma')));
   const ouvertes = rows.filter((r) => r.reste !== null && cts(r.reste) > 0);
   const [hc] = await Q(`SELECT count(*)::int AS n FROM fin_reglements_hors_caisse h

@@ -53,8 +53,12 @@ const numeroEcriture = (e) => (e.numero ? `${e.journal_code}-${e.exercice_code}-
 // ── Liste ───────────────────────────────────────────────────────────────────
 const FILTRES = {
   fournisseur: [['', 'Toutes'], ['a_valider', 'À valider'], ['a_imputer', 'À imputer'], ['a_payer', 'À payer'], ['echues', 'Échues'], ['annulees', 'Annulées']],
-  client: [['', 'Tous'], ['factures', 'Factures et avoirs'], ['proformas', 'Proformas'], ['a_valider', 'À valider'], ['a_payer', 'À encaisser'], ['echues', 'Échues'], ['annulees', 'Annulés']],
+  client: [['', 'Tous'], ['proformas', 'Proformas'], ['factures', 'Factures définitives'], ['avoirs', 'Avoirs'], ['a_valider', 'À valider'], ['a_payer', 'À encaisser'], ['echues', 'Échues'], ['annulees', 'Annulés']],
 };
+// Tableau des achats : par type d'achat (catégorie de la facture ou de son imputation).
+const TYPES_ACHAT = [['', 'Tous les achats'], ['marchandises', 'Achats de marchandises'], ['autres', 'Autres achats et charges'], ['immobilisation', 'Immobilisations']];
+const TITRES_TYPE = { marchandises: 'Achats de marchandises', autres: 'Autres achats et charges', immobilisation: 'Achats d\'immobilisations' };
+const TITRES_FILTRE = { proformas: 'Factures proforma', factures: 'Factures définitives', avoirs: 'Factures d\'avoir' };
 
 export function AchatsListePage({ sens = 'fournisseur' }) {
   const C = CFG[sens];
@@ -62,27 +66,30 @@ export function AchatsListePage({ sens = 'fournisseur' }) {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const filtre = params.get('filtre') || '';
+  const typeAchat = sens === 'fournisseur' ? params.get('type') || '' : '';
   const [origine, setOrigine] = useState('');
   const [recherche, setRecherche] = useState('');
   const [d, setD] = useState(null);
   const [erreur, setErreur] = useState('');
   const rech = useDiffere(recherche, 300);
   const charger = useCallback(async () => {
-    const q = new URLSearchParams({ filtre, origine, q: rech });
+    const q = new URLSearchParams({ filtre, origine, q: rech, type: typeAchat });
     const r = await api.get(`${C.api}?${q}`);
     if (r?.error) { setErreur(r.error); return; }
     setErreur(''); setD({ ...r, factures: r.factures.map((f) => ({ ...f, sens })) });
-  }, [filtre, origine, rech, C.api, sens]);
+  }, [filtre, origine, rech, typeAchat, C.api, sens]);
   useEffect(() => { charger(); }, [charger]);
-  const choisir = (f) => setParams(f ? { filtre: f } : {});
-  const exporter = () => exporterExcel(sens === 'client' ? 'Factures_clients' : 'Factures_fournisseurs', ['Origine', 'N°', 'Référence', C.tiers, 'Date', 'Échéance', 'HT', 'Taxes', 'TTC', 'Reste à payer', 'État'],
-    d.factures.map((f) => [f.origine_libelle, f.numero, f.reference, f.tiers_nom, f.date_facture, f.date_echeance || '', +f.total_ht, +f.total_taxes,
+  const choisir = (f) => setParams({ ...(f ? { filtre: f } : {}), ...(typeAchat ? { type: typeAchat } : {}) });
+  const choisirType = (t) => setParams({ ...(filtre ? { filtre } : {}), ...(t ? { type: t } : {}) });
+  const avecActivite = Boolean(d?.factures?.some((f) => f.activite));
+  const exporter = () => exporterExcel(sens === 'client' ? 'Factures_clients' : 'Factures_fournisseurs', ['Origine', 'N°', 'Référence', C.tiers, 'Date', 'Échéance', 'Comptes', 'Activité', 'HT', 'Taxes', 'TTC', 'Reste à payer', 'Statut'],
+    d.factures.map((f) => [f.origine_libelle, f.numero, f.reference, f.tiers_nom, f.date_facture, f.date_echeance || '', f.comptes || '', f.activite || '', +f.total_ht, +f.total_taxes,
       (f.type === 'avoir' ? -1 : 1) * f.total_ttc, f.reste === null ? '' : +f.reste, f.etat]));
   return (
     <div className="cm-page fin-page">
       <div className="cm-entete">
         <div>
-          <h2>{C.titreListe}</h2>
+          <h2>{(sens === 'fournisseur' && TITRES_TYPE[typeAchat]) || (sens === 'client' && TITRES_FILTRE[filtre]) || (sens === 'fournisseur' ? 'Tableau des achats' : C.titreListe)}</h2>
           <p>{sens === 'client'
             ? 'Factures, avoirs et proformas, avec PDF au logo de l\'entreprise. Un encaissement par la caisse ou la banque se fait depuis la facture.'
             : 'Factures saisies ici et factures validées dans NJ COMMERCIAL, en une seule liste. Le paiement par la caisse ou la banque se fait depuis la facture.'}</p>
@@ -112,6 +119,11 @@ export function AchatsListePage({ sens = 'fournisseur' }) {
       {d?.compteurs.hors_caisse_a_valider > 0 && (
         <div className="fin-bandeau">{d.compteurs.hors_caisse_a_valider} règlement(s) hors caisse ni banque attendent la décision du directeur : ouvrez la facture concernée.</div>
       )}
+      {sens === 'fournisseur' && (
+        <div className="fin-segments" role="tablist" aria-label="Type d'achat">
+          {TYPES_ACHAT.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={typeAchat === k} className={typeAchat === k ? 'actif' : ''} onClick={() => choisirType(k)}>{l}</button>)}
+        </div>
+      )}
       <div className="fin-onglets" role="tablist">
         {FILTRES[sens].map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={filtre === k} className={filtre === k ? 'actif' : ''} onClick={() => choisir(k)}>{l}</button>)}
       </div>
@@ -130,8 +142,8 @@ export function AchatsListePage({ sens = 'fournisseur' }) {
       ) : (
         <div className="cm-table-wrap">
           <table className="cm-table fin-table">
-            <thead><tr><th>N°</th><th>{C.tiers}</th><th>Référence</th><th>Date</th><th>Échéance</th>
-              <th className="fin-num">TTC</th><th className="fin-num">{C.reste}</th><th>État</th></tr></thead>
+            <thead><tr><th>N°</th><th>{C.tiers}</th><th>Référence</th><th>Date</th><th>Échéance</th><th>Compte</th>{avecActivite && <th>Activité</th>}
+              <th className="fin-num">TTC</th><th className="fin-num">{C.reste}</th><th>Statut</th></tr></thead>
             <tbody>
               {d.factures.map((f) => (
                 <tr key={f.cle} className="cm-cliquable" tabIndex={0} onClick={() => navigate(lienFacture(f))} onKeyDown={(e) => { if (e.key === 'Enter') navigate(lienFacture(f)); }}>
@@ -141,6 +153,8 @@ export function AchatsListePage({ sens = 'fournisseur' }) {
                   <td className="fin-mono">{f.reference || '—'}</td>
                   <td>{fmtDate(f.date_facture)}</td>
                   <td className={f.echue ? 'fin-retard' : ''}>{fmtDate(f.date_echeance)}{f.echue && <div className="cm-sous">{f.jours_retard} j de retard</div>}</td>
+                  <td className="fin-mono">{f.comptes || '—'}</td>
+                  {avecActivite && <td>{f.activite || <span className="cm-sous">—</span>}</td>}
                   <td className="fin-num">{f.type === 'avoir' ? '−' : ''}{fmtCompta(f.total_ttc)}</td>
                   <td className="fin-num fin-fort">{f.reste === null ? '—' : fmtCompta(f.reste, { zero: '0' })}</td>
                   <td><BadgeEtat etat={f.etat} /></td>

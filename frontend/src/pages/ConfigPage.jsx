@@ -10,22 +10,31 @@ import PiecesTab from '@/components/config/PiecesTab';
 import RolesTab from '@/components/config/RolesTab';
 import ActivitesTab from '@/components/config/ActivitesTab';
 import FacturationTab from '@/pages/finance/FacturationTab';
+import { TiersListePage } from '@/pages/finance/TiersPages';
 import { voitOngletConfig } from '@/lib/acces';
 import { useContexteProjets } from '@/lib/projets';
+
+const ClientsTab = () => <TiersListePage key="c" sens="client" />;
+const FournisseursTab = () => <TiersListePage key="f" sens="fournisseur" />;
 
 // Reprend loadConfig()/switchTab() de legacy/js/app.js (l. 3913-3948).
 // Les 6 onglets (+ Rôles : super_admin, ou directeur via roles.edit — décision
 // du 02/10/2026) sont maintenant tous portés.
+// NJ FINANCE (menu réorganisé le 25/11/2026) : onglets regroupés en trois familles —
+// l'entité, ses tiers (clients, fournisseurs), les paramètres comptables et financiers.
+const GROUPES = { entite: "L'entité", tiers: 'Clients et fournisseurs', parametres: 'Paramètres comptables et financiers' };
 const TABS = [
-  { id: 'entite', label: '🏢 Entité', Comp: EntiteTab },
-  { id: 'users', label: '👥 Utilisateurs', Comp: UsersTab },
-  { id: 'journaux', label: '📒 Journaux', Comp: JournauxTab },
-  { id: 'plan', label: '📚 Plan comptable', Comp: PlanComptableTab },
-  { id: 'rubriques', label: '📋 Rubriques', Comp: RubriquesTab },
-  { id: 'pieces', label: '📎 Pièces justificatives', Comp: PiecesTab },
-  { id: 'activites', label: '🎯 Activités / projets', Comp: ActivitesTab },
+  { id: 'entite', groupe: 'entite', label: '🏢 Entité', Comp: EntiteTab },
+  { id: 'users', groupe: 'entite', label: '👥 Utilisateurs', Comp: UsersTab },
+  { id: 'clients', groupe: 'tiers', label: '🤝 Clients', Comp: ClientsTab },
+  { id: 'fournisseurs', groupe: 'tiers', label: '🚚 Fournisseurs', Comp: FournisseursTab },
+  { id: 'journaux', groupe: 'parametres', label: '📒 Journaux', Comp: JournauxTab },
+  { id: 'plan', groupe: 'parametres', label: '📚 Plan comptable', Comp: PlanComptableTab },
+  { id: 'rubriques', groupe: 'parametres', label: '📋 Rubriques', Comp: RubriquesTab },
+  { id: 'pieces', groupe: 'parametres', label: '📎 Pièces justificatives', Comp: PiecesTab },
   // NJ FINANCE F5 (079) : catégories, prestations, modes de règlement, taxes, numérotation.
-  { id: 'facturation', label: '🧾 Facturation', Comp: FacturationTab },
+  { id: 'facturation', groupe: 'parametres', label: '🧾 Facturation', Comp: FacturationTab },
+  { id: 'activites', groupe: 'parametres', label: '🎯 Activités / projets', Comp: ActivitesTab },
 ];
 
 export default function ConfigPage() {
@@ -47,7 +56,8 @@ export default function ConfigPage() {
   // Activités / projets : réservés aux ONG et associations (25/11/2026).
   const ctxProjets = useContexteProjets();
   const visibles = TABS.filter((t) => voitOngletConfig(user, can, t.id) && !(t.id === 'activites' && ctxProjets && !ctxProjets.ong));
-  const tabs = voitRoles ? [...visibles, { id: 'roles', label: '🎭 Rôles', Comp: RolesTab }] : visibles;
+  const tabs = voitRoles ? [...visibles.slice(0, visibles.filter((t) => t.groupe === 'entite').length),
+    { id: 'roles', groupe: 'entite', label: '🎭 Rôles', Comp: RolesTab }, ...visibles.filter((t) => t.groupe !== 'entite')] : visibles;
   const courant = tabs.find((t) => t.id === active) || tabs[0];
   const ActiveComp = courant?.Comp;
 
@@ -80,12 +90,23 @@ export default function ConfigPage() {
           </ol>
         </div>
       )}
-      <div className="tabs-header">
-        {tabs.map((t) => (
-          <button key={t.id} className={'tab-btn' + (courant.id === t.id ? ' active' : '')} onClick={() => setActive(t.id)}>
-            {t.label}
-          </button>
-        ))}
+      <div className="config-groupes">
+        {Object.entries(GROUPES).map(([g, libelle]) => {
+          const ceux = tabs.filter((t) => t.groupe === g);
+          if (!ceux.length) return null;
+          return (
+            <div key={g} className={`config-groupe${ceux.some((t) => t.id === courant.id) ? ' actif' : ''}`}>
+              <div className="config-groupe-titre">{libelle}</div>
+              <div className="tabs-header">
+                {ceux.map((t) => (
+                  <button key={t.id} className={'tab-btn' + (courant.id === t.id ? ' active' : '')} onClick={() => setActive(t.id)}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
       <div className="tab-content active">
         <ActiveComp />

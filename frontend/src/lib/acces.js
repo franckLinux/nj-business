@@ -56,6 +56,10 @@ export const CONFIG_TABS = {
   rubriques: { voir: 'rubriques.view',      gerer: ['rubriques.edit', 'rubriques.create'] },
   pieces:    { voir: 'pieces.view',         gerer: ['pieces.edit'] },
   activites: { voir: 'activites.view',      gerer: ['activites.edit'] },
+  // NJ FINANCE (menu réorganisé le 25/11/2026) : clients et fournisseurs dans la Configuration.
+  // La consultation suffit (la caissière consulte les fiches) : voirSuffit.
+  clients:      { voir: 'finance.tiers.voir', gerer: ['finance.tiers.gerer'], voirSuffit: true },
+  fournisseurs: { voir: 'finance.tiers.voir', gerer: ['finance.tiers.gerer'], voirSuffit: true },
   // NJ FINANCE F5 (079) : paramétrage de la facturation.
   facturation: { voir: 'finance.config.facturation', gerer: ['finance.config.facturation'] },
   // La passerelle comptable a quitté la Configuration (041) : menu « Contrôle comptable ».
@@ -66,7 +70,7 @@ export const voitOngletConfig = (user, can, id) => {
   if (!t) return false;
   if (t.gerer.some((c) => can(c))) return true;
   if (!can(t.voir)) return false;
-  if (user?.role === 'auditeur') return true;
+  if (t.voirSuffit || user?.role === 'auditeur') return true;
   const accordees = Array.isArray(user?.permissionsAccordees) ? user.permissionsAccordees : [];
   return [t.voir, ...t.gerer].some((c) => accordees.includes(c));
 };

@@ -15,37 +15,37 @@ const TITLES = {
   '/': 'Tableau de bord',
   '/prospects': 'Prospects & démonstrations',
   '/mynjbusiness': 'MyNjBusiness',
-  '/journaux-recap': 'Journaux de caisse',
-  '/budget': 'Suivi Budgétaire',
-  '/previsions': 'Prévisions de dépenses',
-  '/appel-fonds': 'Demande de fonds',
+  '/journaux-recap': 'Caisse Pro — Historique des mouvements',
+  '/budget': 'Caisse Pro — Suivi budgétaire',
+  '/previsions': 'Caisse Pro — Prévisions de dépenses',
+  '/appel-fonds': 'Caisse Pro — Demande de fonds',
   '/compte-emploi': "Compte d'emploi",
-  '/activites': "Gestion d'activité — Suivi par activité",
-  '/projets': "Gestion d'activité — Projets",
-  '/projets/a-controler': "Gestion d'activité — Justificatifs à contrôler",
-  '/projets/bilan': "Gestion d'activité — Bilan des activités",
+  '/activites': 'Gestion des activités — Rapports par activité',
+  '/projets': 'Gestion des activités — Activités et projets',
+  '/projets/a-controler': 'Gestion des activités — Justificatifs à contrôler',
+  '/projets/bilan': 'Gestion des activités — Budgets et suivi budgétaire',
   '/config': 'Configuration',
   '/tenants': 'Clients (Tenants)',
   '/permissions': 'Gestion des permissions',
   '/plan-modele': 'Modèle comptable',
   '/plateforme': 'Administration plateforme',
   '/validation-directe': 'Validation directe des prospects',
-  '/attente': 'Dépenses en attente',
-  '/controle/pieces': 'Contrôles comptables — Rapport',
-  '/controle/regularite': 'Contrôles comptables — Contrôle de substance',
-  '/controle/arretes': 'Caisse — Arrêtés de caisse & inventaires',
-  '/controle/ecarts': 'Inventaire — Écarts de caisse',
-  '/controle/registre': 'Contrôles comptables — Registre bénéficiaires Payés/Encaissés',
-  '/finance/tiers': 'Clients et fournisseurs',
-  '/finance/creances': 'Clients et fournisseurs — Créances clients',
-  '/finance/dettes': 'Clients et fournisseurs — Dettes fournisseurs',
-  '/finance/achats': 'Achats — Factures fournisseurs',
+  '/attente': 'Caisse Pro — Dépenses en attente',
+  '/controle/pieces': 'Contrôle — Rapport de contrôle',
+  '/controle/regularite': 'Contrôle — Pièces justificatives (substance)',
+  '/controle/arretes': 'Caisse Pro — Arrêts de caisse et contrôles physiques',
+  '/controle/ecarts': 'Caisse Pro — Écarts de caisse',
+  '/controle/registre': 'Contrôle — Registre bénéficiaires Payés/Encaissés',
+  '/finance/tiers': 'Configuration — Clients et fournisseurs',
+  '/finance/creances': 'Facturation — Suivi des créances clients',
+  '/finance/dettes': 'Achats — Dettes fournisseurs',
+  '/finance/achats': 'Achats — Tableau des achats',
   '/finance/achats/nouvelle': 'Achats — Nouvelle facture',
-  '/finance/achats/echeancier': 'Achats — Échéancier',
-  '/finance/ventes': 'Ventes et facturation — Factures clients',
-  '/finance/ventes/nouvelle': 'Ventes et facturation — Nouveau document',
-  '/finance/ventes/echeancier': 'Ventes et facturation — Échéancier clients',
-  '/controle/passerelle': 'Contrôles comptables — Contrôle de régularité formelle',
+  '/finance/achats/echeancier': 'Achats — Échéancier fournisseurs',
+  '/finance/ventes': 'Facturation',
+  '/finance/ventes/nouvelle': 'Facturation — Nouveau document',
+  '/finance/ventes/echeancier': 'Facturation — Échéancier clients',
+  '/controle/passerelle': 'Contrôle — Régularité formelle',
 };
 
 export default function Layout() {
@@ -95,10 +95,10 @@ export default function Layout() {
   }, [user, activeTenantId, openTenantSelector, pageSansClient]);
 
   // Le titre d'une page journal reprend le format « Nom (CODE) ».
-  let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? "Gestion d'activité — Projets"
-    : location.pathname.startsWith('/finance/tiers/') ? 'Clients et fournisseurs — Fiche'
+  let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? 'Gestion des activités — Projets'
+    : location.pathname.startsWith('/finance/tiers/') ? 'Configuration — Fiche client / fournisseur'
       : location.pathname.startsWith('/finance/achats/') ? 'Achats — Facture fournisseur'
-        : location.pathname.startsWith('/finance/ventes/') ? 'Ventes et facturation — Document client' : 'Tableau de bord');
+        : location.pathname.startsWith('/finance/ventes/') ? 'Facturation — Document client' : 'Tableau de bord');
   if (location.pathname.startsWith('/journal/')) {
     const j = journaux.find((x) => String(x.id) === String(params.id));
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';

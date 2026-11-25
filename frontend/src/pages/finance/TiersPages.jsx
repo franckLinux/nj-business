@@ -81,10 +81,12 @@ function FormulaireTiers({ initial, onFermer, onEnregistre }) {
 }
 
 // ── Liste ───────────────────────────────────────────────────────────────────
-export function TiersListePage() {
+// `sens` (menu réorganisé le 25/11/2026) : la liste s'ouvre dans Configuration →
+// Clients ou → Fournisseurs, sans les onglets ; sans `sens`, liste complète.
+export function TiersListePage({ sens = null }) {
   const { can } = useApp();
   const navigate = useNavigate();
-  const [onglet, setOnglet] = useState('client');
+  const [onglet, setOnglet] = useState(sens || 'client');
   const [recherche, setRecherche] = useState('');
   const [brouillard, setBrouillard] = useState(false);
   const [d, setD] = useState(null);
@@ -105,8 +107,9 @@ export function TiersListePage() {
     <div className="cm-page fin-page">
       <div className="cm-entete">
         <div>
-          <h2>Clients et fournisseurs</h2>
-          <p>Fiche unique par tiers, partagée avec le registre des bénéficiaires et NJ COMMERCIAL. Les soldes viennent des écritures validées des comptes 40 et 41.</p>
+          <h2>{sens === 'client' ? 'Clients' : sens === 'fournisseur' ? 'Fournisseurs' : 'Clients et fournisseurs'}</h2>
+          <p>Fiche unique par tiers, partagée avec le registre des bénéficiaires et NJ COMMERCIAL. Les soldes viennent des écritures validées des comptes 40, 41 et 481.
+            {sens === 'client' && ' Un tiers à la fois client et fournisseur apparaît dans les deux listes.'}</p>
         </div>
         <div className="cm-actions">
           <button type="button" className="cm-btn cm-secondaire" disabled={!d?.tiers?.length} onClick={exporter}>Exporter</button>
@@ -115,17 +118,19 @@ export function TiersListePage() {
       </div>
       {d && (
         <div className="fin-kpis">
-          <Kpi libelle="Clients" valeur={d.totaux.clients.toLocaleString('fr-FR')} />
-          <Kpi libelle="Créances clients" valeur={fmtCompta(d.totaux.creances, { zero: '0' })} ton={Number(d.totaux.creances) > 0 ? 'alerte' : ''} aide={<Link to="/finance/creances">Voir l'état</Link>} />
-          <Kpi libelle="Fournisseurs" valeur={d.totaux.fournisseurs.toLocaleString('fr-FR')} />
-          <Kpi libelle="Dettes fournisseurs" valeur={fmtCompta(d.totaux.dettes, { zero: '0' })} ton={Number(d.totaux.dettes) > 0 ? 'alerte' : ''} aide={<Link to="/finance/dettes">Voir l'état</Link>} />
+          {sens !== 'fournisseur' && <Kpi libelle="Clients" valeur={d.totaux.clients.toLocaleString('fr-FR')} />}
+          {sens !== 'fournisseur' && <Kpi libelle="Créances clients" valeur={fmtCompta(d.totaux.creances, { zero: '0' })} ton={Number(d.totaux.creances) > 0 ? 'alerte' : ''} aide={<Link to="/finance/creances">Voir l'état</Link>} />}
+          {sens !== 'client' && <Kpi libelle="Fournisseurs" valeur={d.totaux.fournisseurs.toLocaleString('fr-FR')} />}
+          {sens !== 'client' && <Kpi libelle="Dettes fournisseurs" valeur={fmtCompta(d.totaux.dettes, { zero: '0' })} ton={Number(d.totaux.dettes) > 0 ? 'alerte' : ''} aide={<Link to="/finance/dettes">Voir l'état</Link>} />}
         </div>
       )}
-      <div className="fin-onglets" role="tablist">
-        {[['client', 'Clients'], ['fournisseur', 'Fournisseurs'], ['tous', 'Tous']].map(([k, l]) => (
-          <button key={k} type="button" role="tab" aria-selected={onglet === k} className={onglet === k ? 'actif' : ''} onClick={() => setOnglet(k)}>{l}</button>
-        ))}
-      </div>
+      {!sens && (
+        <div className="fin-onglets" role="tablist">
+          {[['client', 'Clients'], ['fournisseur', 'Fournisseurs'], ['tous', 'Tous']].map(([k, l]) => (
+            <button key={k} type="button" role="tab" aria-selected={onglet === k} className={onglet === k ? 'actif' : ''} onClick={() => setOnglet(k)}>{l}</button>
+          ))}
+        </div>
+      )}
       <div className="fin-filtres">
         <input type="search" className="fin-recherche" placeholder="Nom, NIU, code, téléphone…" value={recherche} onChange={(e) => setRecherche(e.target.value)} />
         <label className="fin-case"><input type="checkbox" checked={brouillard} onChange={(e) => setBrouillard(e.target.checked)} /> Inclure le brouillard</label>
@@ -177,11 +182,11 @@ export function TiersFichePage() {
     setErreur(''); setT(r);
   }, [id, brouillard]);
   useEffect(() => { charger(); }, [charger]);
-  if (erreur) return <div className="cm-page"><Link to="/finance/tiers" className="fin-lien">‹ Clients et fournisseurs</Link><Erreur message={erreur} /></div>;
+  if (erreur) return <div className="cm-page"><Link to="/config" state={{ onglet: 'clients' }} className="fin-lien">‹ Configuration</Link><Erreur message={erreur} /></div>;
   if (!t) return <div className="loading-msg">Chargement…</div>;
   return (
     <div className="cm-page fin-page">
-      <Link to="/finance/tiers" className="fin-lien">‹ Clients et fournisseurs</Link>
+      <Link to="/config" state={{ onglet: estClient(t.type) ? 'clients' : 'fournisseurs' }} className="fin-lien">‹ Configuration — {estClient(t.type) ? 'Clients' : 'Fournisseurs'}</Link>
       <div className="fin-fiche-tete">
         <div className="fin-avatar" aria-hidden="true">{t.nom.slice(0, 2).toUpperCase()}</div>
         <div className="fin-fiche-id">
