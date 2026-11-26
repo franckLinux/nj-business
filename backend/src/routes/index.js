@@ -328,6 +328,7 @@ router.post  ('/projets/demandes/:id/renvoyer',      authGuard, tenantGuard, dfC
 router.post  ('/projets/demandes/:id/rejeter',       authGuard, tenantGuard, dfCtrl.rejeter);
 router.post  ('/projets/demandes/:id/annuler',       authGuard, tenantGuard, dfCtrl.annuler);
 router.post  ('/projets/demandes/:id/decaisser',     authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.decaisser);
+router.post  ('/projets/demandes/:id/solliciter',    authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.solliciter);
 router.post  ('/projets/demandes/:id/reverser',      authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.reverser);
 router.post  ('/projets/demandes/:id/depenses',      authGuard, tenantGuard, dfCtrl.declarer);
 router.get   ('/projets/depenses',                   authGuard, tenantGuard, dfCtrl.depenses);

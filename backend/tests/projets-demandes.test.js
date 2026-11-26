@@ -253,3 +253,37 @@ test('Contre-passation du décaissement : il ne compte plus ; annulation par le 
   assert.equal((await appel('POST', `/projets/demandes/${d3.data.id}/annuler`, 'chef', { motif: 'Plus utile' })).status, 403);
   assert.equal((await appel('POST', `/projets/demandes/${d3.data.id}/annuler`, 'dir', { motif: 'Plus utile' })).data.statut, 'annulee');
 });
+
+test('Solde insuffisant : décaissement refusé, manque porté à la Demande de fonds de la caisse ; notifications', async () => {
+  const gros = await appel('POST', '/projets/demandes', 'resp', demande({ soumettre: true, objet: 'Grosse campagne',
+    lignes: [{ designation: 'Logistique', quantite: 1, prix_unitaire: 900000 }] }));
+  assert.equal(gros.status, 201, gros.message);
+  // Le chef de projet a été prévenu dans l'application (le mail suit son canal).
+  await new Promise((r) => setTimeout(r, 400));
+  const [{ n: notifChef }] = await sql(`SELECT count(*)::int AS n FROM notifications WHERE destinataire_id = $1 AND ref_type = 'demande_fonds' AND ref_id = $2`,
+    [C.ong.u.chef.id, gros.data.id]);
+  assert.equal(notifChef, 1);
+  assert.equal((await appel('POST', `/projets/demandes/${gros.data.id}/valider`, 'chef')).status, 200);
+  assert.equal((await appel('POST', `/projets/demandes/${gros.data.id}/valider`, 'dir')).status, 200);
+  const ctx = (await appel('GET', '/projets/demandes/contexte', 'cai')).data;
+  const caisse = ctx.journaux.find((j) => j.id === String(S.caisse));
+  assert.ok(caisse.solde > 0 && caisse.solde < 900000, `solde affiché : ${caisse.solde}`);
+  const refus = await appel('POST', `/projets/demandes/${gros.data.id}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT' });
+  assert.equal(refus.status, 409);
+  assert.equal(refus.code, 'SOLDE_INSUFFISANT');
+  assert.match(refus.message, /il manque/);
+  const s = await appel('POST', `/projets/demandes/${gros.data.id}/solliciter`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT' });
+  assert.equal(s.status, 201, s.message);
+  assert.equal(s.data.manque, Math.round((900000 - caisse.solde) * 100) / 100);
+  const [ligne] = await sql(`SELECT montant, intitule FROM depenses_attente WHERE tenant_id = $1 AND rubrique_code = 'ACT'`, [C.ong.tenant]);
+  assert.equal(Number(ligne.montant), s.data.manque);
+  assert.match(ligne.intitule, /Réappro\. caisse/);
+  const fiche = (await appel('GET', `/projets/demandes/${gros.data.id}`, 'cai')).data;
+  assert.equal(fiche.sollicitations.length, 1);
+  assert.equal(fiche.sollicitations[0].statut_demande_fonds, 'en_attente');
+  await new Promise((r) => setTimeout(r, 400));
+  const [{ n: notifDir }] = await sql(`SELECT count(*)::int AS n FROM notifications WHERE destinataire_id = $1 AND type = 'demande_fonds_sollicitation'`, [C.ong.u.dir.id]);
+  assert.equal(notifDir, 1, 'directeur prévenu du réapprovisionnement');
+  // La banque n'est pas concernée par le contrôle du solde (découvert possible) ni par la sollicitation.
+  assert.equal((await appel('POST', `/projets/demandes/${gros.data.id}/solliciter`, 'cai', { journal_id: S.banque, rubrique_code: 'ACT' })).status, 400);
+});

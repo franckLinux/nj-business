@@ -265,3 +265,4 @@ tr.fin-annule td { color: #94a3b8; text-decoration: line-through; }
 }
 .fin-page a.cm-btn { text-decoration: none; }
 .fin-tableau-immos td, .fin-tableau-immos th { padding-left: 8px; padding-right: 8px; }
+.fin-bandeau-alerte { background: #fef2f2; border-color: #fecaca; color: #7f1d1d; }

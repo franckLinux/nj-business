@@ -284,6 +284,22 @@ export function DemandeFichePage() {
         </section>
       )}
 
+      {d.sollicitations?.length > 0 && (
+        <section className="fin-carte">
+          <h3 className="fin-titre-section">Réapprovisionnement de la caisse (Demande de fonds)</h3>
+          <table className="cm-table fin-table">
+            <thead><tr><th>Demandé le</th><th>Caisse</th><th className="fin-num">Solde constaté</th><th className="fin-num">Manque porté</th><th>Demande de fonds</th><th>État</th></tr></thead>
+            <tbody>{d.sollicitations.map((so, k) => (
+              // eslint-disable-next-line react/no-array-index-key
+              <tr key={k}><td>{fmtDate(so.demandee_le)}{so.par ? <div className="cm-sous">{so.par}</div> : null}</td><td>{so.caisse}</td>
+                <td className="fin-num">{m(so.solde_constate)}</td><td className="fin-num">{m(so.montant)}</td>
+                <td>{so.semaine ? `Semaine ${so.semaine} de ` : ''}{so.mois} {so.annee}</td>
+                <td><span className={`fin-pastille fin-pastille-${so.statut_demande_fonds === 'valide' ? 'vert' : so.statut_demande_fonds === 'rejete' ? 'rouge-plein' : 'orange'}`}>
+                  {so.statut_demande_fonds === 'valide' ? 'Validée par le directeur' : so.statut_demande_fonds === 'rejete' ? 'Rejetée' : 'En attente du directeur'}</span></td></tr>))}</tbody>
+          </table>
+        </section>
+      )}
+
       {x.statut === 'approuvee' && (
         <section className="fin-carte">
           <h3 className="fin-titre-section">Dépenses effectuées et justificatifs</h3>
@@ -365,6 +381,10 @@ function MouvementTiroir({ sens, demande, ctx, onFermer, onFait }) {
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   const set = (k) => (e) => setV((x) => ({ ...x, [k]: e.target.value }));
+  // Décision de Franck (26/11) : le solde de la caisse est regardé AVANT de décaisser.
+  const journal = ctx.journaux.find((j) => j.id === String(v.journal_id));
+  const montantNum = Number(String(v.montant).replace(/\s/g, '').replace(',', '.')) || 0;
+  const manque = decaissement && journal && journal.type !== 'banque' ? Math.round((montantNum - Math.max(journal.solde, 0)) * 100) / 100 : 0;
   const valider = async () => {
     setEnCours(true); setErreur('');
     const r = await api.post(`/projets/demandes/${demande.id}/${decaissement ? 'decaisser' : 'reverser'}`, v);
@@ -373,25 +393,40 @@ function MouvementTiroir({ sens, demande, ctx, onFermer, onFait }) {
     toast(`${decaissement ? 'Décaissement' : 'Reliquat'} enregistré (n° ${r.numero}).`, 'success');
     onFait();
   };
+  const solliciter = async () => {
+    setEnCours(true); setErreur('');
+    const r = await api.post(`/projets/demandes/${demande.id}/solliciter`, { journal_id: v.journal_id, rubrique_code: v.rubrique_code, montant: v.montant });
+    setEnCours(false);
+    if (r?.error) { setErreur(r.error); return; }
+    toast(`Besoin de ${m(r.manque)} FCFA ajouté à la Demande de fonds de ${r.periode} : le directeur est prévenu par mail.`, 'success');
+    onFait();
+  };
   return (
     <Tiroir titre={decaissement ? 'Décaisser les fonds' : 'Encaisser le reliquat'}
       sousTitre={`${demande.numero} — ${decaissement ? 'reste à décaisser' : 'reliquat'} : ${m(plafond)} FCFA`} onFermer={onFermer} pied={<>
         <button type="button" className="cm-btn cm-secondaire" onClick={onFermer}>Annuler</button>
-        <button type="button" className="cm-btn cm-primaire" disabled={enCours || !v.journal_id || !v.rubrique_code || !(Number(v.montant) > 0)} onClick={valider}>Enregistrer</button>
+        <button type="button" className="cm-btn cm-primaire" disabled={enCours || !v.journal_id || !v.rubrique_code || !(montantNum > 0) || manque > 0} onClick={valider}>Enregistrer</button>
       </>}>
       <p className="cm-sous">{decaissement
         ? 'Une sortie est écrite dans la caisse ou la banque choisie, sur l\'activité de la demande, avec les contrôles habituels (période ouverte, solde).'
         : 'Une entrée est écrite dans la caisse ou la banque choisie : les fonds non dépensés reviennent à la structure.'}</p>
       <Erreur message={erreur} />
       <div className="cm-grille">
-        <Champ label="Caisse ou banque" requis id="mv-j"><select id="mv-j" value={v.journal_id} onChange={set('journal_id')}>
-          {ctx.journaux.map((j) => <option key={j.id} value={j.id}>{j.code} — {j.nom}</option>)}</select></Champ>
+        <Champ label="Caisse ou banque" requis id="mv-j" aide={journal ? `Solde disponible : ${m(journal.solde)} FCFA` : undefined}><select id="mv-j" value={v.journal_id} onChange={set('journal_id')}>
+          {ctx.journaux.map((j) => <option key={j.id} value={j.id}>{j.code} — {j.nom} ({m(j.solde)} FCFA)</option>)}</select></Champ>
         <Champ label="Rubrique" requis id="mv-r"><select id="mv-r" value={v.rubrique_code} onChange={set('rubrique_code')}>
           {rubriques.map((r) => <option key={r.code} value={r.code}>{r.intitule}</option>)}</select></Champ>
         <Champ label="Date" requis id="mv-d"><input id="mv-d" type="date" value={v.date} onChange={set('date')} /></Champ>
         <Champ label="Montant" requis id="mv-m" aide={`Au plus ${m(plafond)}`}><input id="mv-m" inputMode="decimal" value={v.montant} onChange={set('montant')} /></Champ>
         {decaissement && <Champ label="Bénéficiaire" pleine id="mv-b"><input id="mv-b" value={v.beneficiaire} maxLength={150} onChange={set('beneficiaire')} /></Champ>}
       </div>
+      {manque > 0 && (
+        <div className="fin-bandeau fin-bandeau-alerte">
+          <b>Solde insuffisant :</b> « {journal.nom} » n'a que {m(journal.solde)} FCFA ; il manque <b>{m(manque)} FCFA</b>.
+          La caisse doit d'abord être réapprovisionnée : le besoin est porté à la <b>Demande de fonds</b> de la période, que le directeur valide (il est prévenu par mail).
+          <div style={{ marginTop: 8 }}><button type="button" className="cm-btn cm-primaire cm-petit" disabled={enCours || !v.rubrique_code} onClick={solliciter}>Solliciter la Demande de fonds ({m(manque)} FCFA)</button></div>
+        </div>
+      )}
     </Tiroir>
   );
 }

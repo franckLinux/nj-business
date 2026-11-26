@@ -22,6 +22,9 @@ const { userHasPermission } = require('./permission.service');
 const { ErreurProjet, estOng } = require('./projets.service');
 const gestion = require('./projets_gestion.service');
 const pv = require('./pv_storage.service');
+const journalSvc = require('./journal.service');
+const hebdo = require('./budget_hebdo.service');
+const notifs = require('./projets_notifications.service');
 
 const T = sequelize.QueryTypes;
 const Q = (sql, replacements, transaction) => sequelize.query(sql, { replacements, type: T.SELECT, transaction });
@@ -128,7 +131,8 @@ const contexte = async (req) => {
     { t: req.tenantId, resp: p.responsable.length ? p.responsable : [0], chef: p.chef.length ? p.chef : [0] }) : [];
   // Pour la caissière : caisses et banques, rubriques de sortie (décaissement) et d'entrée (reliquat).
   const [journaux, rubriques] = p.caisse ? await Promise.all([
-    Q('SELECT id::text AS id, code, nom, type FROM journaux WHERE tenant_id = :t AND actif ORDER BY ordre, code', { t: req.tenantId }),
+    Q('SELECT id::text AS id, code, nom, type FROM journaux WHERE tenant_id = :t AND actif ORDER BY ordre, code', { t: req.tenantId })
+      .then((js) => Promise.all(js.map(async (j) => ({ ...j, solde: (await soldeDisponible(req.tenantId, j.id, new Date().toISOString().slice(0, 10))).solde })))),
     Q(`SELECT code, intitule, type FROM rubriques WHERE tenant_id = :t AND actif AND nature_recette IS NULL ORDER BY intitule`, { t: req.tenantId }),
   ]) : [[], []];
   const projets = await Q(`SELECT id, nom FROM activites WHERE tenant_id = :t AND type = 'projet' ORDER BY nom`, { t: req.tenantId });
@@ -190,11 +194,18 @@ const lire = async (req, id) => {
        FROM projet_depenses x LEFT JOIN users ud ON ud.id = x.declare_par LEFT JOIN users uc ON uc.id = x.controle_par
        LEFT JOIN projet_demande_lignes l ON l.id = x.ligne_id
       WHERE x.demande_id = :id ORDER BY x.date_depense, x.id`, { id: d.id });
+  const sollicitations = await Q(
+    `SELECT s.montant, s.solde_constate, s.mois, s.annee, s.semaine, s.demandee_le, j.nom AS caisse, u.username AS par,
+            coalesce(v.statut, 'en_attente') AS statut_demande_fonds
+       FROM projet_demande_sollicitations s JOIN journaux j ON j.id = s.journal_id LEFT JOIN users u ON u.id = s.demandee_par
+       LEFT JOIN budget_validation v ON v.tenant_id = s.tenant_id AND v.mois = s.mois AND v.annee = s.annee AND v.semaine IS NOT DISTINCT FROM s.semaine
+      WHERE s.demande_id = :id ORDER BY s.id`, { id: d.id });
   const f = former(d);
   const estDemandeur = d.demandeur_id === p.userId || p.responsable.includes(Number(d.activite_id));
   return {
     demande: f, lignes: lignes.map((l) => ({ ...l, quantite: n(l.quantite), jours: l.jours === null ? null : n(l.jours), prix_unitaire: n(l.prix_unitaire), montant: n(l.montant) })),
     mouvements: mouvements.map((m) => ({ ...m, entree: n(m.entree), sortie: n(m.sortie) })),
+    sollicitations: sollicitations.map((s) => ({ ...s, montant: n(s.montant), solde_constate: n(s.solde_constate) })),
     depenses: depenses.map((x) => ({ ...x, montant: n(x.montant), declare_par: undefined, de_moi: x.declare_par === p.userId })),
     actions: {
       modifier: d.statut === 'brouillon' && (d.demandeur_id === p.userId || p.chef.includes(Number(d.projet_id))),
@@ -210,6 +221,41 @@ const lire = async (req, id) => {
     },
   };
 };
+
+// ── Notifications (mail + application) à chaque étape ────────────────────────
+const annoncer = async (req, demandeId, quoi, extra = {}) => {
+  const [d] = await Q(`SELECT d.id, d.numero, d.objet, d.total, d.demandeur_id, d.motif, p.nom AS projet, p.chef_projet_id, a.nom AS activite,
+                              u.username AS demandeur
+                         FROM projet_demandes_fonds d JOIN activites p ON p.id = d.projet_id JOIN activites a ON a.id = d.activite_id
+                         LEFT JOIN users u ON u.id = d.demandeur_id WHERE d.id = :id`, { id: demandeId });
+  if (!d) return;
+  const ref = `${d.numero || 'Demande'} — ${d.projet} / ${d.activite}`;
+  const base = [`Demande : ${ref}.`, `Objet : ${d.objet}.`, `Montant : ${fmt(d.total)} FCFA.`];
+  const chemin = `/projets/demandes/${d.id}`;
+  const par = req.user?.username ? ` par ${req.user.username}` : '';
+  const E = {
+    soumise: { dest: { ids: [d.chef_projet_id] }, titre: `Demande de fonds à valider (chef de projet) — ${d.numero}`, lignes: [...base, `Envoyée${par}.`] },
+    validee_chef: { dest: { role: 'directeur' }, titre: `Demande de fonds à approuver — ${d.numero}`, lignes: [...base, d.chef_projet_id ? 'Validée par le chef de projet.' : 'Envoyée directement au directeur.'] },
+    approuvee: { dest: { permission: 'journal.create', ids: [d.demandeur_id] }, titre: `Demande de fonds approuvée — ${d.numero}`, lignes: [...base, `Approuvée${par} : les fonds peuvent être décaissés.`] },
+    brouillon: { dest: { ids: [d.demandeur_id] }, titre: `Demande de fonds renvoyée pour correction — ${d.numero}`, lignes: [...base, `Motif : ${d.motif}.`] },
+    rejetee: { dest: { ids: [d.demandeur_id] }, titre: `Demande de fonds rejetée — ${d.numero}`, lignes: [...base, `Motif : ${d.motif}.`] },
+    annulee: { dest: { ids: [d.demandeur_id, d.chef_projet_id] }, titre: `Demande de fonds annulée — ${d.numero}`, lignes: [...base, `Motif : ${d.motif}.`] },
+    decaissement: { dest: { ids: [d.demandeur_id] }, titre: `Fonds décaissés — ${d.numero}`, lignes: [...base, `Décaissé${par} : ${fmt(extra.montant)} FCFA. Déclarez ensuite vos dépenses avec les pièces.`] },
+    reversement: { dest: { ids: [d.demandeur_id] }, titre: `Reliquat encaissé — ${d.numero}`, lignes: [...base, `Reliquat reversé : ${fmt(extra.montant)} FCFA.`] },
+    depense: { dest: { permission: 'justificatifs.valider' }, titre: `Dépense à contrôler — ${d.numero}`, lignes: [...base, `Dépense déclarée${par} : ${extra.designation} (${fmt(extra.montant)} FCFA).`] },
+    depense_rejetee: { dest: { ids: [extra.declarant] }, titre: `Dépense rejetée — ${d.numero}`, lignes: [...base, `Dépense : ${extra.designation} (${fmt(extra.montant)} FCFA).`, `Motif : ${extra.motif}.`] },
+    sollicitation: { dest: { role: 'directeur', permission: 'budget.validate' }, titre: `Réapprovisionnement à valider — ${d.numero}`,
+      lignes: [...base, `La caisse « ${extra.caisse} » n'a que ${fmt(extra.solde)} FCFA : il manque ${fmt(extra.manque)} FCFA pour décaisser.`,
+        extra.figee ? `La Demande de fonds de ${extra.periode} est déjà validée : remettez-la « en attente » pour y ajouter ce besoin.`
+          : `Le besoin est ajouté à la Demande de fonds de ${extra.periode} (rubrique ${extra.rubrique}) : validez-la dans Caisse Pro → Demande de fonds.`] },
+  }[quoi];
+  if (!E) return;
+  notifs.plusTard({ tenantId: req.tenantId, auteurId: req.user?.id, destinataires: E.dest, type: `demande_fonds_${quoi}`, titre: E.titre,
+    lignes: E.lignes, chemin: quoi === 'sollicitation' ? '/appel-fonds' : chemin, refType: 'demande_fonds', refId: d.id });
+};
+// L'annonce ne doit jamais faire échouer l'action déjà enregistrée.
+const annoncerSansRisque = (req, id, quoi, extra) => annoncer(req, id, quoi, extra)
+  .catch((e) => console.warn(`[Gestion des activités] annonce « ${quoi} » :`, e.message));
 
 // ── Saisie de la demande ────────────────────────────────────────────────────
 const lireSaisie = async (req, p, b, transaction) => {
@@ -277,7 +323,7 @@ const creer = async (req) => {
     await ecrireLignes(t, req.tenantId, d.id, s.lignes);
     const r = b.soumettre ? await soumettreDans(t, req.tenantId, d, req.user.id) : { statut: 'brouillon' };
     return { id: String(d.id), ...r };
-  });
+  }).then((r) => { if (b.soumettre) annoncerSansRisque(req, r.id, r.statut); return r; });
 };
 
 const modifier = async (req, id) => {
@@ -293,7 +339,7 @@ const modifier = async (req, id) => {
     await ecrireLignes(t, req.tenantId, d.id, s.lignes);
     const r = b.soumettre ? await soumettreDans(t, req.tenantId, { ...d, projet_id: s.projetId }, req.user.id) : { statut: 'brouillon' };
     return { id: String(d.id), ...r };
-  });
+  }).then((r) => { if (b.soumettre) annoncerSansRisque(req, r.id, r.statut); return r; });
 };
 
 const supprimer = async (req, id) => {
@@ -313,8 +359,8 @@ const soumettre = async (req, id) => {
     const d = await charger(req.tenantId, id, t, true);
     if (d.statut !== 'brouillon') throw err(409, 'Seul un brouillon se soumet.', 'DEMANDE_CIRCUIT');
     if (d.demandeur_id !== p.userId && !p.chef.includes(Number(d.projet_id))) throw err(403, 'Vous n\'êtes pas l\'auteur de cette demande.', 'DEMANDE_NON_AUTORISEE');
-    return soumettreDans(t, req.tenantId, d, req.user.id);
-  });
+    return { id: d.id, ...(await soumettreDans(t, req.tenantId, d, req.user.id)) };
+  }).then((r) => { annoncerSansRisque(req, r.id, r.statut); return { numero: r.numero, statut: r.statut }; });
 };
 
 // Validation : chef de projet (soumise → validee_chef), puis directeur (validee_chef → approuvee).
@@ -325,21 +371,22 @@ const valider = async (req, id) => {
     if (d.statut === 'soumise') {
       if (!p.chef.includes(Number(d.projet_id))) throw err(403, 'Seul le chef de ce projet valide la demande à cette étape.', 'CHEF_SEUL');
       await X(`UPDATE projet_demandes_fonds SET statut = 'validee_chef', chef_par = :u, chef_le = NOW() WHERE id = :id`, { u: req.user.id, id: d.id }, t);
-      return { statut: 'validee_chef' };
+      return { statut: 'validee_chef', id: d.id };
     }
     if (d.statut === 'validee_chef') {
       if (!p.directeur) throw err(403, 'Seul le directeur approuve une demande de fonds.', 'DIRECTEUR_SEUL');
       await X(`UPDATE projet_demandes_fonds SET statut = 'approuvee', directeur_par = :u, directeur_le = NOW() WHERE id = :id`, { u: req.user.id, id: d.id }, t);
-      return { statut: 'approuvee' };
+      return { statut: 'approuvee', id: d.id };
     }
     throw err(409, 'Cette demande n\'attend pas de validation.', 'DEMANDE_CIRCUIT');
-  });
+  }).then((r) => { annoncerSansRisque(req, r.id, r.statut); return { statut: r.statut }; });
 };
 
 // Renvoi pour correction, rejet définitif, annulation : motif obligatoire.
 const decider = (action) => async (req, id) => {
   const p = await profil(req);
   const motif = texte(req.body?.motif, 500, 'Motif', { obligatoire: true });
+  const demandeId = idNum(id, 'Demande');
   return enTransaction(async (t) => {
     const d = await charger(req.tenantId, id, t, true);
     const valideur = (d.statut === 'soumise' && p.chef.includes(Number(d.projet_id))) || (d.statut === 'validee_chef' && p.directeur);
@@ -356,7 +403,7 @@ const decider = (action) => async (req, id) => {
     const statut = action === 'renvoyer' ? 'brouillon' : 'rejetee';
     await X('UPDATE projet_demandes_fonds SET statut = :statut, motif = :motif WHERE id = :id', { statut, motif, id: d.id }, t);
     return { statut };
-  });
+  }).then((r) => { annoncerSansRisque(req, demandeId, r.statut); return r; });
 };
 
 // ── Décaissement et reversement : la saisie de caisse elle-même ─────────────
@@ -381,6 +428,17 @@ const mouvement = (sens) => async (req, id, { creerMouvement }) => {
   if (!r || (sens === 'decaissement' ? r.type === 'entree' : r.type !== 'entree')) {
     throw err(400, sens === 'decaissement' ? 'Choisissez une rubrique de dépense.' : 'Choisissez une rubrique d\'entrée pour le reversement.', 'RUBRIQUE');
   }
+  // Décision de Franck (26/11) : on regarde le solde AVANT de décaisser. Une caisse
+  // (hors banque) qui n'a pas l'argent ne décaisse pas : le manque passe par la
+  // Demande de fonds de Caisse Pro (voir solliciter).
+  if (sens === 'decaissement') {
+    const etat = await soldeDisponible(req.tenantId, journalId, jour);
+    if (!etat.banque && montant > etat.solde + 0.004) {
+      throw Object.assign(err(409, `Solde insuffisant dans « ${etat.nom} » : ${fmt(etat.solde)} FCFA disponibles pour ${fmt(montant)} FCFA à décaisser `
+        + `(il manque ${fmt(montant - etat.solde)} FCFA). Sollicitez la Demande de fonds pour réapprovisionner la caisse.`, 'SOLDE_INSUFFISANT'),
+      { details: { disponible: etat.solde, manque: Math.round((montant - Math.max(etat.solde, 0)) * 100) / 100, journal_id: String(journalId) } });
+    }
+  }
   const [a] = await Q('SELECT a.nom, pr.nom AS projet FROM activites a JOIN activites pr ON pr.id = a.projet_id WHERE a.id = :a', { a: d.activite_id });
   const [u] = await Q('SELECT username FROM users WHERE id = :u', { u: d.demandeur_id });
   const corps = {
@@ -393,7 +451,93 @@ const mouvement = (sens) => async (req, id, { creerMouvement }) => {
   const res = await creerMouvement(corps);
   if (res.status >= 400) throw err(res.status, res.data?.error || 'Saisie refusée.', res.data?.code || 'SAISIE_CAISSE');
   if (res.data?.en_attente) throw err(409, 'La sortie a été mise en attente du directeur au lieu d\'être enregistrée.', 'EN_ATTENTE');
+  annoncerSansRisque(req, d.id, sens, { montant });
   return { journal_id: String(res.data.id), numero: res.data.numero, montant };
+};
+
+// Solde d'une caisse ou d'une banque à la date du mouvement (mois de la date).
+const MOIS_SOLDE = ['Janvier', 'Fevrier', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Aout', 'Septembre', 'Octobre', 'Novembre', 'Decembre'];
+const soldeDisponible = async (tenantId, journalId, jour) => {
+  const [j] = await Q('SELECT id, nom, type FROM journaux WHERE id = :j AND tenant_id = :t', { j: journalId, t: tenantId });
+  if (!j) throw err(400, 'Caisse ou banque introuvable.', 'JOURNAL');
+  const s = await journalSvc.soldeJournal(tenantId, MOIS_SOLDE[Number(jour.slice(5, 7)) - 1], Number(jour.slice(0, 4)), journalId);
+  return { nom: j.nom, banque: j.type === 'banque', solde: Math.round(n(s.solde) * 100) / 100 };
+};
+
+/**
+ * Le solde ne suffit pas : le manque est porté à la Demande de fonds de Caisse Pro
+ * de la période en cours (ligne de « dépenses en attente » sur la rubrique du
+ * décaissement), que le directeur valide comme aujourd'hui. Mail au directeur.
+ */
+const solliciter = async (req, id) => {
+  const p = await profil(req);
+  if (!p.caisse) throw err(403, 'Permission requise : saisir en caisse.', 'CAISSE_SEULE');
+  const b = req.body || {};
+  const d = await charger(req.tenantId, id);
+  if (d.statut !== 'approuvee') throw err(409, 'La demande n\'est pas approuvée.', 'DEMANDE_NON_APPROUVEE');
+  const [c] = await Q('SELECT * FROM projet_demande_chiffres(:id)', { id: d.id });
+  const reste = n(d.total) - n(c.decaisse);
+  const voulu = b.montant === undefined || b.montant === '' ? reste : Math.min(nombre(b.montant, 'Montant', { min: 0, strict: true }), reste);
+  const jour = new Date().toISOString().slice(0, 10);
+  const journalId = idNum(b.journal_id, 'Caisse');
+  const etat = await soldeDisponible(req.tenantId, journalId, jour);
+  if (etat.banque) throw err(400, 'Une banque n\'est pas réapprovisionnée par la Demande de fonds : choisissez la caisse.', 'JOURNAL');
+  const manque = Math.round((voulu - Math.max(etat.solde, 0)) * 100) / 100;
+  if (manque <= 0) throw err(409, `La caisse « ${etat.nom} » a assez d'argent (${fmt(etat.solde)} FCFA) : décaissez directement.`, 'SOLDE_SUFFISANT');
+  const rubrique = texte(b.rubrique_code, 40, 'Rubrique', { obligatoire: true });
+  const [r] = await Q('SELECT type FROM rubriques WHERE tenant_id = :t AND code = :c', { t: req.tenantId, c: rubrique });
+  if (!r || r.type === 'entree') throw err(400, 'Choisissez la rubrique de dépense du décaissement.', 'RUBRIQUE');
+  const mois = MOIS_SOLDE[Number(jour.slice(5, 7)) - 1]; const annee = Number(jour.slice(0, 4));
+  const semaine = (await hebdo.estHebdo(req.tenantId, mois, annee)) ? hebdo.semaineDeDate(jour).semaine : null;
+  const periode = semaine ? `la semaine ${semaine} de ${mois} ${annee}` : `${mois} ${annee}`;
+  const [v] = await Q(`SELECT statut FROM budget_validation WHERE tenant_id = :t AND mois = :mois AND annee = :annee AND semaine IS NOT DISTINCT FROM :semaine`,
+    { t: req.tenantId, mois, annee, semaine });
+  if (v?.statut === 'valide') {
+    annoncerSansRisque(req, d.id, 'sollicitation', { caisse: etat.nom, solde: etat.solde, manque, periode, rubrique, figee: true });
+    throw err(409, `La Demande de fonds de ${periode} est déjà validée : elle ne peut plus recevoir ce besoin. `
+      + 'Le directeur vient d\'être prévenu ; il doit la remettre « en attente » pour l\'y ajouter.', 'DEMANDE_FONDS_VALIDEE');
+  }
+  const res = await enTransaction(async (t) => {
+    await Q('SELECT pg_advisory_xact_lock(hashtext(:k))', { k: `depenses_attente:${req.tenantId}:${mois}:${annee}:${semaine || 0}` }, t);
+    const libelle = `Réappro. caisse ${etat.nom} — ${d.numero}`;
+    const [ex] = await Q(`SELECT id FROM depenses_attente WHERE tenant_id = :t AND mois = :mois AND annee = :annee AND coalesce(semaine, 0) = :s AND rubrique_code = :rub FOR UPDATE`,
+      { t: req.tenantId, mois, annee, s: semaine || 0, rub: rubrique }, t);
+    let ligneId;
+    if (ex) {
+      await X(`UPDATE depenses_attente SET montant = coalesce(montant, 0) + :m, intitule = left(intitule || ' ; ' || :lib, 250) WHERE id = :id`,
+        { m: manque, lib: libelle, id: ex.id }, t);
+      ligneId = ex.id;
+    } else {
+      const [[l]] = await X(`INSERT INTO depenses_attente (tenant_id, mois, annee, semaine, rubrique_code, intitule, montant)
+                             VALUES (:t, :mois, :annee, :semaine, :rub, :lib, :m) RETURNING id`,
+      { t: req.tenantId, mois, annee, semaine, rub: rubrique, lib: libelle, m: manque }, t);
+      ligneId = l.id;
+    }
+    await X(`INSERT INTO projet_demande_sollicitations (tenant_id, demande_id, journal_id, rubrique_code, montant, solde_constate, mois, annee, semaine, depense_attente_id, demandee_par)
+             VALUES (:t, :d, :j, :rub, :m, :solde, :mois, :annee, :semaine, :ligne, :u)`,
+    { t: req.tenantId, d: d.id, j: journalId, rub: rubrique, m: manque, solde: etat.solde, mois, annee, semaine, ligne: ligneId, u: req.user.id }, t);
+    return { manque, mois, annee, semaine, periode, solde: etat.solde };
+  });
+  annoncerSansRisque(req, d.id, 'sollicitation', { caisse: etat.nom, solde: etat.solde, manque, periode, rubrique });
+  return res;
+};
+
+/** Appelé quand le directeur décide de la Demande de fonds d'une période (budget.controller). */
+const annoncerDecisionDemandeFonds = async ({ tenantId, user, mois, annee, semaine, statut }) => {
+  const lignes = await Q(`SELECT s.demande_id, s.montant, d.numero, d.demandeur_id, j.nom AS caisse
+                            FROM projet_demande_sollicitations s JOIN projet_demandes_fonds d ON d.id = s.demande_id
+                            JOIN journaux j ON j.id = s.journal_id
+                           WHERE s.tenant_id = :t AND s.mois = :mois AND s.annee = :annee AND s.semaine IS NOT DISTINCT FROM :semaine`,
+  { t: tenantId, mois, annee: Number(annee), semaine: semaine || null });
+  if (!lignes.length || !['valide', 'rejete'].includes(statut)) return 0;
+  const periode = semaine ? `la semaine ${semaine} de ${mois} ${annee}` : `${mois} ${annee}`;
+  const valide = statut === 'valide';
+  notifs.plusTard({ tenantId, auteurId: user?.id, destinataires: { permission: 'journal.create', ids: lignes.map((l) => l.demandeur_id) },
+    type: 'demande_fonds_reappro', titre: `Demande de fonds de ${periode} ${valide ? 'validée' : 'rejetée'}`,
+    lignes: [valide ? 'Le directeur a validé la Demande de fonds : réapprovisionnez la caisse, puis décaissez.' : 'Le directeur a rejeté la Demande de fonds : les décaissements ci-dessous restent en attente de fonds.',
+      ...lignes.map((l) => `${l.numero} : ${fmt(l.montant)} FCFA pour la caisse « ${l.caisse} ».`)],
+    chemin: '/projets/demandes?vue=a_decaisser', refType: 'demande_fonds', refId: lignes[0].demande_id });
+  return lignes.length;
 };
 
 /** Appelé par la saisie de caisse (journal.controller) quand le corps porte demande_fonds_id. */
@@ -439,7 +583,7 @@ const declarer = async (req, id) => {
     await X('UPDATE projet_depenses SET fichier_chemin = :c, fichier_nom = :nom, mime = :mime, sha256 = :sha WHERE id = :id',
       { c: chemin, nom: fichier.nom, mime: fichier.mime, sha: fichier.sha256, id: x.id }, t);
     return { id: String(x.id) };
-  });
+  }).then((r) => { annoncerSansRisque(req, d.id, 'depense', { designation: String(b.designation).trim(), montant: Number(String(b.montant).replace(',', '.')) }); return r; });
 };
 
 const chargerDepense = async (req, p, id, transaction, verrou = false) => {
@@ -474,7 +618,10 @@ const controler = async (req, id) => {
     if (x.declare_par === p.userId) throw err(403, 'Vous ne contrôlez pas une dépense que vous avez déclarée.', 'AUTOCONTROLE');
     await X('UPDATE projet_depenses SET statut = :s, motif = :m, controle_par = :u, controle_le = NOW() WHERE id = :id',
       { s: decision, m: motif, u: req.user.id, id: x.id }, t);
-    return { statut: decision };
+    return { statut: decision, x };
+  }).then(({ statut, x }) => {
+    if (statut === 'rejetee') annoncerSansRisque(req, x.demande_id, 'depense_rejetee', { declarant: x.declare_par, designation: x.designation, montant: x.montant, motif });
+    return { statut };
   });
 };
 
@@ -633,7 +780,7 @@ const compteurs = async (req, d) => {
 module.exports = {
   compteurs, traduire, contexte, lister, lire, creer, modifier, supprimer, soumettre, valider,
   renvoyer: decider('renvoyer'), rejeter: decider('rejeter'), annuler: decider('annuler'),
-  decaisser: mouvement('decaissement'), reverser: mouvement('reversement'),
+  decaisser: mouvement('decaissement'), reverser: mouvement('reversement'), solliciter, annoncerDecisionDemandeFonds,
   lienCaisse, relierMouvement,
   declarer, retirerDepense, controler, listerDepenses, fichierDepense, rapport, rapportPdf,
 };

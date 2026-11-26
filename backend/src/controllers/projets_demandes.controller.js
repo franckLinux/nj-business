@@ -7,7 +7,7 @@ const journalCtrl = require('./journal.controller');
 
 const repondre = (res, err, nom) => {
   const e = svc.traduire(err);
-  if (e instanceof ErreurProjet) return res.status(e.status).json({ error: e.message, code: e.code });
+  if (e instanceof ErreurProjet) return res.status(e.status).json({ error: e.message, code: e.code, ...(e.details ? { details: e.details } : {}) });
   console.error(`[Gestion des activités] ${nom} :`, err.message);
   return res.status(500).json({ error: 'Erreur serveur.' });
 };
@@ -44,6 +44,7 @@ module.exports = {
   annuler:   traiter('annulation de demande', (req) => svc.annuler(req, req.params.id)),
   decaisser: traiter('décaissement', (req) => svc.decaisser(req, req.params.id, { creerMouvement: creerMouvementPour(req) }), 201),
   reverser:  traiter('reliquat', (req) => svc.reverser(req, req.params.id, { creerMouvement: creerMouvementPour(req) }), 201),
+  solliciter: traiter('sollicitation de la demande de fonds', (req) => svc.solliciter(req, req.params.id), 201),
   declarer:  traiter('déclaration de dépense', (req) => svc.declarer(req, req.params.id), 201),
   depenses:  traiter('liste des dépenses', (req) => svc.listerDepenses(req)),
   retirerDepense: traiter('retrait de dépense', (req) => svc.retirerDepense(req, req.params.id)),

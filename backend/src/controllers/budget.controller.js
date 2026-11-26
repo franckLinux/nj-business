@@ -219,6 +219,10 @@ const setValidation = async (req, res) => {
       rejete: `Demande de fonds rejetée : aucun budget ouvert pour ${pour}.`,
       en_attente: `Demande de fonds remise en attente : le budget de ${pour} est suspendu et les prévisions sont de nouveau modifiables.`,
     };
+    // Gestion des activités (085) : la caisse et les demandeurs dont le réapprovisionnement
+    // attendait cette Demande de fonds sont prévenus (mail + application).
+    require('../services/projets_demandes.service').annoncerDecisionDemandeFonds({ tenantId: req.tenantId, user: req.user, mois, annee, semaine, statut })
+      .catch((e) => console.warn('[Budget] annonce aux demandes de fonds d\'activité :', e.message));
     res.json({ message: messages[statut] || `Budget ${statut}.`, mois_applic: cible?.mois_applic || null, annee_applic: cible?.annee_applic || null, semaine });
   } catch (err) {
     if (refusHebdo(res, err)) return;
