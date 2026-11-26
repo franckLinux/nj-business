@@ -164,7 +164,8 @@ const createMouvement = async (req, res) => {
   let lienDemande = null;
   if (req.body.demande_fonds_id) {
     try {
-      lienDemande = await demandesSvc.lienCaisse(req.tenantId, req.body.demande_fonds_id, { entree, sortie });
+      lienDemande = await demandesSvc.lienCaisse(req.tenantId, req.body.demande_fonds_id,
+        { entree, sortie, ordreId: req.body.ordre_decaissement_id, userId: req.user.id });
       activiteId = lienDemande.activiteId;
     } catch (e) {
       if (e instanceof projetsSvc.ErreurProjet) return res.status(e.status).json({ error: e.message, code: e.code });

@@ -39,12 +39,12 @@ export default function ReinitialisationPage({ token }) {
         <div className="login-brand">
           <div className="brand-icon">₣</div>
           <h1>NJ Caisse Pro</h1>
-          <p>Réinitialisation du mot de passe</p>
+          <p>{info?.invitation ? 'Bienvenue — création du mot de passe' : 'Réinitialisation du mot de passe'}</p>
         </div>
         <div className="login-card">
           {fini !== null ? (
             <>
-              <h2>Mot de passe modifié ✓</h2>
+              <h2>{info?.invitation ? 'Mot de passe créé ✓' : 'Mot de passe modifié ✓'}</h2>
               <p style={{ fontSize: 14 }}>Vous pouvez vous connecter avec votre nouveau mot de passe{fini ? <> (identifiant : <strong>{fini}</strong>)</> : ''}.</p>
               <button className="btn-primary" onClick={versConnexion}>Se connecter</button>
             </>
@@ -56,7 +56,7 @@ export default function ReinitialisationPage({ token }) {
             </>
           ) : (
             <>
-              <h2>Nouveau mot de passe</h2>
+              <h2>{info.invitation ? 'Créez votre mot de passe' : 'Nouveau mot de passe'}</h2>
               <p style={{ fontSize: 13 }}>Compte : <strong>{info.identifiant}</strong></p>
               {erreur && <div className="alert-err">{erreur}</div>}
               <label>Nouveau mot de passe</label>

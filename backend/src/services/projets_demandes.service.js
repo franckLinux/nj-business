@@ -85,6 +85,9 @@ const profil = async (req) => {
 const voitTout = (p) => p.voirTous || p.directeur || p.comptable;
 const peutVoir = (p, dem) => voitTout(p) || p.chef.includes(Number(dem.projet_id)) || p.responsable.includes(Number(dem.activite_id))
   || dem.demandeur_id === p.userId || (p.caisse && dem.statut === 'approuvee');
+// Décision de Franck (26/11) : le chef de projet (ou le directeur) initie le décaissement ;
+// la caisse le valide ensuite (ordre de décaissement, migration 086).
+const peutInitier = (p, d) => p.directeur || p.chef.includes(Number(d.projet_id));
 const peutDemander = (p, projetId, activiteId) => p.responsable.includes(Number(activiteId)) || p.chef.includes(Number(projetId));
 
 // ── Lecture ─────────────────────────────────────────────────────────────────
@@ -94,7 +97,8 @@ const SELECT_DEMANDE = `
          p.nom AS projet, p.chef_projet_id, a.nom AS activite, a.responsable_id,
          ud.username AS demandeur, uc.username AS chef_nom, ux.username AS directeur_nom, uch.username AS chef_projet_nom,
          c.decaisse, c.reverse, c.depenses, c.depenses_validees,
-         (SELECT count(*)::int FROM projet_depenses x WHERE x.demande_id = d.id AND x.statut = 'declaree') AS depenses_a_controler
+         (SELECT count(*)::int FROM projet_depenses x WHERE x.demande_id = d.id AND x.statut = 'declaree') AS depenses_a_controler,
+         (SELECT coalesce(sum(o.montant), 0) FROM projet_ordres_decaissement o WHERE o.demande_id = d.id AND o.statut = 'en_attente') AS en_attente_caisse
     FROM projet_demandes_fonds d
     JOIN activites p ON p.id = d.projet_id JOIN activites a ON a.id = d.activite_id
     LEFT JOIN users ud ON ud.id = d.demandeur_id LEFT JOIN users uc ON uc.id = d.chef_par
@@ -106,7 +110,7 @@ const LIBELLES = { brouillon: 'Brouillon', soumise: 'Chez le chef de projet', va
 const etat = (d) => {
   if (d.statut !== 'approuvee') return LIBELLES[d.statut];
   const dec = n(d.decaisse); const tot = n(d.total);
-  if (dec <= 0) return 'À décaisser';
+  if (dec <= 0) return n(d.en_attente_caisse) > 0 ? 'Sortie à valider par la caisse' : 'À décaisser';
   const reste = dec - n(d.depenses) - n(d.reverse);
   if (dec < tot) return reste > 0 ? 'Décaissée en partie' : 'Décaissée en partie, justifiée';
   if (reste > 0) return 'À justifier';
@@ -116,6 +120,9 @@ const etat = (d) => {
 const former = (d) => ({
   ...d, total: n(d.total), decaisse: n(d.decaisse), reverse: n(d.reverse), depenses: n(d.depenses), depenses_validees: n(d.depenses_validees),
   reste_a_decaisser: d.statut === 'approuvee' ? Math.max(n(d.total) - n(d.decaisse), 0) : 0,
+  en_attente_caisse: n(d.en_attente_caisse),
+  // Ce que le chef de projet peut encore envoyer à la caisse (ordres en attente déduits).
+  reste_a_initier: d.statut === 'approuvee' ? Math.max(n(d.total) - n(d.decaisse) - n(d.en_attente_caisse), 0) : 0,
   reste_a_justifier: Math.max(n(d.decaisse) - n(d.depenses) - n(d.reverse), 0),
   etat: etat(d),
 });
@@ -155,7 +162,9 @@ const lister = async (req) => {
     || (d.statut === 'validee_chef' && p.directeur);
   const filtres = {
     a_valider: aValider,
-    a_decaisser: (d) => d.statut === 'approuvee' && d.reste_a_decaisser > 0,
+    // Caisse : sorties initiées par le chef de projet, à valider. Chef : reste à envoyer à la caisse.
+    a_decaisser: (d) => d.statut === 'approuvee' && d.en_attente_caisse > 0,
+    a_initier: (d) => d.statut === 'approuvee' && d.reste_a_initier > 0 && peutInitier(p, d),
     a_justifier: (d) => d.statut === 'approuvee' && d.reste_a_justifier > 0,
     mes: (d) => d.demandeur_id === p.userId || p.responsable.includes(Number(d.activite_id)),
   };
@@ -164,6 +173,7 @@ const lister = async (req) => {
     compteurs: {
       a_valider: lignes.filter(aValider).length,
       a_decaisser: lignes.filter(filtres.a_decaisser).length,
+      a_initier: lignes.filter(filtres.a_initier).length,
       a_justifier: lignes.filter(filtres.a_justifier).length,
     },
   };
@@ -200,11 +210,14 @@ const lire = async (req, id) => {
        FROM projet_demande_sollicitations s JOIN journaux j ON j.id = s.journal_id LEFT JOIN users u ON u.id = s.demandee_par
        LEFT JOIN budget_validation v ON v.tenant_id = s.tenant_id AND v.mois = s.mois AND v.annee = s.annee AND v.semaine IS NOT DISTINCT FROM s.semaine
       WHERE s.demande_id = :id ORDER BY s.id`, { id: d.id });
+  const ordres = await Q(`${SELECT_ORDRE} WHERE o.demande_id = :id ORDER BY o.id`, { id: d.id });
   const f = former(d);
   const estDemandeur = d.demandeur_id === p.userId || p.responsable.includes(Number(d.activite_id));
   return {
     demande: f, lignes: lignes.map((l) => ({ ...l, quantite: n(l.quantite), jours: l.jours === null ? null : n(l.jours), prix_unitaire: n(l.prix_unitaire), montant: n(l.montant) })),
     mouvements: mouvements.map((m) => ({ ...m, entree: n(m.entree), sortie: n(m.sortie) })),
+    ordres: ordres.map((o) => ({ ...formerOrdre(o), de_moi: o.initie_par === p.userId,
+      a_moi_de_valider: o.statut === 'en_attente' && p.caisse && o.initie_par !== p.userId })),
     sollicitations: sollicitations.map((s) => ({ ...s, montant: n(s.montant), solde_constate: n(s.solde_constate) })),
     depenses: depenses.map((x) => ({ ...x, montant: n(x.montant), declare_par: undefined, de_moi: x.declare_par === p.userId })),
     actions: {
@@ -214,7 +227,8 @@ const lire = async (req, id) => {
       renvoyer: (d.statut === 'soumise' && p.chef.includes(Number(d.projet_id))) || (d.statut === 'validee_chef' && p.directeur),
       annuler: (['brouillon', 'soumise', 'validee_chef'].includes(d.statut) && (d.demandeur_id === p.userId || p.directeur))
         || (d.statut === 'approuvee' && p.directeur && f.decaisse === 0),
-      decaisser: d.statut === 'approuvee' && p.caisse && f.reste_a_decaisser > 0,
+      initier: d.statut === 'approuvee' && peutInitier(p, d) && f.reste_a_initier > 0,
+      decaisser: d.statut === 'approuvee' && p.caisse && ordres.some((o) => o.statut === 'en_attente' && o.initie_par !== p.userId),
       reverser: d.statut === 'approuvee' && p.caisse && f.reste_a_justifier > 0,
       declarer: d.statut === 'approuvee' && estDemandeur && f.reste_a_justifier > 0,
       controler: p.comptable,
@@ -240,7 +254,14 @@ const annoncer = async (req, demandeId, quoi, extra = {}) => {
     brouillon: { dest: { ids: [d.demandeur_id] }, titre: `Demande de fonds renvoyée pour correction — ${d.numero}`, lignes: [...base, `Motif : ${d.motif}.`] },
     rejetee: { dest: { ids: [d.demandeur_id] }, titre: `Demande de fonds rejetée — ${d.numero}`, lignes: [...base, `Motif : ${d.motif}.`] },
     annulee: { dest: { ids: [d.demandeur_id, d.chef_projet_id] }, titre: `Demande de fonds annulée — ${d.numero}`, lignes: [...base, `Motif : ${d.motif}.`] },
-    decaissement: { dest: { ids: [d.demandeur_id] }, titre: `Fonds décaissés — ${d.numero}`, lignes: [...base, `Décaissé${par} : ${fmt(extra.montant)} FCFA. Déclarez ensuite vos dépenses avec les pièces.`] },
+    ordre: { dest: { permission: 'journal.create' }, titre: `Sortie de caisse à valider — ${d.numero}`,
+      lignes: [...base, `Décaissement initié${par} : ${fmt(extra.montant)} FCFA${extra.beneficiaire ? ` pour ${extra.beneficiaire}` : ''}.`,
+        'Remettez les fonds, validez la sortie dans Caisse Pro → Fonds à décaisser, puis imprimez le bon de sortie à faire signer.'] },
+    ordre_refuse: { dest: { ids: [extra.initiateur] }, titre: `Sortie refusée par la caisse — ${d.numero}`,
+      lignes: [...base, `Ordre de ${fmt(extra.montant)} FCFA refusé${par}.`, `Motif : ${extra.motif}.`] },
+    ordre_annule: { dest: { permission: 'journal.create', ids: [extra.initiateur] }, titre: `Ordre de décaissement retiré — ${d.numero}`,
+      lignes: [...base, `Ordre de ${fmt(extra.montant)} FCFA retiré${par} : la caisse ne doit plus le payer.`, `Motif : ${extra.motif}.`] },
+    decaissement: { dest: { ids: [d.demandeur_id, extra.initiateur] }, titre: `Fonds décaissés — ${d.numero}`, lignes: [...base, `Décaissé${par} : ${fmt(extra.montant)} FCFA. Déclarez ensuite vos dépenses avec les pièces.`] },
     reversement: { dest: { ids: [d.demandeur_id] }, titre: `Reliquat encaissé — ${d.numero}`, lignes: [...base, `Reliquat reversé : ${fmt(extra.montant)} FCFA.`] },
     depense: { dest: { permission: 'justificatifs.valider' }, titre: `Dépense à contrôler — ${d.numero}`, lignes: [...base, `Dépense déclarée${par} : ${extra.designation} (${fmt(extra.montant)} FCFA).`] },
     depense_rejetee: { dest: { ids: [extra.declarant] }, titre: `Dépense rejetée — ${d.numero}`, lignes: [...base, `Dépense : ${extra.designation} (${fmt(extra.montant)} FCFA).`, `Motif : ${extra.motif}.`] },
@@ -397,6 +418,8 @@ const decider = (action) => async (req, id) => {
       }
       await X(`UPDATE projet_demandes_fonds SET statut = 'annulee', motif = :motif, annule_par = :u, annule_le = NOW() WHERE id = :id`,
         { motif, u: req.user.id, id: d.id }, t);
+      await X(`UPDATE projet_ordres_decaissement SET statut = 'annule', motif = left('Demande annulée : ' || :motif, 300), traite_par = :u, traite_le = NOW()
+                WHERE demande_id = :id AND statut = 'en_attente'`, { motif, u: req.user.id, id: d.id }, t);
       return { statut: 'annulee' };
     }
     if (!valideur) throw err(403, 'Seul le valideur de l\'étape en cours peut renvoyer ou rejeter la demande.', 'DEMANDE_NON_AUTORISEE');
@@ -417,10 +440,22 @@ const mouvement = (sens) => async (req, id, { creerMouvement }) => {
   const d = await charger(req.tenantId, id);
   if (d.statut !== 'approuvee') throw err(409, 'La demande n\'est pas approuvée.', 'DEMANDE_NON_APPROUVEE');
   const [c] = await Q('SELECT * FROM projet_demande_chiffres(:id)', { id: d.id });
-  const plafond = sens === 'decaissement' ? n(d.total) - n(c.decaisse) : n(c.decaisse) - n(c.depenses) - n(c.reverse);
-  const montant = b.montant === undefined || b.montant === '' ? plafond : nombre(b.montant, 'Montant', { min: 0, strict: true });
-  if (plafond <= 0) throw err(409, sens === 'decaissement' ? 'Tout est déjà décaissé.' : 'Aucun reliquat à reverser.', 'RIEN_A_FAIRE');
-  if (montant > plafond) throw err(409, `${sens === 'decaissement' ? 'Reste à décaisser' : 'Reliquat'} : ${fmt(plafond)} FCFA.`, 'PLAFOND');
+  // Décaissement : la caisse exécute un ordre initié par le chef de projet (086),
+  // pour son montant exact ; elle ne décaisse jamais de sa propre initiative.
+  let ordre = null;
+  if (sens === 'decaissement') {
+    if (!b.ordre_id) throw err(409, 'Le décaissement est initié par le chef de projet : validez un ordre de décaissement en attente.', 'ORDRE_REQUIS');
+    [ordre] = await Q(`${SELECT_ORDRE} WHERE o.id = :o AND o.tenant_id = :t`, { o: idNum(b.ordre_id, 'Ordre de décaissement'), t: req.tenantId });
+    if (!ordre || ordre.demande_id !== String(d.id)) throw err(404, 'Ordre de décaissement introuvable.', 'ORDRE_INTROUVABLE');
+    if (ordre.statut !== 'en_attente') throw err(409, 'Cet ordre de décaissement a déjà été traité.', 'ORDRE_TRAITE');
+    if (ordre.initie_par === req.user.id) {
+      throw err(403, 'Vous avez initié ce décaissement : une autre personne de la caisse doit valider la sortie.', 'MEME_PERSONNE');
+    }
+  }
+  const plafond = sens === 'decaissement' ? n(ordre.montant) : n(c.decaisse) - n(c.depenses) - n(c.reverse);
+  const montant = sens === 'decaissement' || b.montant === undefined || b.montant === '' ? plafond : nombre(b.montant, 'Montant', { min: 0, strict: true });
+  if (plafond <= 0) throw err(409, 'Aucun reliquat à reverser.', 'RIEN_A_FAIRE');
+  if (montant > plafond) throw err(409, `Reliquat : ${fmt(plafond)} FCFA.`, 'PLAFOND');
   const jour = dateIso(b.date, 'Date') || new Date().toISOString().slice(0, 10);
   const journalId = idNum(b.journal_id, 'Caisse ou banque');
   const rubrique = texte(b.rubrique_code, 40, 'Rubrique', { obligatoire: true });
@@ -444,15 +479,141 @@ const mouvement = (sens) => async (req, id, { creerMouvement }) => {
   const corps = {
     date: jour, mois: MOIS[Number(jour.slice(5, 7)) - 1], annee: Number(jour.slice(0, 4)), journal_id: journalId, rubrique_code: rubrique,
     intitule: `${sens === 'decaissement' ? 'Fonds' : 'Reliquat'} ${d.numero} — ${a.projet} / ${a.nom}`.slice(0, 200),
-    objet: d.objet.slice(0, 200), beneficiaire: texte(b.beneficiaire, 150, 'Bénéficiaire') || u?.username || '',
-    activite_id: d.activite_id, demande_fonds_id: String(d.id),
+    objet: d.objet.slice(0, 200), beneficiaire: texte(b.beneficiaire, 150, 'Bénéficiaire') || ordre?.beneficiaire || u?.username || '',
+    activite_id: d.activite_id, demande_fonds_id: String(d.id), ...(ordre ? { ordre_decaissement_id: ordre.id } : {}),
     ...(sens === 'decaissement' ? { sortie: montant, entree: 0 } : { entree: montant, sortie: 0 }),
   };
   const res = await creerMouvement(corps);
   if (res.status >= 400) throw err(res.status, res.data?.error || 'Saisie refusée.', res.data?.code || 'SAISIE_CAISSE');
   if (res.data?.en_attente) throw err(409, 'La sortie a été mise en attente du directeur au lieu d\'être enregistrée.', 'EN_ATTENTE');
-  annoncerSansRisque(req, d.id, sens, { montant });
-  return { journal_id: String(res.data.id), numero: res.data.numero, montant };
+  annoncerSansRisque(req, d.id, sens, { montant, initiateur: ordre?.initie_par });
+  return { journal_id: String(res.data.id), numero: res.data.numero, montant, ...(ordre ? { ordre_id: ordre.id } : {}) };
+};
+
+// ── Ordres de décaissement (086) ────────────────────────────────────────────
+// Le chef de projet (ou le directeur) initie ; le paiement reste en attente ;
+// la caisse remet les fonds et valide la sortie (mouvement du journal à son nom),
+// puis imprime le bon de sortie signé par le bénéficiaire.
+const SELECT_ORDRE = `
+  SELECT o.id::text AS id, o.demande_id::text AS demande_id, o.montant, o.beneficiaire, o.instructions, o.statut, o.initie_le, o.traite_le,
+         o.motif, o.journal_id::text AS journal_id, o.initie_par, o.traite_par, ui.username AS initie_par_nom, ut.username AS traite_par_nom,
+         d.numero, d.objet, d.projet_id, d.activite_id, d.demandeur_id, p.nom AS projet, a.nom AS activite, ud.username AS demandeur,
+         j.numero AS mouvement_numero, j.date::text AS mouvement_date, coalesce(j.annule, false) AS mouvement_annule,
+         jx.nom AS caisse, jx.code AS caisse_code
+    FROM projet_ordres_decaissement o JOIN projet_demandes_fonds d ON d.id = o.demande_id
+    JOIN activites p ON p.id = d.projet_id JOIN activites a ON a.id = d.activite_id
+    LEFT JOIN users ui ON ui.id = o.initie_par LEFT JOIN users ut ON ut.id = o.traite_par LEFT JOIN users ud ON ud.id = d.demandeur_id
+    LEFT JOIN journal j ON j.id = o.journal_id LEFT JOIN journaux jx ON jx.id = j.journal_id`;
+const numeroOrdre = (id) => `OD-${String(id).padStart(5, '0')}`;
+const formerOrdre = (o) => {
+  const { initie_par: _i, traite_par: _t, demandeur_id: _d, ...reste } = o;
+  return { ...reste, montant: n(o.montant), numero_ordre: numeroOrdre(o.id) };
+};
+const peutVoirOrdre = (p, o) => p.caisse || voitTout(p) || p.chef.includes(Number(o.projet_id))
+  || p.responsable.includes(Number(o.activite_id)) || o.demandeur_id === p.userId || o.initie_par === p.userId;
+const chargerOrdre = async (req, p, id) => {
+  const [o] = await Q(`${SELECT_ORDRE} WHERE o.id = :id AND o.tenant_id = :t`, { id: idNum(id, 'Ordre de décaissement'), t: req.tenantId });
+  if (!o || !peutVoirOrdre(p, o)) throw err(404, 'Ordre de décaissement introuvable.', 'ORDRE_INTROUVABLE');
+  return o;
+};
+
+const initier = async (req, id) => {
+  const p = await profil(req);
+  const b = req.body || {};
+  const beneficiaire = texte(b.beneficiaire, 150, 'Bénéficiaire');
+  const instructions = texte(b.instructions, 300, 'Instructions');
+  const r = await enTransaction(async (t) => {
+    const d = await charger(req.tenantId, id, t, true);
+    if (!peutInitier(p, d)) throw err(403, 'Seul le chef de projet (ou le directeur) initie le décaissement.', 'CHEF_SEUL');
+    if (d.statut !== 'approuvee') throw err(409, 'La demande n\'est pas approuvée.', 'DEMANDE_NON_APPROUVEE');
+    const [c] = await Q('SELECT * FROM projet_demande_chiffres(:id)', { id: d.id }, t);
+    const [{ attente }] = await Q(`SELECT coalesce(sum(montant), 0) AS attente FROM projet_ordres_decaissement
+                                    WHERE demande_id = :id AND statut = 'en_attente'`, { id: d.id }, t);
+    const reste = Math.round((n(d.total) - n(c.decaisse) - n(attente)) * 100) / 100;
+    if (reste <= 0) {
+      throw err(409, n(attente) > 0 ? 'Le reste à décaisser attend déjà la validation de la caisse.' : 'Tout est déjà décaissé.', 'RIEN_A_FAIRE');
+    }
+    const montant = b.montant === undefined || b.montant === '' ? reste : nombre(b.montant, 'Montant', { min: 0, strict: true });
+    if (montant > reste + 0.004) throw err(409, `Reste à décaisser : ${fmt(reste)} FCFA.`, 'PLAFOND');
+    const [u] = await Q('SELECT username FROM users WHERE id = :u', { u: d.demandeur_id }, t);
+    const [[o]] = await X(`INSERT INTO projet_ordres_decaissement (tenant_id, demande_id, montant, beneficiaire, instructions, initie_par)
+                           VALUES (:t, :d, :m, :b, :i, :u) RETURNING id`,
+    { t: req.tenantId, d: d.id, m: montant, b: beneficiaire || u?.username || '', i: instructions, u: req.user.id }, t);
+    await X(`INSERT INTO audit_log (tenant_id, user_id, action, entite, entite_id, nouvelle_valeur)
+             VALUES (:t, :u, 'ORDRE_DECAISSEMENT', 'projet_ordres_decaissement', :id, CAST(:det AS jsonb))`,
+    { t: req.tenantId, u: req.user.id, id: String(o.id), det: JSON.stringify({ demande: d.numero, montant }) }, t);
+    return { id: String(o.id), demandeId: d.id, montant, beneficiaire: beneficiaire || u?.username || '' };
+  });
+  annoncerSansRisque(req, r.demandeId, 'ordre', { montant: r.montant, beneficiaire: r.beneficiaire });
+  return formerOrdre(await chargerOrdre(req, await profil(req), r.id));
+};
+
+// La caisse refuse (fonds non remis : bénéficiaire absent, montant contesté…),
+// ou l'initiateur / le directeur retire l'ordre. Motif obligatoire.
+const clore = (statut) => async (req, id) => {
+  const p = await profil(req);
+  const motif = texte(req.body?.motif, 300, 'Motif', { obligatoire: true });
+  const o = await chargerOrdre(req, p, id);
+  if (o.statut !== 'en_attente') throw err(409, 'Cet ordre de décaissement a déjà été traité.', 'ORDRE_TRAITE');
+  if (statut === 'refuse' && !p.caisse) throw err(403, 'Seule la caisse refuse une sortie.', 'CAISSE_SEULE');
+  if (statut === 'annule' && !(o.initie_par === p.userId || p.directeur)) {
+    throw err(403, 'Seul l\'initiateur ou le directeur retire un ordre de décaissement.', 'INITIATEUR_SEUL');
+  }
+  const [, meta] = await enTransaction((t) => X(`UPDATE projet_ordres_decaissement SET statut = :s, motif = :motif, traite_par = :u, traite_le = NOW()
+                                                WHERE id = :id AND tenant_id = :t AND statut = 'en_attente'`,
+  { s: statut, motif, u: req.user.id, id: o.id, t: req.tenantId }, t));
+  if (meta.rowCount !== 1) throw err(409, 'Cet ordre de décaissement vient d\'être traité.', 'ORDRE_TRAITE');
+  annoncerSansRisque(req, Number(o.demande_id), statut === 'refuse' ? 'ordre_refuse' : 'ordre_annule',
+    { montant: o.montant, motif, initiateur: o.initie_par });
+  return formerOrdre(await chargerOrdre(req, p, o.id));
+};
+
+const listerOrdres = async (req) => {
+  const p = await profil(req);
+  const statut = ['en_attente', 'execute', 'refuse', 'annule'].includes(req.query.statut) ? req.query.statut : null;
+  const lignes = await Q(`${SELECT_ORDRE} WHERE o.tenant_id = :t AND (CAST(:s AS TEXT) IS NULL OR o.statut = :s) ORDER BY o.id DESC LIMIT 500`,
+    { t: req.tenantId, s: statut });
+  return {
+    ordres: lignes.filter((o) => peutVoirOrdre(p, o)).map((o) => ({ ...formerOrdre(o), de_moi: o.initie_par === p.userId,
+      a_moi_de_valider: o.statut === 'en_attente' && p.caisse && o.initie_par !== p.userId })),
+    caisse: p.caisse,
+  };
+};
+
+/** Bon de sortie de caisse : à faire signer par le bénéficiaire au moment de la remise des fonds. */
+const bonDeSortiePdf = async (req, id) => {
+  const p = await profil(req);
+  const o = await chargerOrdre(req, p, id);
+  if (o.statut !== 'execute') throw err(409, 'Le bon de sortie s\'imprime une fois la sortie validée par la caisse.', 'ORDRE_NON_EXECUTE');
+  const { dateFr, montantEnLettres, COULEURS } = require('./commercial/bc_pdf.service');
+  const mp = require('./commercial/ventes_pdf.service');
+  const s = await require('./entreprise.service').identitePour(req.tenantId, null);
+  const numero = o.mouvement_numero ? `N° ${o.mouvement_numero}` : numeroOrdre(o.id);
+  const { doc, fin } = mp.nouveauDoc(`Bon de sortie ${numero}`, s);
+  const m = (v) => Math.round(n(v)).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g, ' ');
+  let y = mp.entete(doc, s, 'BON DE SORTIE DE CAISSE', numero, [
+    `Date : ${dateFr(o.mouvement_date)}`, `Caisse : ${o.caisse}${o.caisse_code ? ` (${o.caisse_code})` : ''}`,
+    `Ordre : ${numeroOrdre(o.id)}`, 'Montants en FCFA']);
+  y = mp.boites(doc, y, ['Bénéficiaire', [o.beneficiaire || o.demandeur || '—', o.demandeur && o.demandeur !== o.beneficiaire ? `Demandeur : ${o.demandeur}` : '']],
+    ['Demande de fonds', [o.numero, `Projet : ${o.projet}`, `Activité : ${o.activite}`]]);
+  y = mp.tableau(doc, y, [['Réf.', 80, 'left'], ['Objet', 335, 'left'], ['Montant', 100, 'right']],
+    [[o.numero, `${o.objet}${o.instructions ? `\n${o.instructions}` : ''}`, m(o.montant)]]);
+  const lettres = montantEnLettres(o.montant, 'XAF');
+  doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#0f172a')
+    .text(`Arrêté le présent bon à la somme de ${lettres.charAt(0).toUpperCase()}${lettres.slice(1)}.`, 40, y + 12, { width: 515 });
+  doc.font('Helvetica').fontSize(8.3).fillColor('#475569').text([
+    `Décaissement initié par ${o.initie_par_nom || '—'} le ${dateFr(String(o.initie_le.toISOString ? o.initie_le.toISOString() : o.initie_le).slice(0, 10))}.`,
+    `Sortie validée par ${o.traite_par_nom || '—'} (caisse) le ${dateFr(String(o.traite_le.toISOString ? o.traite_le.toISOString() : o.traite_le).slice(0, 10))}.`,
+  ].join('\n'), 40, doc.y + 6, { width: 515, lineGap: 1 });
+  y = doc.y + 18;
+  if (y > 650) { doc.addPage(); y = 50; }
+  const wZ = (515 - 24) / 3;
+  mp.zoneSignature(doc, 40, y, wZ, 92, `Le caissier / la caissière — ${o.traite_par_nom || ''}\nfonds remis`);
+  mp.zoneSignature(doc, 40 + wZ + 12, y, wZ, 92, 'Le bénéficiaire — « reçu la somme ci-dessus », date et signature');
+  mp.zoneSignature(doc, 40 + 2 * (wZ + 12), y, wZ, 92, `Le chef de projet — ${o.initie_par_nom || ''}\nvisa`);
+  doc.fillColor(COULEURS.GRIS);
+  mp.finaliser(doc, s, numero, o.mouvement_annule ? 'MOUVEMENT ANNULÉ' : '');   // termine le document
+  return { contenu: await fin, nom: `bon-de-sortie-${String(o.mouvement_numero || numeroOrdre(o.id)).replace(/[^\w-]/g, '_')}.pdf` };
 };
 
 // Solde d'une caisse ou d'une banque à la date du mouvement (mois de la date).
@@ -541,18 +702,33 @@ const annoncerDecisionDemandeFonds = async ({ tenantId, user, mois, annee, semai
 };
 
 /** Appelé par la saisie de caisse (journal.controller) quand le corps porte demande_fonds_id. */
-const lienCaisse = async (tenantId, demandeId, { entree, sortie }) => {
+const lienCaisse = async (tenantId, demandeId, { entree, sortie, ordreId, userId }) => {
   const id = idNum(demandeId, 'Demande de fonds');
   const [d] = await Q('SELECT id, statut, activite_id, numero FROM projet_demandes_fonds WHERE id = :id AND tenant_id = :t', { id, t: tenantId });
   if (!d) throw err(400, 'Demande de fonds introuvable.', 'DEMANDE_INTROUVABLE');
   if (d.statut !== 'approuvee') throw err(409, `La demande ${d.numero} n'est pas approuvée.`, 'DEMANDE_NON_APPROUVEE');
   const s = n(sortie); const e = n(entree);
   if ((s > 0) === (e > 0)) throw err(400, 'Un mouvement relié à une demande est soit une sortie (décaissement), soit une entrée (reliquat).', 'SAISIE');
-  return { demandeId: id, activiteId: Number(d.activite_id), sens: s > 0 ? 'decaissement' : 'reversement' };
+  if (s <= 0) return { demandeId: id, activiteId: Number(d.activite_id), sens: 'reversement', ordreId: null };
+  // 086 : une sortie reliée à une demande exécute un ordre initié par le chef de projet.
+  if (!ordreId) throw err(409, 'Le décaissement d\'une demande de fonds est initié par le chef de projet : validez l\'ordre en attente (Caisse Pro → Fonds à décaisser).', 'ORDRE_REQUIS');
+  const [o] = await Q('SELECT id, demande_id, montant, statut, initie_par FROM projet_ordres_decaissement WHERE id = :o AND tenant_id = :t',
+    { o: idNum(ordreId, 'Ordre de décaissement'), t: tenantId });
+  if (!o || Number(o.demande_id) !== id) throw err(404, 'Ordre de décaissement introuvable.', 'ORDRE_INTROUVABLE');
+  if (o.statut !== 'en_attente') throw err(409, 'Cet ordre de décaissement a déjà été traité.', 'ORDRE_TRAITE');
+  if (Math.abs(n(o.montant) - s) > 0.004) throw err(409, `La sortie doit être de ${fmt(o.montant)} FCFA, le montant de l'ordre.`, 'ORDRE_MONTANT');
+  if (o.initie_par && o.initie_par === userId) throw err(403, 'Vous avez initié ce décaissement : une autre personne de la caisse doit valider la sortie.', 'MEME_PERSONNE');
+  return { demandeId: id, activiteId: Number(d.activite_id), sens: 'decaissement', ordreId: Number(o.id) };
 };
-const relierMouvement = (tenantId, lien, journalId, userId, transaction) => X(
-  `INSERT INTO projet_demande_mouvements (tenant_id, demande_id, journal_id, sens, cree_par) VALUES (:t, :d, :j, :s, :u)`,
-  { t: tenantId, d: lien.demandeId, j: journalId, s: lien.sens, u: userId || null }, transaction);
+const relierMouvement = async (tenantId, lien, journalId, userId, transaction) => {
+  await X(`INSERT INTO projet_demande_mouvements (tenant_id, demande_id, journal_id, sens, cree_par, ordre_id) VALUES (:t, :d, :j, :s, :u, :o)`,
+    { t: tenantId, d: lien.demandeId, j: journalId, s: lien.sens, u: userId || null, o: lien.ordreId || null }, transaction);
+  if (!lien.ordreId) return;
+  const [, meta] = await X(`UPDATE projet_ordres_decaissement SET statut = 'execute', journal_id = :j, traite_par = :u, traite_le = NOW()
+                             WHERE id = :o AND tenant_id = :t AND statut = 'en_attente'`,
+  { j: journalId, u: userId || null, o: lien.ordreId, t: tenantId }, transaction);
+  if (meta.rowCount !== 1) throw err(409, 'Cet ordre de décaissement vient d\'être traité par quelqu\'un d\'autre.', 'ORDRE_TRAITE');
+};
 
 // ── Dépenses ────────────────────────────────────────────────────────────────
 const declarer = async (req, id) => {
@@ -769,9 +945,10 @@ const compteurs = async (req, d) => {
   const directeur = req.user.role === 'directeur';
   const [c] = await Q(
     `SELECT count(*) FILTER (WHERE (statut = 'soumise' AND projet_id IN (:chef)) OR (statut = 'validee_chef' AND :directeur))::int AS a_valider,
-            count(*) FILTER (WHERE statut = 'approuvee' AND :caisse AND total > (SELECT decaisse FROM projet_demande_chiffres(d.id)))::int AS a_decaisser
+            count(*) FILTER (WHERE statut = 'approuvee' AND :caisse AND EXISTS (SELECT 1 FROM projet_ordres_decaissement o
+                              WHERE o.demande_id = d.id AND o.statut = 'en_attente' AND o.initie_par IS DISTINCT FROM :u))::int AS a_decaisser
        FROM projet_demandes_fonds d WHERE tenant_id = :t`,
-    { t: req.tenantId, chef: d.chef.length ? d.chef : [0], directeur, caisse });
+    { t: req.tenantId, chef: d.chef.length ? d.chef : [0], directeur, caisse, u: req.user.id });
   const [x] = comptable ? await Q(`SELECT count(*)::int AS nb FROM projet_depenses WHERE tenant_id = :t AND statut = 'declaree' AND declare_par <> :u`,
     { t: req.tenantId, u: req.user.id }) : [{ nb: 0 }];
   return { demandes_a_valider: c.a_valider, demandes_a_decaisser: c.a_decaisser, depenses_a_controler: x.nb, comptable, caisse, directeur };
@@ -782,5 +959,6 @@ module.exports = {
   renvoyer: decider('renvoyer'), rejeter: decider('rejeter'), annuler: decider('annuler'),
   decaisser: mouvement('decaissement'), reverser: mouvement('reversement'), solliciter, annoncerDecisionDemandeFonds,
   lienCaisse, relierMouvement,
+  initier, refuserOrdre: clore('refuse'), annulerOrdre: clore('annule'), listerOrdres, bonDeSortiePdf,
   declarer, retirerDepense, controler, listerDepenses, fichierDepense, rapport, rapportPdf,
 };

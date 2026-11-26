@@ -33,6 +33,7 @@ module.exports = {
   utilisateurs:     traiter('utilisateurs', (req) => gestion.utilisateurs(req)),
   // Équipe des projets (26/11/2026) : chefs de projet et responsables d'activité.
   equipe:           traiter('équipe des projets', (req) => require('../services/projets_equipe.service').lister(req)),
+  inviterEquipier:  traiter('invitation d\'un membre de l\'équipe', (req) => require('../services/projets_equipe.service').renvoyerInvitation(req, req.params.id)),
   creerEquipier:    traiter('création d\'un membre de l\'équipe', (req) => require('../services/projets_equipe.service').creer(req), 201),
   creerProjet:      traiter('création', (req) => gestion.creerProjet(req, req.body || {}), 201),
   modifierProjet:   traiter('modification', (req) => gestion.modifierProjet(req, req.params.id, req.body || {})),

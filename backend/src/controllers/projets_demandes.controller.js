@@ -44,6 +44,17 @@ module.exports = {
   annuler:   traiter('annulation de demande', (req) => svc.annuler(req, req.params.id)),
   decaisser: traiter('décaissement', (req) => svc.decaisser(req, req.params.id, { creerMouvement: creerMouvementPour(req) }), 201),
   reverser:  traiter('reliquat', (req) => svc.reverser(req, req.params.id, { creerMouvement: creerMouvementPour(req) }), 201),
+  initier:   traiter('ordre de décaissement', (req) => svc.initier(req, req.params.id), 201),
+  ordres:    traiter('ordres de décaissement', (req) => svc.listerOrdres(req)),
+  refuserOrdre: traiter('refus de sortie', (req) => svc.refuserOrdre(req, req.params.id)),
+  annulerOrdre: traiter('retrait d\'ordre', (req) => svc.annulerOrdre(req, req.params.id)),
+  bonDeSortie: async (req, res) => {
+    try {
+      const f = await svc.bonDeSortiePdf(req, req.params.id);
+      envoyerFichier(res, { ...f, mime: 'application/pdf' });
+      res.end(f.contenu);
+    } catch (err) { repondre(res, err, 'bon de sortie'); }
+  },
   solliciter: traiter('sollicitation de la demande de fonds', (req) => svc.solliciter(req, req.params.id), 201),
   declarer:  traiter('déclaration de dépense', (req) => svc.declarer(req, req.params.id), 201),
   depenses:  traiter('liste des dépenses', (req) => svc.listerDepenses(req)),

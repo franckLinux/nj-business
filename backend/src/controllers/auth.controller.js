@@ -205,7 +205,7 @@ const motDePasseOublie = async (req, res) => {
 
 const lireJeton = async (jeton) => {
   const { rows } = await query(
-    `SELECT r.id, r.user_id, u.username FROM password_resets r JOIN users u ON u.id = r.user_id
+    `SELECT r.id, r.user_id, u.username, to_jsonb(r)->>'nature' AS nature FROM password_resets r JOIN users u ON u.id = r.user_id
       WHERE r.token_hash = $1 AND r.utilise_le IS NULL AND r.expire_le > NOW() AND u.actif = true`, [hashJeton(jeton)]);
   return rows[0] || null;
 };
@@ -214,7 +214,7 @@ const verifierReinitialisation = async (req, res) => {
   try {
     const r = await lireJeton(req.params.jeton);
     if (!r) return res.status(410).json({ error: 'Ce lien n\'est plus valable (déjà utilisé ou expiré). Refaites une demande.' });
-    res.json({ identifiant: r.username });
+    res.json({ identifiant: r.username, invitation: r.nature === 'invitation' });
   } catch (err) {
     res.status(500).json({ error: 'Erreur serveur.' });
   }
@@ -233,7 +233,7 @@ const reinitialiserMotDePasse = async (req, res) => {
     await query('UPDATE password_resets SET utilise_le = NOW() WHERE user_id = $1 AND utilise_le IS NULL', [r.user_id]);
     // 067 : toute session ouverte avec l'ancien mot de passe est fermée.
     await sessions.terminer({ userId: r.user_id, statut: 'revoquee', motif: 'Mot de passe réinitialisé', action: 'SESSION_REVOCATION' });
-    res.json({ message: 'Mot de passe modifié. Vous pouvez vous connecter.', identifiant: r.username });
+    res.json({ message: r.nature === 'invitation' ? 'Mot de passe créé. Vous pouvez vous connecter.' : 'Mot de passe modifié. Vous pouvez vous connecter.', identifiant: r.username });
   } catch (err) {
     console.error('[Auth] reinitialiserMotDePasse :', err.message);
     res.status(500).json({ error: 'Erreur serveur.' });

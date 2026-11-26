@@ -1,6 +1,8 @@
 // Gestion des activités simplifiée (ONG et associations) — migration 083.
 //   • Demandes de fonds : le responsable d'activité saisit ses lignes budgétaires ;
-//     le chef de projet valide, puis le directeur approuve ; la caissière décaisse.
+//     le chef de projet valide, puis le directeur approuve ; le chef de projet initie
+//     le décaissement (ordre en attente) et la caissière valide la sortie, qui écrit
+//     le mouvement de caisse ; bon de sortie à faire signer (migration 086).
 //   • Dépenses et justificatifs : déclarées avec pièce, contrôlées par le comptable ;
 //     le reliquat est reversé en caisse ou en banque.
 //   • Rapport financier : par projet et activité, à tout moment.
@@ -15,7 +17,7 @@ import { exporterExcel } from '@/lib/export';
 
 const TONS = {
   Brouillon: 'gris', 'Chez le chef de projet': 'orange', 'Chez le directeur': 'orange', Rejetée: 'rouge-plein', Annulée: 'gris',
-  'À décaisser': 'bleu', 'Décaissée en partie': 'bleu', 'Décaissée en partie, justifiée': 'bleu', 'À justifier': 'orange',
+  'À décaisser': 'bleu', 'Sortie à valider par la caisse': 'orange', 'Décaissée en partie': 'bleu', 'Décaissée en partie, justifiée': 'bleu', 'À justifier': 'orange',
   'Dépenses à contrôler': 'orange', Justifiée: 'vert',
 };
 export const Etat = ({ etat }) => <span className={`fin-pastille fin-pastille-${TONS[etat] || 'gris'}`}>{etat}</span>;
@@ -31,7 +33,7 @@ const useContexte = () => {
 };
 
 // ── Liste des demandes ──────────────────────────────────────────────────────
-const VUES = [['a_valider', 'À valider'], ['a_decaisser', 'À décaisser'], ['a_justifier', 'À justifier'], ['mes', 'Mes demandes'], ['', 'Toutes']];
+const VUES = [['a_valider', 'À valider'], ['a_initier', 'À initier'], ['a_decaisser', 'Sorties à valider'], ['a_justifier', 'À justifier'], ['mes', 'Mes demandes'], ['', 'Toutes']];
 export function DemandesFondsPage() {
   const [params, setParams] = useSearchParams();
   const { ctx, erreur: errCtx } = useContexte();
@@ -199,7 +201,7 @@ export function DemandeFichePage() {
   const { ctx } = useContexte();
   const [d, setD] = useState(null);
   const [erreur, setErreur] = useState('');
-  const [tiroir, setTiroir] = useState(null);      // 'decaisser' | 'reverser' | 'depense' | { motif: action }
+  const [tiroir, setTiroir] = useState(null);      // 'initier' | { ordre } | 'reverser' | 'depense' | { motif: action } | { ordreMotif }
   const charger = useCallback(() => {
     api.get(`/projets/demandes/${id}`).then((r) => (r?.error ? setErreur(r.error) : setD(r)));
   }, [id]);
@@ -240,7 +242,9 @@ export function DemandeFichePage() {
           {(a.valider_chef || a.approuver) && <button type="button" className="cm-btn cm-primaire" onClick={() => agir('valider')}>{a.approuver ? 'Approuver (directeur)' : 'Valider (chef de projet)'}</button>}
           {a.renvoyer && <button type="button" className="cm-btn cm-secondaire" onClick={() => setTiroir({ motif: 'renvoyer' })}>Renvoyer pour correction</button>}
           {a.renvoyer && <button type="button" className="cm-btn cm-secondaire" onClick={() => setTiroir({ motif: 'rejeter' })}>Rejeter</button>}
-          {a.decaisser && <button type="button" className="cm-btn cm-primaire" onClick={() => setTiroir('decaisser')}>💵 Décaisser</button>}
+          {a.initier && <button type="button" className="cm-btn cm-primaire" onClick={() => setTiroir('initier')}>💵 Initier le décaissement</button>}
+          {a.decaisser && <button type="button" className="cm-btn cm-primaire"
+            onClick={() => setTiroir({ ordre: d.ordres.find((o) => o.a_moi_de_valider) })}>💵 Valider la sortie de caisse</button>}
           {a.declarer && <button type="button" className="cm-btn cm-primaire" onClick={() => setTiroir('depense')}>+ Déclarer une dépense</button>}
           {a.reverser && <button type="button" className="cm-btn cm-secondaire" onClick={() => setTiroir('reverser')}>↩ Encaisser le reliquat</button>}
           {a.annuler && <button type="button" className="cm-btn cm-secondaire" onClick={() => setTiroir({ motif: 'annuler' })}>Annuler la demande</button>}
@@ -269,6 +273,34 @@ export function DemandeFichePage() {
           {x.chef_le ? ` · validée par le chef de projet${x.chef_nom ? ` (${x.chef_nom})` : ''} le ${fmtDate(x.chef_le)}` : x.chef_projet_nom ? ` · chef de projet : ${x.chef_projet_nom}` : ''}
           {x.directeur_le ? ` · approuvée par ${x.directeur_nom} le ${fmtDate(x.directeur_le)}` : ''}</p>
       </section>
+
+      {d.ordres?.length > 0 && (
+        <section className="fin-carte">
+          <h3 className="fin-titre-section">Ordres de décaissement</h3>
+          <p className="cm-sous">Le chef de projet initie ; la caisse remet les fonds et valide la sortie : le mouvement de caisse est alors écrit à son nom, et le bon de sortie s'imprime pour la signature du bénéficiaire.</p>
+          <div className="cm-table-wrap">
+            <table className="cm-table fin-table">
+              <thead><tr><th>N°</th><th>Initié</th><th>Bénéficiaire</th><th className="fin-num">Montant</th><th>État</th><th aria-label="Actions" /></tr></thead>
+              <tbody>{d.ordres.map((o) => (
+                <tr key={o.id}>
+                  <td className="fin-mono">{o.numero_ordre}</td>
+                  <td>{fmtDate(o.initie_le)}<div className="cm-sous">par {o.initie_par_nom || '—'}</div></td>
+                  <td>{o.beneficiaire || '—'}{o.instructions && <div className="cm-sous">{o.instructions}</div>}</td>
+                  <td className="fin-num">{m(o.montant)}</td>
+                  <td><EtatOrdre o={o} /></td>
+                  <td className="fin-actions-ligne">
+                    {o.a_moi_de_valider && (<>
+                      <button type="button" className="cm-btn cm-primaire cm-petit" onClick={() => setTiroir({ ordre: o })}>Valider la sortie</button>
+                      <button type="button" className="cm-btn cm-secondaire cm-petit" onClick={() => setTiroir({ ordreMotif: { o, action: 'refuser' } })}>Refuser</button></>)}
+                    {o.statut === 'en_attente' && (o.de_moi || ctx?.directeur) && (
+                      <button type="button" className="cm-btn cm-secondaire cm-petit" onClick={() => setTiroir({ ordreMotif: { o, action: 'annuler' } })}>Retirer</button>)}
+                    {o.statut === 'execute' && <button type="button" className="cm-btn cm-secondaire cm-petit" onClick={() => imprimerBon(o, toast)}>🖨 Bon de sortie</button>}
+                  </td>
+                </tr>))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {d.mouvements.length > 0 && (
         <section className="fin-carte">
@@ -312,8 +344,19 @@ export function DemandeFichePage() {
         </section>
       )}
 
-      {(tiroir === 'decaisser' || tiroir === 'reverser') && ctx && (
-        <MouvementTiroir sens={tiroir} demande={x} ctx={ctx} onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />
+      {(tiroir?.ordre || tiroir === 'reverser') && ctx && (
+        <MouvementTiroir sens={tiroir?.ordre ? 'decaisser' : 'reverser'} ordre={tiroir?.ordre} demande={x} ctx={ctx}
+          onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />
+      )}
+      {tiroir === 'initier' && <InitierTiroir demande={x} onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />}
+      {tiroir?.ordreMotif && (
+        <MotifTiroir titre={tiroir.ordreMotif.action === 'refuser' ? 'Refuser la sortie de caisse' : 'Retirer l\'ordre de décaissement'}
+          onFermer={() => setTiroir(null)} onValider={async (motif) => {
+            const r = await api.post(`/projets/ordres-decaissement/${tiroir.ordreMotif.o.id}/${tiroir.ordreMotif.action}`, { motif });
+            if (r?.error) { toast(r.error, 'error'); return; }
+            toast(tiroir.ordreMotif.action === 'refuser' ? 'Sortie refusée : le chef de projet est prévenu.' : 'Ordre retiré.', 'success');
+            setTiroir(null); charger();
+          }} />
       )}
       {tiroir === 'depense' && <DepenseTiroir demande={x} lignes={d.lignes} onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />}
       {tiroir?.motif && (
@@ -371,13 +414,57 @@ function MotifTiroir({ titre, onFermer, onValider }) {
   );
 }
 
-function MouvementTiroir({ sens, demande, ctx, onFermer, onFait }) {
+const ETATS_ORDRE = { en_attente: ['En attente de la caisse', 'orange'], execute: ['Sortie validée', 'vert'], refuse: ['Refusé par la caisse', 'rouge-plein'], annule: ['Retiré', 'gris'] };
+function EtatOrdre({ o }) {
+  const [lib, ton] = ETATS_ORDRE[o.statut] || [o.statut, 'gris'];
+  return (<>
+    <span className={`fin-pastille fin-pastille-${ton}`}>{lib}</span>
+    {o.statut === 'execute' && <div className="cm-sous">n° {o.mouvement_numero} · {o.caisse} · par {o.traite_par_nom}{o.mouvement_annule ? ' (mouvement annulé)' : ''}</div>}
+    {['refuse', 'annule'].includes(o.statut) && <div className="cm-sous">{o.traite_par_nom} : {o.motif}</div>}
+  </>);
+}
+const imprimerBon = (o, toast) => ouvrirFichier(api, `/projets/ordres-decaissement/${o.id}/bon-de-sortie`,
+  `bon-de-sortie-${o.mouvement_numero || o.numero_ordre}.pdf`, 'application/pdf', toast);
+
+// Le chef de projet (ou le directeur) initie : le paiement reste en attente de la caisse.
+function InitierTiroir({ demande, onFermer, onFait }) {
+  const toast = useToast();
+  const [v, setV] = useState({ montant: String(demande.reste_a_initier), beneficiaire: demande.demandeur || '', instructions: '' });
+  const [erreur, setErreur] = useState('');
+  const [enCours, setEnCours] = useState(false);
+  const set = (k) => (e) => setV((x) => ({ ...x, [k]: e.target.value }));
+  const valider = async () => {
+    setEnCours(true); setErreur('');
+    const r = await api.post(`/projets/demandes/${demande.id}/initier`, v);
+    setEnCours(false);
+    if (r?.error) { setErreur(r.error); return; }
+    toast(`Ordre ${r.numero_ordre} envoyé à la caisse : la caissière est prévenue par mail.`, 'success');
+    onFait();
+  };
+  return (
+    <Tiroir titre="Initier le décaissement" sousTitre={`${demande.numero} — reste à décaisser : ${m(demande.reste_a_initier)} FCFA`} onFermer={onFermer} pied={<>
+      <button type="button" className="cm-btn cm-secondaire" onClick={onFermer}>Annuler</button>
+      <button type="button" className="cm-btn cm-primaire" disabled={enCours || !(Number(String(v.montant).replace(/\s/g, '').replace(',', '.')) > 0)} onClick={valider}>Envoyer à la caisse</button>
+    </>}>
+      <p className="cm-sous">Le paiement passe <b>en attente</b> : aucune sortie n'est écrite tant que la caissière n'a pas remis les fonds et validé la sortie. Elle imprime alors le bon de sortie à faire signer par le bénéficiaire.</p>
+      <Erreur message={erreur} />
+      <div className="cm-grille">
+        <Champ label="Montant" requis id="od-m" aide={`Au plus ${m(demande.reste_a_initier)}`}><input id="od-m" inputMode="decimal" value={v.montant} onChange={set('montant')} /></Champ>
+        <Champ label="Bénéficiaire" id="od-b"><input id="od-b" value={v.beneficiaire} maxLength={150} onChange={set('beneficiaire')} /></Champ>
+        <Champ label="Instructions pour la caisse" pleine id="od-i"><input id="od-i" value={v.instructions} maxLength={300} onChange={set('instructions')} placeholder="Ex. : remettre en main propre au relais de Mfou" /></Champ>
+      </div>
+    </Tiroir>
+  );
+}
+
+function MouvementTiroir({ sens, ordre, demande, ctx, onFermer, onFait }) {
   const toast = useToast();
   const decaissement = sens === 'decaisser';
   const rubriques = ctx.rubriques.filter((r) => (decaissement ? r.type !== 'entree' : r.type === 'entree'));
-  const plafond = decaissement ? demande.reste_a_decaisser : demande.reste_a_justifier;
+  const plafond = decaissement ? ordre.montant : demande.reste_a_justifier;
   const [v, setV] = useState({ journal_id: ctx.journaux[0]?.id || '', rubrique_code: rubriques.find((r) => (decaissement ? /ACTIV|PROJET/i : /REVERS|RELIQUAT|REMBOURS/i).test(r.intitule))?.code || rubriques[0]?.code || '',
-    date: aujourdhui(), montant: String(plafond), beneficiaire: decaissement ? demande.demandeur || '' : '' });
+    date: aujourdhui(), montant: String(plafond), beneficiaire: decaissement ? ordre.beneficiaire || demande.demandeur || '' : '',
+    ...(decaissement ? { ordre_id: ordre.id } : {}) });
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   const set = (k) => (e) => setV((x) => ({ ...x, [k]: e.target.value }));
@@ -390,7 +477,9 @@ function MouvementTiroir({ sens, demande, ctx, onFermer, onFait }) {
     const r = await api.post(`/projets/demandes/${demande.id}/${decaissement ? 'decaisser' : 'reverser'}`, v);
     setEnCours(false);
     if (r?.error) { setErreur(r.error); return; }
-    toast(`${decaissement ? 'Décaissement' : 'Reliquat'} enregistré (n° ${r.numero}).`, 'success');
+    toast(`${decaissement ? 'Sortie validée' : 'Reliquat enregistré'} (n° ${r.numero}).${decaissement ? ' Faites signer le bon de sortie.' : ''}`, 'success');
+    // Le bon de sortie s'ouvre aussitôt pour impression et signature du bénéficiaire.
+    if (decaissement) imprimerBon({ id: r.ordre_id, mouvement_numero: r.numero }, toast);
     onFait();
   };
   const solliciter = async () => {
@@ -402,13 +491,14 @@ function MouvementTiroir({ sens, demande, ctx, onFermer, onFait }) {
     onFait();
   };
   return (
-    <Tiroir titre={decaissement ? 'Décaisser les fonds' : 'Encaisser le reliquat'}
-      sousTitre={`${demande.numero} — ${decaissement ? 'reste à décaisser' : 'reliquat'} : ${m(plafond)} FCFA`} onFermer={onFermer} pied={<>
+    <Tiroir titre={decaissement ? 'Valider la sortie de caisse' : 'Encaisser le reliquat'}
+      sousTitre={decaissement ? `${demande.numero} — ordre ${ordre.numero_ordre} de ${ordre.initie_par_nom || 'chef de projet'} : ${m(plafond)} FCFA`
+        : `${demande.numero} — reliquat : ${m(plafond)} FCFA`} onFermer={onFermer} pied={<>
         <button type="button" className="cm-btn cm-secondaire" onClick={onFermer}>Annuler</button>
-        <button type="button" className="cm-btn cm-primaire" disabled={enCours || !v.journal_id || !v.rubrique_code || !(montantNum > 0) || manque > 0} onClick={valider}>Enregistrer</button>
+        <button type="button" className="cm-btn cm-primaire" disabled={enCours || !v.journal_id || !v.rubrique_code || !(montantNum > 0) || manque > 0} onClick={valider}>{decaissement ? 'Fonds remis : valider la sortie' : 'Enregistrer'}</button>
       </>}>
       <p className="cm-sous">{decaissement
-        ? 'Une sortie est écrite dans la caisse ou la banque choisie, sur l\'activité de la demande, avec les contrôles habituels (période ouverte, solde).'
+        ? 'Validez seulement après avoir remis les fonds : la sortie est écrite à votre nom dans la caisse ou la banque choisie, sur l\'activité de la demande, puis le bon de sortie s\'ouvre pour la signature du bénéficiaire.'
         : 'Une entrée est écrite dans la caisse ou la banque choisie : les fonds non dépensés reviennent à la structure.'}</p>
       <Erreur message={erreur} />
       <div className="cm-grille">
@@ -417,7 +507,8 @@ function MouvementTiroir({ sens, demande, ctx, onFermer, onFait }) {
         <Champ label="Rubrique" requis id="mv-r"><select id="mv-r" value={v.rubrique_code} onChange={set('rubrique_code')}>
           {rubriques.map((r) => <option key={r.code} value={r.code}>{r.intitule}</option>)}</select></Champ>
         <Champ label="Date" requis id="mv-d"><input id="mv-d" type="date" value={v.date} onChange={set('date')} /></Champ>
-        <Champ label="Montant" requis id="mv-m" aide={`Au plus ${m(plafond)}`}><input id="mv-m" inputMode="decimal" value={v.montant} onChange={set('montant')} /></Champ>
+        <Champ label="Montant" requis id="mv-m" aide={decaissement ? 'Montant de l\'ordre du chef de projet' : `Au plus ${m(plafond)}`}>
+          <input id="mv-m" inputMode="decimal" value={v.montant} onChange={set('montant')} readOnly={decaissement} /></Champ>
         {decaissement && <Champ label="Bénéficiaire" pleine id="mv-b"><input id="mv-b" value={v.beneficiaire} maxLength={150} onChange={set('beneficiaire')} /></Champ>}
       </div>
       {manque > 0 && (

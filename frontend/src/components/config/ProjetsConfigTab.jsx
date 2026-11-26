@@ -140,13 +140,19 @@ export default function ProjetsConfigTab() {
         </div>
         {equipe.length === 0 ? <p className="cm-sous">Personne n'est encore désigné.</p> : (
           <table className="cm-table fin-table">
-            <thead><tr><th>Utilisateur</th><th>Fonction</th><th>Projets dirigés</th><th>Activités</th></tr></thead>
+            <thead><tr><th>Utilisateur</th><th>Fonction</th><th>Projets dirigés</th><th>Activités</th><th aria-label="Actions" /></tr></thead>
             <tbody>{equipe.map((u) => (
               <tr key={u.id} className={u.actif ? undefined : 'fin-annule'}>
                 <td><b>{u.username}</b>{u.email && <div className="cm-sous">{u.email}</div>}</td>
                 <td>{u.fonction === 'chef_projet' ? 'Chef de projet' : u.fonction === 'responsable_activite' ? 'Responsable d\'activité' : (u.profil_nom || ROLES[u.role] || u.role)}</td>
                 <td>{u.projets.map((p) => p.nom).join(', ') || '—'}</td>
                 <td>{u.activites.map((a) => `${a.nom} (${a.projet})`).join(', ') || '—'}</td>
+                <td>{u.fonction && u.email && u.actif && (
+                  <button type="button" className="cm-btn cm-secondaire cm-petit" title="Nouveau lien « Créez votre mot de passe », valable 72 heures"
+                    onClick={async () => {
+                      const r = await api.post(`/projets/equipe/${u.id}/invitation`);
+                      if (r?.error) toast(r.error, 'error'); else toast(r.message, r.statut === 'envoye' ? 'success' : 'error');
+                    }}>✉ Renvoyer l'invitation</button>)}</td>
               </tr>))}</tbody>
           </table>
         )}
@@ -154,7 +160,8 @@ export default function ProjetsConfigTab() {
 
       {nouveau && (
         <NouvelEquipier init={nouveau} projets={liste.projets} activites={details} onFermer={() => setNouveau(null)}
-          onFait={(u) => { const retour = nouveau.retour; setNouveau(null); chargerUsers(); charger(); if (retour) retour(u.id); toast(`Compte ${u.username} créé.`, 'success'); }} />
+          onFait={(u) => { const retour = nouveau.retour; setNouveau(null); chargerUsers(); charger(); if (retour) retour(u.id);
+            toast(u.invitation ? `Compte ${u.username} créé. ${u.invitation.message}` : `Compte ${u.username} créé.`, !u.invitation || u.invitation.statut === 'envoye' ? 'success' : 'error'); }} />
       )}
 
       {form && (
@@ -185,14 +192,19 @@ export default function ProjetsConfigTab() {
 
 // Création d'un chef de projet ou d'un responsable d'activité (ONG et associations).
 function NouvelEquipier({ init, projets, activites, onFermer, onFait }) {
+  // Par défaut : invitation par e-mail, la personne crée elle-même son mot de passe.
   const [v, setV] = useState({ fonction: init.fonction, username: '', email: '', password: '', projet_id: '', activite_id: '' });
+  const [inviter, setInviter] = useState(true);
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email.trim());
+  const mdpOk = v.password.length >= 8 && /[A-Za-z]/.test(v.password) && /\d/.test(v.password);
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   const set = (k) => (e) => setV((x) => ({ ...x, [k]: e.target.value }));
   const chef = v.fonction === 'chef_projet';
   const valider = async () => {
     setEnCours(true); setErreur('');
-    const r = await api.post('/projets/equipe', { ...v, projet_id: init.retour ? '' : v.projet_id, activite_id: init.retour ? '' : v.activite_id });
+    const r = await api.post('/projets/equipe', { ...v, password: inviter ? '' : v.password,
+      projet_id: init.retour ? '' : v.projet_id, activite_id: init.retour ? '' : v.activite_id });
     setEnCours(false);
     if (r?.error) { setErreur(r.error); return; }
     onFait(r);
@@ -201,14 +213,19 @@ function NouvelEquipier({ init, projets, activites, onFermer, onFait }) {
     <Tiroir titre={chef ? 'Nouveau chef de projet' : 'Nouveau responsable d\'activité'}
       sousTitre="Compte « Collaborateur » rattaché à NJ FINANCE, limité à la gestion des activités" onFermer={onFermer} pied={<>
         <button type="button" className="cm-btn cm-secondaire" onClick={onFermer}>Annuler</button>
-        <button type="button" className="cm-btn cm-primaire" disabled={enCours || !v.username.trim() || v.password.length < 8} onClick={valider}>Créer le compte</button></>}>
+        <button type="button" className="cm-btn cm-primaire" disabled={enCours || !v.username.trim() || (inviter ? !emailOk : !mdpOk)} onClick={valider}>{inviter ? 'Créer et envoyer l\'invitation' : 'Créer le compte'}</button></>}>
       <Erreur message={erreur} />
       <div className="cm-grille">
         <Champ label="Fonction" requis id="eq-f"><select id="eq-f" value={v.fonction} disabled={Boolean(init.retour)} onChange={set('fonction')}>
           <option value="chef_projet">Chef de projet</option><option value="responsable_activite">Responsable d'activité</option></select></Champ>
         <Champ label="Identifiant de connexion" requis id="eq-u"><input id="eq-u" value={v.username} maxLength={60} autoComplete="off" onChange={set('username')} /></Champ>
-        <Champ label="E-mail" id="eq-e" aide="Pour recevoir les mails des demandes de fonds"><input id="eq-e" type="email" value={v.email} onChange={set('email')} /></Champ>
-        <Champ label="Mot de passe provisoire" requis id="eq-p" aide="8 caractères au moins ; à communiquer à la personne"><input id="eq-p" type="text" value={v.password} autoComplete="new-password" onChange={set('password')} /></Champ>
+        <Champ label="E-mail" requis={inviter} id="eq-e" aide={inviter ? 'Reçoit le lien pour créer son mot de passe, puis les mails des demandes de fonds' : 'Pour recevoir les mails des demandes de fonds'}>
+          <input id="eq-e" type="email" value={v.email} onChange={set('email')} /></Champ>
+        <Champ label="Mot de passe" pleine id="eq-mode">
+          <label className="fin-case"><input type="checkbox" checked={inviter} onChange={(e) => setInviter(e.target.checked)} />
+            {' '}Envoyer un e-mail pour que la personne crée elle-même son mot de passe (lien valable 72 heures)</label></Champ>
+        {!inviter && <Champ label="Mot de passe provisoire" requis id="eq-p" aide="8 caractères, une lettre et un chiffre ; à communiquer à la personne">
+          <input id="eq-p" type="text" value={v.password} autoComplete="new-password" onChange={set('password')} /></Champ>}
         {!init.retour && chef && (
           <Champ label="Chef du projet" pleine id="eq-pr"><select id="eq-pr" value={v.projet_id} onChange={set('projet_id')}>
             <option value="">— Plus tard —</option>{projets.filter((p) => p.actif).map((p) => <option key={p.id} value={p.id}>{p.nom}</option>)}</select></Champ>

@@ -458,8 +458,27 @@ const sendReinitialisationMotDePasse = ({ to, nom, lien }) => {
   return envoyer({ to, subject: `${process.env.APP_NAME || 'NJ Caisse Pro'} — réinitialisation de votre mot de passe`, html });
 };
 
+// Équipe des projets (086) : le nouveau membre choisit lui-même son mot de passe.
+const sendInvitationMotDePasse = ({ to, nom, identifiant, entreprise, fonction, lien, heures = 72 }) => {
+  const app = echapper(process.env.APP_NAME || 'NJ Caisse Pro');
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/></head>
+<body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:0">
+<div style="max-width:600px;margin:30px auto;background:white;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
+  <div style="background:#1a2b4a;padding:22px 30px;text-align:center"><h1 style="color:white;margin:0;font-size:20px">${app}</h1>
+  <p style="color:rgba(255,255,255,.7);margin:6px 0 0;font-size:13px">Bienvenue — créez votre mot de passe</p></div>
+  <div style="padding:26px 30px;font-size:14px;color:#1e293b;line-height:1.6">
+    <p>Bonjour ${echapper(nom)},</p>
+    <p>Un compte <b>${echapper(fonction)}</b> vient de vous être ouvert chez <b>${echapper(entreprise)}</b> pour la gestion des activités (demandes de fonds, décaissements, dépenses et pièces justificatives).</p>
+    <p>Votre identifiant de connexion : <b>${echapper(identifiant)}</b></p>
+    <p>Pour activer le compte, choisissez votre mot de passe (8 caractères au moins, avec une lettre et un chiffre). Le lien est valable <b>${Number(heures)} heures</b> et ne fonctionne qu'une fois.</p>
+    <p style="text-align:center;margin:26px 0"><a href="${echapper(lien)}" style="background:#1f5fd1;color:white;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold">Créer mon mot de passe</a></p>
+    <p style="font-size:12px;color:#64748b">Lien expiré ? Demandez à votre administrateur de renvoyer l'invitation, ou utilisez « Mot de passe oublié » sur la page de connexion.</p>
+  </div></div></body></html>`;
+  return envoyer({ to, subject: `${process.env.APP_NAME || 'NJ Caisse Pro'} — créez votre mot de passe`, html });
+};
+
 module.exports = {
   verifierSmtp, sendDemandeAchat, envoyer,
-  sendReinitialisationMotDePasse,
+  sendReinitialisationMotDePasse, sendInvitationMotDePasse,
   sendBienvenueClient,
   sendInvitationDemo, sendRappelDemo, sendNotificationAdmin, contenuInvitation, sendDepassementAlert, sendMouvementAttenteAlert };

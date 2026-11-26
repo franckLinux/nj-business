@@ -312,6 +312,7 @@ router.get   ('/projets/saisie',   authGuard, tenantGuard, requireAnyPermission(
 router.get   ('/projets/acces',        authGuard, tenantGuard, projCtrl.acces);
 router.get   ('/projets/utilisateurs', authGuard, tenantGuard, projCtrl.utilisateurs);
 router.get   ('/projets/equipe',       authGuard, tenantGuard, requirePermission('projets.gerer'), projCtrl.equipe);
+router.post  ('/projets/equipe/:id/invitation', authGuard, tenantGuard, requirePermission('projets.gerer'), requirePermission('users.create'), projCtrl.inviterEquipier);
 router.post  ('/projets/equipe',       authGuard, tenantGuard, requirePermission('projets.gerer'), requirePermission('users.create'), projCtrl.creerEquipier);
 // Lot P3 — routes fixes AVANT /projets/:id.
 router.get   ('/projets/bilan',                    authGuard, tenantGuard, projCtrl.bilan);
@@ -329,6 +330,11 @@ router.post  ('/projets/demandes/:id/valider',       authGuard, tenantGuard, dfC
 router.post  ('/projets/demandes/:id/renvoyer',      authGuard, tenantGuard, dfCtrl.renvoyer);
 router.post  ('/projets/demandes/:id/rejeter',       authGuard, tenantGuard, dfCtrl.rejeter);
 router.post  ('/projets/demandes/:id/annuler',       authGuard, tenantGuard, dfCtrl.annuler);
+router.post  ('/projets/demandes/:id/initier',       authGuard, tenantGuard, dfCtrl.initier);
+router.get   ('/projets/ordres-decaissement',        authGuard, tenantGuard, dfCtrl.ordres);
+router.post  ('/projets/ordres-decaissement/:id/refuser', authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.refuserOrdre);
+router.post  ('/projets/ordres-decaissement/:id/annuler', authGuard, tenantGuard, dfCtrl.annulerOrdre);
+router.get   ('/projets/ordres-decaissement/:id/bon-de-sortie', authGuard, tenantGuard, dfCtrl.bonDeSortie);
 router.post  ('/projets/demandes/:id/decaisser',     authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.decaisser);
 router.post  ('/projets/demandes/:id/solliciter',    authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.solliciter);
 router.post  ('/projets/demandes/:id/reverser',      authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.reverser);

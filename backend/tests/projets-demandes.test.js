@@ -54,6 +54,13 @@ const demande = (extra = {}) => ({
   ...extra,
 });
 
+// 086 : le chef de projet initie, la caisse valide la sortie (ordre de décaissement).
+const ordonner = async (demandeId, corps = {}, qui = 'chef') => {
+  const o = await appel('POST', `/projets/demandes/${demandeId}/initier`, qui, corps);
+  assert.equal(o.status, 201, o.message);
+  return o.data.id;
+};
+
 const creerClient = async (cle, forme) => {
   const c = C[cle];
   [{ id: c.tenant }] = await sql(`INSERT INTO tenants (slug, nom, forme_juridique, initialise_le) VALUES ($1, $2, $3, NOW()) RETURNING id`,
@@ -149,9 +156,10 @@ test('Circuit : chef de projet puis directeur ; renvoi avec motif', async () => 
   assert.equal((await appel('POST', `/projets/demandes/${S.d1}/valider`, 'chef')).status, 403, 'le chef n\'approuve pas');
   const a = await appel('POST', `/projets/demandes/${S.d1}/valider`, 'dir');
   assert.equal(a.data.statut, 'approuvee');
-  const liste = (await appel('GET', '/projets/demandes?vue=a_decaisser', 'cai')).data;
-  assert.equal(liste.demandes[0].etat, 'À décaisser');
-  assert.equal(liste.demandes[0].total, 80000);
+  assert.equal((await appel('GET', '/projets/demandes?vue=a_decaisser', 'cai')).data.demandes.length, 0, 'rien tant que le chef n\'a pas initié');
+  const aInitier = (await appel('GET', '/projets/demandes?vue=a_initier', 'chef')).data;
+  assert.equal(aInitier.demandes[0].etat, 'À décaisser');
+  assert.equal(aInitier.demandes[0].total, 80000);
   // Rejet définitif d'une autre demande, motif obligatoire.
   const d2 = await appel('POST', '/projets/demandes', 'resp', demande({ soumettre: true, objet: 'Deuxième' }));
   assert.equal((await appel('POST', `/projets/demandes/${d2.data.id}/rejeter`, 'chef', { motif: '' })).status, 400);
@@ -160,10 +168,37 @@ test('Circuit : chef de projet puis directeur ; renvoi avec motif', async () => 
 
 test('Décaissement : par la caisse, plafonné à l\'approuvé, hors budget de fonctionnement', async () => {
   assert.equal((await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'resp', { journal_id: S.caisse, rubrique_code: 'ACT' })).status, 403);
-  const trop = await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT', montant: 90000 });
-  assert.equal(trop.status, 409);
-  const r = await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT', montant: 50000 });
+  const seule = await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT', montant: 50000 });
+  assert.equal(seule.code, 'ORDRE_REQUIS', 'la caisse ne décaisse pas sans ordre du chef');
+  assert.equal((await appel('POST', `/projets/demandes/${S.d1}/initier`, 'resp', {})).status, 403, 'le responsable n\'initie pas');
+  assert.equal((await appel('POST', `/projets/demandes/${S.d1}/initier`, 'chef', { montant: 90000 })).status, 409, 'plafonné à l\'approuvé');
+  const o1 = await ordonner(S.d1, { montant: 50000, beneficiaire: 'Relais de Mfou' });
+  // En attente : aucun mouvement de caisse encore.
+  assert.equal((await sql('SELECT count(*)::int AS n FROM projet_demande_mouvements WHERE demande_id = $1', [S.d1]))[0].n, 0);
+  let fiche = (await appel('GET', `/projets/demandes/${S.d1}`, 'cai')).data;
+  assert.equal(fiche.demande.etat, 'Sortie à valider par la caisse');
+  assert.equal(fiche.demande.reste_a_initier, 30000);
+  assert.equal(fiche.actions.decaisser, true);
+  assert.equal((await appel('POST', `/projets/demandes/${S.d1}/initier`, 'chef', { montant: 40000 })).status, 409, 'ordres en attente comptés');
+  assert.equal((await appel('GET', '/projets/demandes?vue=a_decaisser', 'cai')).data.demandes.length, 1);
+  const enAttente = (await appel('GET', '/projets/ordres-decaissement?statut=en_attente', 'cai')).data.ordres;
+  assert.equal(enAttente.length, 1);
+  assert.equal(enAttente[0].a_moi_de_valider, true);
+  const pasEncore = await fetch(`${BASE}/projets/ordres-decaissement/${o1}/bon-de-sortie`, { headers: { Authorization: `Bearer ${C.ong.u.cai.token}` } });
+  assert.equal(pasEncore.status, 409, 'pas de bon avant la sortie');
+  const r = await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'cai', { ordre_id: o1, journal_id: S.caisse, rubrique_code: 'ACT', montant: 99 });
   assert.equal(r.status, 201, r.message);
+  assert.equal(r.data.montant, 50000, 'montant de l\'ordre, pas celui saisi');
+  assert.equal((await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'cai', { ordre_id: o1, journal_id: S.caisse, rubrique_code: 'ACT' })).code, 'ORDRE_TRAITE');
+  const [ord] = await sql('SELECT statut, journal_id, traite_par FROM projet_ordres_decaissement WHERE id = $1', [o1]);
+  assert.deepEqual([ord.statut, String(ord.journal_id), ord.traite_par], ['execute', String(r.data.journal_id), C.ong.u.cai.id]);
+  const bon = await fetch(`${BASE}/projets/ordres-decaissement/${o1}/bon-de-sortie`, { headers: { Authorization: `Bearer ${C.ong.u.chef.token}` } });
+  assert.equal(bon.status, 200);
+  assert.equal(bon.headers.get('content-type'), 'application/pdf');
+  const bonPdf = Buffer.from(await bon.arrayBuffer());
+  if (process.env.DUMP_PDF) fs.writeFileSync(process.env.DUMP_PDF, bonPdf);
+  assert.equal(bonPdf.byteLength > 1500, true);
+  assert.equal((await fetch(`${BASE}/projets/ordres-decaissement/${o1}/bon-de-sortie`, { headers: { Authorization: `Bearer ${C.pme.u.dir.token}` } })).status, 403, 'autre client');
   S.sortie1 = r.data.journal_id;
   const [j] = await sql('SELECT sortie, activite_id FROM journal WHERE id = $1', [S.sortie1]);
   assert.deepEqual([Number(j.sortie), j.activite_id], [50000, S.atelier]);
@@ -173,8 +208,17 @@ test('Décaissement : par la caisse, plafonné à l\'approuvé, hors budget de f
   const direct = await appel('POST', '/journal', 'cai', { date: jour, mois: MOIS[dd.getMonth()], annee: dd.getFullYear(), journal_id: S.caisse,
     rubrique_code: 'ACT', intitule: 'X', entree: 0, sortie: 40000, demande_fonds_id: S.d1 });
   assert.equal(direct.status, 409, direct.message);
-  assert.match(direct.message, /reste 30/);
-  const r2 = await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT' });
+  assert.equal(direct.code, 'ORDRE_REQUIS', 'pas de sortie directe sans ordre');
+  // Refus par la caisse (motif), puis nouvel ordre : retrait par l'initiateur seulement.
+  const o2 = await ordonner(S.d1, { montant: 30000 });
+  assert.equal((await appel('POST', `/projets/ordres-decaissement/${o2}/refuser`, 'cai', { motif: '' })).status, 400);
+  assert.equal((await appel('POST', `/projets/ordres-decaissement/${o2}/refuser`, 'cai', { motif: 'Bénéficiaire absent' })).data.statut, 'refuse');
+  const o3 = await ordonner(S.d1, {});
+  assert.equal((await appel('POST', `/projets/ordres-decaissement/${o3}/annuler`, 'cai', { motif: 'x' })).status, 403, 'la caisse refuse, elle ne retire pas');
+  const direct2 = await appel('POST', '/journal', 'cai', { date: jour, mois: MOIS[dd.getMonth()], annee: dd.getFullYear(), journal_id: S.caisse,
+    rubrique_code: 'ACT', intitule: 'X', entree: 0, sortie: 20000, demande_fonds_id: S.d1, ordre_decaissement_id: o3 });
+  assert.equal(direct2.code, 'ORDRE_MONTANT', 'le montant de l\'ordre exactement');
+  const r2 = await appel('POST', `/projets/demandes/${S.d1}/decaisser`, 'cai', { ordre_id: o3, journal_id: S.caisse, rubrique_code: 'ACT' });
   assert.equal(r2.status, 201, r2.message);
   assert.equal(r2.data.montant, 30000, 'le reste par défaut');
   const d = (await appel('GET', `/projets/demandes/${S.d1}`, 'resp')).data;
@@ -236,7 +280,8 @@ test('Contre-passation du décaissement : il ne compte plus ; annulation par le 
   const d3 = await appel('POST', '/projets/demandes', 'chef', demande({ soumettre: true, objet: 'Par le chef' }));
   assert.equal(d3.data.statut, 'validee_chef', 'le chef demandeur : étape du chef acquise');
   assert.equal((await appel('POST', `/projets/demandes/${d3.data.id}/valider`, 'dir')).status, 200);
-  const r = await appel('POST', `/projets/demandes/${d3.data.id}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT', montant: 10000 });
+  const od = await ordonner(d3.data.id, { montant: 10000 });
+  const r = await appel('POST', `/projets/demandes/${d3.data.id}/decaisser`, 'cai', { ordre_id: od, journal_id: S.caisse, rubrique_code: 'ACT' });
   assert.equal(r.status, 201, r.message);
   assert.equal((await appel('POST', `/projets/demandes/${d3.data.id}/annuler`, 'dir', { motif: 'Erreur' })).status, 409, 'fonds décaissés');
   const cx = await pool.connect();
@@ -268,7 +313,11 @@ test('Solde insuffisant : décaissement refusé, manque porté à la Demande de 
   const ctx = (await appel('GET', '/projets/demandes/contexte', 'cai')).data;
   const caisse = ctx.journaux.find((j) => j.id === String(S.caisse));
   assert.ok(caisse.solde > 0 && caisse.solde < 900000, `solde affiché : ${caisse.solde}`);
-  const refus = await appel('POST', `/projets/demandes/${gros.data.id}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT' });
+  const og = await ordonner(gros.data.id);
+  await new Promise((r) => setTimeout(r, 400));
+  const [{ n: notifCaisse }] = await sql(`SELECT count(*)::int AS n FROM notifications WHERE destinataire_id = $1 AND type = 'demande_fonds_ordre' AND ref_id = $2`, [C.ong.u.cai.id, gros.data.id]);
+  assert.equal(notifCaisse, 1, 'la caisse est prévenue de la sortie à valider');
+  const refus = await appel('POST', `/projets/demandes/${gros.data.id}/decaisser`, 'cai', { ordre_id: og, journal_id: S.caisse, rubrique_code: 'ACT' });
   assert.equal(refus.status, 409);
   assert.equal(refus.code, 'SOLDE_INSUFFISANT');
   assert.match(refus.message, /il manque/);
@@ -311,4 +360,30 @@ test('Équipe des projets : créer un chef de projet et un responsable d\'activi
   assert.deepEqual(ctx.activites.map((x) => x.id), [a2]);
   const equipe = (await appel('GET', '/projets/equipe', 'dir')).data;
   assert.ok(equipe.some((x) => x.username === `chef2-${sfx}` && x.fonction === 'chef_projet' && x.projets.length === 1));
+});
+
+test('Équipe des projets : invitation par e-mail pour créer son mot de passe', async () => {
+  const sansMail = await appel('POST', '/projets/equipe', 'dir', { fonction: 'responsable_activite', username: `resp3-${sfx}` });
+  assert.equal(sansMail.code, 'EMAIL_REQUIS');
+  const r = await appel('POST', '/projets/equipe', 'dir', { fonction: 'responsable_activite', username: `resp3-${sfx}`, email: `resp3-${sfx}@test.cm` });
+  assert.equal(r.status, 201, r.message);
+  assert.ok(r.data.invitation && r.data.invitation.email === `resp3-${sfx}@test.cm`, 'résultat de l\'envoi rendu');
+  const [inv] = await sql(`SELECT nature, expire_le > NOW() + INTERVAL '71 hours' AS long FROM password_resets WHERE user_id = $1 AND utilise_le IS NULL`, [r.data.id]);
+  assert.deepEqual([inv.nature, inv.long], ['invitation', true], 'lien de 72 heures');
+  // Renvoyer : l'ancien lien tombe, un seul reste valable.
+  assert.equal((await appel('POST', `/projets/equipe/${r.data.id}/invitation`, 'cai')).status, 403);
+  assert.equal((await appel('POST', `/projets/equipe/${C.ong.u.cai.id}/invitation`, 'dir')).status, 404, 'hors équipe');
+  assert.equal((await appel('POST', `/projets/equipe/${r.data.id}/invitation`, 'dir')).status, 200);
+  const liens = await sql('SELECT id FROM password_resets WHERE user_id = $1 AND utilise_le IS NULL', [r.data.id]);
+  assert.equal(liens.length, 1);
+  // Le membre ouvre le lien et choisit son mot de passe, puis se connecte.
+  const jeton = crypto.randomBytes(24).toString('base64url');
+  await sql('UPDATE password_resets SET token_hash = $2 WHERE id = $1', [liens[0].id, crypto.createHash('sha256').update(jeton).digest('hex')]);
+  const v0 = await (await fetch(`${BASE}/auth/reinitialisation/${jeton}`)).json();
+  const v = v0.data ?? v0;
+  assert.deepEqual([v.identifiant, v.invitation], [`resp3-${sfx}`, true]);
+  const choix = await fetch(`${BASE}/auth/reinitialisation/${jeton}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mot_de_passe: 'Bienvenue2026' }) });
+  assert.equal(choix.status, 200);
+  const login = await fetch(`${BASE}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: `resp3-${sfx}`, password: 'Bienvenue2026' }) });
+  assert.equal(login.status, 200, 'connexion avec le mot de passe choisi');
 });
