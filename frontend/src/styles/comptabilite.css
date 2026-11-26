@@ -251,3 +251,17 @@
 tr.fin-annule td { color: #94a3b8; text-decoration: line-through; }
 .fin-lignes input { width: 100%; min-width: 70px; }
 .fin-lignes td:first-child input { min-width: 220px; }
+
+/* ── NJ FINANCE lot F10 : tableau des immobilisations ───────────────────── */
+.fin-tableau-immos th.fin-groupe { text-align: center; border-bottom: 1px solid var(--border, #e2e8f0); }
+.fin-tableau-immos td, .fin-tableau-immos th { white-space: nowrap; font-size: 12.5px; }
+.fin-tableau-immos td:nth-child(2) { white-space: normal; min-width: 180px; }
+.fin-ligne-groupe td { background: #f1f5f9; }
+.fin-ligne-total td { font-weight: 700; border-top: 2px solid #cbd5e1; }
+.fin-ligne-courante td { background: #eff6ff; }
+@media print {
+  .sidebar, .app-sidebar, nav, .fin-actions, .fin-lien, header { display: none !important; }
+  .fin-tableau-immos td, .fin-tableau-immos th { font-size: 9px; padding: 2px 4px; }
+}
+.fin-page a.cm-btn { text-decoration: none; }
+.fin-tableau-immos td, .fin-tableau-immos th { padding-left: 8px; padding-right: 8px; }

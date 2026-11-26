@@ -46,6 +46,22 @@ router.get   ('/achats/referentiels',         ...VOIR_ACHATS, c.getAchatsRef);
 router.get   ('/achats/echeancier',           ...VOIR_ACHATS, c.getEcheancier);
 router.get   ('/achats/ouvertes',             ...FACTURES_OUVERTES, c.getOuvertes);
 router.get   ('/achats/sorties-disponibles',  ...AFFECTER, c.getSorties);
+// Lot F10 : tableau des immobilisations.
+const VOIR_IMMOS = P('finance.immos.voir');
+const GERER_IMMOS = P('finance.immos.gerer');
+router.get   ('/immobilisations/referentiels',  ...VOIR_IMMOS, c.getImmoReferentiels);
+router.get   ('/immobilisations/tableau',       ...VOIR_IMMOS, c.getImmoTableau);
+router.get   ('/immobilisations/categories',    ...VOIR_IMMOS, c.getImmoCategories);
+router.post  ('/immobilisations/categories',    ...GERER_IMMOS, c.postImmoCategories);
+router.put   ('/immobilisations/categories/:id', ...GERER_IMMOS, c.putImmoCategorie);
+router.get   ('/immobilisations',               ...VOIR_IMMOS, c.getImmos);
+router.post  ('/immobilisations',               ...GERER_IMMOS, c.postImmo);
+router.get   ('/immobilisations/:id',           ...VOIR_IMMOS, c.getImmo);
+router.put   ('/immobilisations/:id',           ...GERER_IMMOS, c.putImmo);
+router.delete('/immobilisations/:id',           ...GERER_IMMOS, c.deleteImmo);
+router.post  ('/immobilisations/:id/sortie',    ...GERER_IMMOS, c.postImmoSortie);
+router.delete('/immobilisations/:id/sortie',    ...GERER_IMMOS, c.deleteImmoSortie);
+
 // Lot F7 : import et lecture automatique (la facture elle-même se crée par POST /achats, permission de saisie).
 const IMPORTER = P('finance.achats.importer');
 const PIECE_LUE = [authGuard, tenantGuard, requireAnyPermission('finance.achats.importer', 'finance.achats.voir')];

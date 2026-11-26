@@ -7,9 +7,11 @@ const socle = require('../services/comptabilite/socle.service');
 const achats = require('../services/finance/achats.service');
 const facturesPdf = require('../services/finance/factures_pdf.service');
 const extractions = require('../services/finance/extractions.service');
+const immos = require('../services/finance/immobilisations.service');
 const journalCtrl = require('./journal.controller');
 
 const repondre = (res, err, quoi) => {
+  if (err instanceof immos.ErreurImmo) return res.status(err.status).json({ error: err.message });
   if (err instanceof extractions.ErreurExtraction) {
     return res.status(err.status).json({ error: err.message, ...(err.doublon ? { doublon: err.doublon } : {}) });
   }
@@ -116,5 +118,22 @@ module.exports = {
       return res.sendFile(f.chemin, (err) => { if (err && !res.headersSent) repondre(res, err, 'pièce lue'); else if (err) console.error('[NJ FINANCE] envoi de pièce :', err.message); });
     } catch (err) { return repondre(res, err, 'pièce lue'); }
   },
+  // Lot F10 : tableau des immobilisations.
+  ...Object.fromEntries(Object.entries({
+    getImmoReferentiels: ['référentiels des immobilisations', (req) => immos.referentiels(req.tenantId)],
+    getImmos:            ['immobilisations', (req) => immos.lister(req.tenantId, req.query)],
+    getImmo:             ['immobilisation', (req) => immos.lire(req.tenantId, req.params.id)],
+    postImmo:            ['création d\'immobilisation', (req) => immos.creer(ctx(req)), 201],
+    putImmo:             ['modification d\'immobilisation', (req) => immos.modifier({ ...ctx(req), id: req.params.id })],
+    deleteImmo:          ['suppression d\'immobilisation', (req) => immos.supprimer({ ...ctx(req), id: req.params.id })],
+    postImmoSortie:      ['sortie d\'immobilisation', (req) => immos.sortir({ ...ctx(req), id: req.params.id })],
+    deleteImmoSortie:    ['annulation de sortie', (req) => immos.annulerSortie({ ...ctx(req), id: req.params.id })],
+    getImmoTableau:      ['tableau des immobilisations', (req) => immos.tableau(req.tenantId, req.query)],
+    getImmoCategories:   ['catégories d\'immobilisations', (req) => immos.listerCategories(req.tenantId)],
+    postImmoCategories:  ['catégories standard', (req) => immos.initialiserCategories(ctx(req))],
+    putImmoCategorie:    ['catégorie d\'immobilisation', (req) => immos.enregistrerCategorie({ ...ctx(req), id: req.params.id === 'nouvelle' ? null : req.params.id })],
+  }).map(([nom, [quoi, fn, statut]]) => [nom, action(quoi, async (req) => {
+    try { return await fn(req); } catch (e) { throw immos.traduire(e); }   // règles de la base → messages des immobilisations
+  }, statut)])),
   deleteReglement: action('retrait de règlement', (req) => achats.retirerReglement({ ...ctx(req), id: req.params.id })),
 };

@@ -46,6 +46,9 @@ const TITLES = {
   '/finance/achats': 'Achats — Tableau des achats',
   '/finance/achats/nouvelle': 'Achats — Nouvelle facture',
   '/finance/achats/lecture': 'Achats — Import et lecture automatique',
+  '/finance/immobilisations': 'Inventaire — Immobilisations',
+  '/finance/immobilisations/tableau': 'Inventaire — Tableau des immobilisations',
+  '/finance/immobilisations/nouvelle': 'Inventaire — Nouvelle immobilisation',
   '/finance/achats/echeancier': 'Achats — Échéancier fournisseurs',
   '/finance/ventes': 'Facturation',
   '/finance/ventes/nouvelle': 'Facturation — Nouveau document',
@@ -103,7 +106,8 @@ export default function Layout() {
   let title = TITLES[location.pathname] || (location.pathname.startsWith('/projets/') ? 'Gestion des activités — Projets'
     : location.pathname.startsWith('/finance/tiers/') ? 'Configuration — Fiche client / fournisseur'
       : location.pathname.startsWith('/finance/achats/') ? 'Achats — Facture fournisseur'
-        : location.pathname.startsWith('/finance/ventes/') ? 'Facturation — Document client' : 'Tableau de bord');
+        : location.pathname.startsWith('/finance/ventes/') ? 'Facturation — Document client'
+          : location.pathname.startsWith('/finance/immobilisations/') ? 'Inventaire — Fiche d\'immobilisation' : 'Tableau de bord');
   if (location.pathname.startsWith('/journal/')) {
     const j = journaux.find((x) => String(x.id) === String(params.id));
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';
