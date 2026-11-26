@@ -11,6 +11,7 @@ import BudgetPage from '@/pages/BudgetPage';
 import PrevisionsPage from '@/pages/PrevisionsPage';
 import AppelFondsPage from '@/pages/AppelFondsPage';
 import SuiviActivitesPage from '@/pages/SuiviActivitesPage';
+import { DemandesFondsPage, DemandeSaisiePage, DemandeFichePage, DepensesProjetsPage, RapportFinancierPage } from '@/pages/projets/DemandesFondsPages';
 import ProjetsPage from '@/pages/ProjetsPage';
 import ProjetPage from '@/pages/ProjetPage';
 import ProjetsAControlerPage from '@/pages/ProjetsAControlerPage';
@@ -320,6 +321,12 @@ function AuthenticatedApp() {
         <Route path="activites"      element={<Autorise code={PAGE_PERMS['/activites']}><SuiviActivitesPage /></Autorise>} />
         {/* Projets des ONG / associations (069) : le serveur décide du périmètre. */}
         <Route path="projets"        element={<ProjetsPage />} />
+        <Route path="projets/demandes"            element={<DemandesFondsPage />} />
+        <Route path="projets/demandes/nouvelle"   element={<DemandeSaisiePage />} />
+        <Route path="projets/demandes/:id"        element={<DemandeFichePage />} />
+        <Route path="projets/demandes/:id/modifier" element={<DemandeSaisiePage />} />
+        <Route path="projets/depenses"            element={<DepensesProjetsPage />} />
+        <Route path="projets/rapport"             element={<RapportFinancierPage />} />
         <Route path="projets/a-controler" element={<ProjetsAControlerPage />} />
         <Route path="projets/bilan"  element={<ProjetsBilanPage />} />
         <Route path="projets/:id"    element={<ProjetPage />} />

@@ -314,6 +314,28 @@ router.get   ('/projets/utilisateurs', authGuard, tenantGuard, projCtrl.utilisat
 // Lot P3 — routes fixes AVANT /projets/:id.
 router.get   ('/projets/bilan',                    authGuard, tenantGuard, projCtrl.bilan);
 router.get   ('/projets/controle/justificatifs',   authGuard, tenantGuard, projCtrl.aControler);
+// Gestion des activités simplifiée (083) : demandes de fonds, dépenses, rapport financier.
+const dfCtrl = require('../controllers/projets_demandes.controller');
+router.get   ('/projets/demandes/contexte',          authGuard, tenantGuard, dfCtrl.contexte);
+router.get   ('/projets/demandes',                   authGuard, tenantGuard, dfCtrl.lister);
+router.post  ('/projets/demandes',                   authGuard, tenantGuard, dfCtrl.creer);
+router.get   ('/projets/demandes/:id',               authGuard, tenantGuard, dfCtrl.lire);
+router.put   ('/projets/demandes/:id',               authGuard, tenantGuard, dfCtrl.modifier);
+router.delete('/projets/demandes/:id',               authGuard, tenantGuard, dfCtrl.supprimer);
+router.post  ('/projets/demandes/:id/soumettre',     authGuard, tenantGuard, dfCtrl.soumettre);
+router.post  ('/projets/demandes/:id/valider',       authGuard, tenantGuard, dfCtrl.valider);
+router.post  ('/projets/demandes/:id/renvoyer',      authGuard, tenantGuard, dfCtrl.renvoyer);
+router.post  ('/projets/demandes/:id/rejeter',       authGuard, tenantGuard, dfCtrl.rejeter);
+router.post  ('/projets/demandes/:id/annuler',       authGuard, tenantGuard, dfCtrl.annuler);
+router.post  ('/projets/demandes/:id/decaisser',     authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.decaisser);
+router.post  ('/projets/demandes/:id/reverser',      authGuard, tenantGuard, requirePermission('journal.create'), dfCtrl.reverser);
+router.post  ('/projets/demandes/:id/depenses',      authGuard, tenantGuard, dfCtrl.declarer);
+router.get   ('/projets/depenses',                   authGuard, tenantGuard, dfCtrl.depenses);
+router.delete('/projets/depenses/:id',               authGuard, tenantGuard, dfCtrl.retirerDepense);
+router.post  ('/projets/depenses/:id/controler',     authGuard, tenantGuard, dfCtrl.controler);
+router.get   ('/projets/depenses/:id/fichier',       authGuard, tenantGuard, dfCtrl.fichierDepense);
+router.get   ('/projets/rapport-financier',          authGuard, tenantGuard, dfCtrl.rapport);
+router.get   ('/projets/rapport-financier/pdf',      authGuard, tenantGuard, dfCtrl.rapportPdf);
 router.get   ('/projets',              authGuard, tenantGuard, projCtrl.lister);
 router.post  ('/projets',              authGuard, tenantGuard, projCtrl.creerProjet);
 router.get   ('/projets/:id',          authGuard, tenantGuard, projCtrl.detail);

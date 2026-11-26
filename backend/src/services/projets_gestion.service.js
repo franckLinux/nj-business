@@ -872,9 +872,12 @@ const acces = async (req) => {
   const [{ nb }] = d.valider
     ? await q(`SELECT COUNT(*)::int AS nb FROM projet_budgets WHERE tenant_id = :t AND statut = 'soumis'`, { t: req.tenantId })
     : [{ nb: 0 }];
+  // Gestion des activités simplifiée (083) : demandes de fonds et dépenses.
+  const df = await require('./projets_demandes.service').compteurs(req, d);
   return {
     ong: true,
-    visible: d.voirTous || d.chef.length > 0 || d.responsable.length > 0,
+    visible: d.voirTous || d.chef.length > 0 || d.responsable.length > 0 || df.directeur || df.comptable,   // la caissière passe par Caisse Pro → Fonds à décaisser
+    ...df,
     a_valider: nb,
     justificatifs_a_controler: await require('./projets_justificatifs.service').nbAControler(req, d),
     controle_justificatifs: d.validerJustificatifs || d.chef.length > 0,

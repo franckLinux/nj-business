@@ -9,6 +9,7 @@ import RubriquesTab from '@/components/config/RubriquesTab';
 import PiecesTab from '@/components/config/PiecesTab';
 import RolesTab from '@/components/config/RolesTab';
 import ActivitesTab from '@/components/config/ActivitesTab';
+import ProjetsConfigTab from '@/components/config/ProjetsConfigTab';
 import FacturationTab from '@/pages/finance/FacturationTab';
 import { TiersListePage } from '@/pages/finance/TiersPages';
 import { voitOngletConfig } from '@/lib/acces';
@@ -23,6 +24,22 @@ const FournisseursTab = () => <TiersListePage key="f" sens="fournisseur" />;
 // NJ FINANCE (menu réorganisé le 25/11/2026) : onglets regroupés en trois familles —
 // l'entité, ses tiers (clients, fournisseurs), les paramètres comptables et financiers.
 const GROUPES = { entite: "L'entité", tiers: 'Clients et fournisseurs', parametres: 'Paramètres comptables et financiers' };
+// 083 : projets, chef de projet, activités et responsables déclarés ici ; la liste
+// complète des activités (y compris hors projet) reste accessible en dessous.
+function ActivitesProjetsTab(props) {
+  const [toutes, setToutes] = useState(false);
+  return (
+    <div>
+      <ProjetsConfigTab />
+      <div style={{ marginTop: 18 }}>
+        <button type="button" className="cm-btn cm-secondaire cm-petit" onClick={() => setToutes((x) => !x)}>
+          {toutes ? 'Masquer la liste détaillée des activités' : 'Liste détaillée des activités (y compris hors projet)'}</button>
+      </div>
+      {toutes && <div style={{ marginTop: 12 }}><ActivitesTab {...props} /></div>}
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'entite', groupe: 'entite', label: '🏢 Entité', Comp: EntiteTab },
   { id: 'users', groupe: 'entite', label: '👥 Utilisateurs', Comp: UsersTab },
@@ -34,7 +51,7 @@ const TABS = [
   { id: 'pieces', groupe: 'parametres', label: '📎 Pièces justificatives', Comp: PiecesTab },
   // NJ FINANCE F5 (079) : catégories, prestations, modes de règlement, taxes, numérotation.
   { id: 'facturation', groupe: 'parametres', label: '🧾 Facturation', Comp: FacturationTab },
-  { id: 'activites', groupe: 'parametres', label: '🎯 Activités / projets', Comp: ActivitesTab },
+  { id: 'activites', groupe: 'parametres', label: '🎯 Activités / projets', Comp: ActivitesProjetsTab },
 ];
 
 export default function ConfigPage() {

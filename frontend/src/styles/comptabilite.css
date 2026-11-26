@@ -243,3 +243,11 @@
 
 .fin-actions-ligne a.cm-btn, .fin-depot + * a.cm-btn { text-decoration: none; }
 .cm-page.fin-page-large { max-width: none; }
+
+/* ── Gestion des activités simplifiée (083) ─────────────────────────────── */
+.fin-totaux-cartes { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.fin-chiffre { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0; }
+.fin-chiffre b { font-size: 18px; font-variant-numeric: tabular-nums; }
+tr.fin-annule td { color: #94a3b8; text-decoration: line-through; }
+.fin-lignes input { width: 100%; min-width: 70px; }
+.fin-lignes td:first-child input { min-width: 220px; }

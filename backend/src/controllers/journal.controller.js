@@ -7,6 +7,7 @@ const { Op, fn, col } = require('sequelize');
 const { resoudreActivite } = require('./activites.controller');
 const hebdoSvc = require('../services/budget_hebdo.service');
 const projetsSvc = require('../services/projets.service');
+const demandesSvc = require('../services/projets_demandes.service');
 const ecartsSvc = require('../services/ecarts_caisse.service');
 
 // ── Activité / projet obligatoire (039) ───────────────────────────────────
@@ -158,6 +159,19 @@ const createMouvement = async (req, res) => {
     console.error('[Journal] contrôle rubrique d\'écart :', e.message);
     return res.status(500).json({ error: 'Erreur serveur.' });
   }
+  // Gestion des activités (083) : décaissement ou reliquat d'une demande de
+  // fonds approuvée. L'activité est celle de la demande.
+  let lienDemande = null;
+  if (req.body.demande_fonds_id) {
+    try {
+      lienDemande = await demandesSvc.lienCaisse(req.tenantId, req.body.demande_fonds_id, { entree, sortie });
+      activiteId = lienDemande.activiteId;
+    } catch (e) {
+      if (e instanceof projetsSvc.ErreurProjet) return res.status(e.status).json({ error: e.message, code: e.code });
+      console.error('[Journal] demande de fonds :', e.message);
+      return res.status(500).json({ error: 'Erreur serveur.' });
+    }
+  }
   // ONG / association (069) : projet bénéficiaire d'un financement affecté,
   // activité de projet d'une remise de fonds. null pour une PME.
   let projetCtx = null;
@@ -280,16 +294,20 @@ const createMouvement = async (req, res) => {
     };
     let mouvement;
     let projetInfo = null;
-    if (projetCtx?.imputation || sortieProjet) {
-      // Écriture + lien projet (ou contrôle du budget du projet) dans UNE
-      // transaction : tout ou rien.
+    if (projetCtx?.imputation || sortieProjet || lienDemande) {
+      // Écriture + lien projet (ou contrôle du budget du projet, ou lien à la
+      // demande de fonds — plafonds contrôlés en base) dans UNE transaction.
       mouvement = await sequelize.transaction(async (t) => {
-        if (sortieProjet) {
+        if (sortieProjet && !lienDemande) {
           projetInfo = await projetsSvc.controlerSortieProjet(req.tenantId,
             { activiteId: projetCtx.activiteProjet.id, montant: montantSortie }, t);
         }
         const m = await Mouvement.create(valeurs, { transaction: t });
-        if (projetCtx.imputation) {
+        if (lienDemande) {
+          await demandesSvc.relierMouvement(req.tenantId, lienDemande, m.id, req.user.id, t);
+          projetInfo = { demande_fonds_id: String(lienDemande.demandeId), sens: lienDemande.sens };
+        }
+        if (projetCtx?.imputation) {
           await projetsSvc.enregistrerImputation(req.tenantId,
             { journalId: m.id, imputation: projetCtx.imputation, userId: req.user.id }, t);
           projetInfo = { projet_id: projetCtx.imputation.projetId };
@@ -309,6 +327,8 @@ const createMouvement = async (req, res) => {
     res.status(201).json({ ...mouvement.toJSON(), budget_warning: budgetWarning, ...(projetInfo ? { projet: projetInfo } : {}) });
   } catch (err) {
     if (err instanceof projetsSvc.ErreurProjet) return res.status(err.status).json({ error: err.message, code: err.code });
+    const e = demandesSvc.traduire(err);
+    if (e instanceof projetsSvc.ErreurProjet) return res.status(e.status).json({ error: e.message, code: e.code });
     console.error('[Journal] createMouvement :', err.message);
     res.status(500).json({ error: `Erreur serveur : ${err.message}` });
   }

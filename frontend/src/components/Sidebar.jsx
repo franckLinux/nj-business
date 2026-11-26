@@ -42,7 +42,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
   // Gestion d'activité (ex-Projets, 069) : ONG / associations, pour la direction, le comptable et les
   // personnes désignées (chef de projet, responsable d'activité).
   const accesProjets = useAccesProjets(`${activeTenantId || ''}:${location.pathname}:${location.search}`);
-  const badgeProjets = (accesProjets?.a_valider || 0) + (accesProjets?.justificatifs_a_controler || 0);
+  const badgeProjets = (accesProjets?.demandes_a_valider || 0) + (accesProjets?.depenses_a_controler || 0);
   // Entrées du menu qui ouvrent une même page filtrée (?filtre=…, ?type=…) : une seule active.
   const surPage = (path, q) => location.pathname === path && (q ? location.search.includes(q) : location.search === '');
   const comptaActive = utiliseAccueil(user) ? moduleActif(user, 'comptabilite') : Boolean(isAdmin && activeTenantId);
@@ -155,42 +155,39 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
           name="gestion-activite"
           label="Gestion des activités"
           badge={badgeProjets}
-          badgeTitre="Budgets à valider et justificatifs à contrôler"
+          badgeTitre="Demandes de fonds à valider et dépenses à contrôler"
           icon={<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><line x1="8" y1="13" x2="16" y2="13" /></svg>}
         >
+          {/* Simplifié le 26/11/2026 (083) : demande de fonds → budget approuvé → caisse ;
+              dépenses et justificatifs ; rapport financier. Projets, chefs et responsables : Configuration. */}
           {accesProjets?.visible && (
-          <NavLink to="/projets" className={subClass}>
-            <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><line x1="8" y1="13" x2="16" y2="13" /></svg>
-            <span style={{ flex: 1 }}>Activités et projets</span>
-            {(accesProjets.a_valider || 0) + (accesProjets.justificatifs_a_controler || 0) > 0 && (
-              <span className="j-badge" style={{ background: '#d97706', color: '#fff' }} title="Budgets à valider et justificatifs à contrôler">
-                {(accesProjets.a_valider || 0) + (accesProjets.justificatifs_a_controler || 0)}
-              </span>
+          <NavLink to="/projets/demandes" className={() => subClass({ isActive: location.pathname.startsWith('/projets/demandes') })}>
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
+            <span style={{ flex: 1 }}>Demandes de fonds</span>
+            {(accesProjets.demandes_a_valider || 0) > 0 && (
+              <span className="j-badge" style={{ background: '#d97706', color: '#fff' }} title="Demandes à valider">{accesProjets.demandes_a_valider}</span>
             )}
           </NavLink>
           )}
           {accesProjets?.visible && (
-          <NavLink to="/projets/bilan" className={subClass}>
-            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
-            Budgets et suivi budgétaire
+          <NavLink to="/projets/depenses" className={subClass}>
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+            <span style={{ flex: 1 }}>Dépenses et justificatifs</span>
+            {(accesProjets.depenses_a_controler || 0) > 0 && (
+              <span className="j-badge" style={{ background: '#d97706', color: '#fff' }} title="Dépenses à contrôler">{accesProjets.depenses_a_controler}</span>
+            )}
           </NavLink>
           )}
           {accesProjets?.visible && (
-          <NavLink to="/projets/a-controler" className={subClass}>
-            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
-            Justificatifs à contrôler
-          </NavLink>
-          )}
-          {voit('/activites') && (
-          <NavLink to="/activites" className={subClass}>
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></svg>
-            Rapports par activité
+          <NavLink to="/projets/rapport" className={subClass}>
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>
+            Rapport financier
           </NavLink>
           )}
           {voitOngletConfig(user, can, 'activites') && (
             <Link to="/config" state={{ onglet: 'activites' }} className="nav-item nav-sub" title="Configuration → Activités / projets">
               <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>
-              Fiches des activités
+              Projets et responsables
             </Link>
           )}
         </NavGroup>
@@ -275,6 +272,15 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
               </NavLink>
             ))}
           </div>
+          {accesProjets?.ong && accesProjets?.caisse && (
+          <NavLink to="/projets/demandes?vue=a_decaisser" className={() => subClass({ isActive: false })}>
+            <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></svg>
+            <span style={{ flex: 1 }}>Fonds à décaisser</span>
+            {(accesProjets.demandes_a_decaisser || 0) > 0 && (
+              <span className="j-badge" style={{ background: '#2563eb', color: '#fff' }} title="Demandes de fonds approuvées à décaisser">{accesProjets.demandes_a_decaisser}</span>
+            )}
+          </NavLink>
+          )}
           {peutVoirAttente && (
           <NavLink to="/attente" className={subClass}>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><polyline points="12 7 12 12 15 14" /></svg>
