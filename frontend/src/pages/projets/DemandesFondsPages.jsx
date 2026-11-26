@@ -425,6 +425,16 @@ function EtatOrdre({ o }) {
 }
 const imprimerBon = (o, toast) => ouvrirFichier(api, `/projets/ordres-decaissement/${o.id}/bon-de-sortie`,
   `bon-de-sortie-${o.mouvement_numero || o.numero_ordre}.pdf`, 'application/pdf', toast);
+// Le navigateur bloque une fenêtre ouverte après une attente réseau : l'onglet du bon
+// est ouvert au clic (vide), puis rempli quand la sortie est enregistrée.
+const ouvrirBonDansOnglet = async (onglet, ordreId, toast) => {
+  const r = await api.fichier(`/projets/ordres-decaissement/${ordreId}/bon-de-sortie`);
+  if (r.error) { onglet?.close(); toast(r.error, 'error'); return; }
+  const lien = URL.createObjectURL(r.blob);
+  if (onglet && !onglet.closed) onglet.location.href = lien;
+  else imprimerBon({ id: ordreId }, toast);
+  setTimeout(() => URL.revokeObjectURL(lien), 120000);
+};
 
 // Le chef de projet (ou le directeur) initie : le paiement reste en attente de la caisse.
 function InitierTiroir({ demande, onFermer, onFait }) {
@@ -474,12 +484,13 @@ function MouvementTiroir({ sens, ordre, demande, ctx, onFermer, onFait }) {
   const manque = decaissement && journal && journal.type !== 'banque' ? Math.round((montantNum - Math.max(journal.solde, 0)) * 100) / 100 : 0;
   const valider = async () => {
     setEnCours(true); setErreur('');
+    const onglet = decaissement ? window.open('', '_blank') : null;
     const r = await api.post(`/projets/demandes/${demande.id}/${decaissement ? 'decaisser' : 'reverser'}`, v);
     setEnCours(false);
-    if (r?.error) { setErreur(r.error); return; }
+    if (r?.error) { onglet?.close(); setErreur(r.error); return; }
     toast(`${decaissement ? 'Sortie validée' : 'Reliquat enregistré'} (n° ${r.numero}).${decaissement ? ' Faites signer le bon de sortie.' : ''}`, 'success');
     // Le bon de sortie s'ouvre aussitôt pour impression et signature du bénéficiaire.
-    if (decaissement) imprimerBon({ id: r.ordre_id, mouvement_numero: r.numero }, toast);
+    if (decaissement) ouvrirBonDansOnglet(onglet, r.ordre_id, toast);
     onFait();
   };
   const solliciter = async () => {

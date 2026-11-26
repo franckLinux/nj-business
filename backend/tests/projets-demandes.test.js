@@ -281,8 +281,10 @@ test('Contre-passation du décaissement : il ne compte plus ; annulation par le 
   assert.equal(d3.data.statut, 'validee_chef', 'le chef demandeur : étape du chef acquise');
   assert.equal((await appel('POST', `/projets/demandes/${d3.data.id}/valider`, 'dir')).status, 200);
   const od = await ordonner(d3.data.id, { montant: 10000 });
-  const r = await appel('POST', `/projets/demandes/${d3.data.id}/decaisser`, 'cai', { ordre_id: od, journal_id: S.caisse, rubrique_code: 'ACT' });
+  // Écran resté en cache (sans ordre_id) : l'ordre en attente est retrouvé.
+  const r = await appel('POST', `/projets/demandes/${d3.data.id}/decaisser`, 'cai', { journal_id: S.caisse, rubrique_code: 'ACT', montant: 99999 });
   assert.equal(r.status, 201, r.message);
+  assert.deepEqual([r.data.ordre_id, r.data.montant], [od, 10000]);
   assert.equal((await appel('POST', `/projets/demandes/${d3.data.id}/annuler`, 'dir', { motif: 'Erreur' })).status, 409, 'fonds décaissés');
   const cx = await pool.connect();
   try {

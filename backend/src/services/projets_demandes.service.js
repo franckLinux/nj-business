@@ -444,8 +444,18 @@ const mouvement = (sens) => async (req, id, { creerMouvement }) => {
   // pour son montant exact ; elle ne décaisse jamais de sa propre initiative.
   let ordre = null;
   if (sens === 'decaissement') {
-    if (!b.ordre_id) throw err(409, 'Le décaissement est initié par le chef de projet : validez un ordre de décaissement en attente.', 'ORDRE_REQUIS');
-    [ordre] = await Q(`${SELECT_ORDRE} WHERE o.id = :o AND o.tenant_id = :t`, { o: idNum(b.ordre_id, 'Ordre de décaissement'), t: req.tenantId });
+    // Sans ordre précisé (écran resté en cache, ancienne version) : l'ordre en attente
+    // le plus ancien de la demande que cette personne n'a pas initié.
+    if (b.ordre_id) {
+      [ordre] = await Q(`${SELECT_ORDRE} WHERE o.id = :o AND o.tenant_id = :t`, { o: idNum(b.ordre_id, 'Ordre de décaissement'), t: req.tenantId });
+    } else {
+      const attente = await Q(`${SELECT_ORDRE} WHERE o.demande_id = :d AND o.tenant_id = :t AND o.statut = 'en_attente' ORDER BY o.id`, { d: d.id, t: req.tenantId });
+      ordre = attente.find((o) => o.initie_par !== req.user.id);
+      if (!ordre && attente.length) {
+        throw err(403, 'Vous avez initié ce décaissement : une autre personne de la caisse doit valider la sortie.', 'MEME_PERSONNE');
+      }
+      if (!ordre) throw err(409, 'Le décaissement est initié par le chef de projet : aucun ordre de décaissement n\'attend la caisse pour cette demande.', 'ORDRE_REQUIS');
+    }
     if (!ordre || ordre.demande_id !== String(d.id)) throw err(404, 'Ordre de décaissement introuvable.', 'ORDRE_INTROUVABLE');
     if (ordre.statut !== 'en_attente') throw err(409, 'Cet ordre de décaissement a déjà été traité.', 'ORDRE_TRAITE');
     if (ordre.initie_par === req.user.id) {
