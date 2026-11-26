@@ -58,6 +58,20 @@ before(async () => {
     await new Promise((r) => setTimeout(r, 250));
   }
   assert.equal((await appel('POST', '/finance/config/initialiser', 'cpt')).status, 200);
+  // Client déjà inscrit : caissière dotée d'un profil métier de caisse créé avant NJ FINANCE
+  // (aucun droit finance.*), et une autre via le profil propre au module (066).
+  const [prof] = await sql(`INSERT INTO roles (nom, code, tenant_id, is_system) VALUES ('Caisse seule', $1, $2, false) RETURNING id`, [`caisse-${sfx}`, C.tenant]);
+  await sql(`INSERT INTO role_permissions (role_id, permission_code) VALUES ($1, 'journal.view'), ($1, 'journal.create')`, [prof.id]);
+  for (const [qui, mode] of [['prof', 'compte'], ['profmod', 'module']]) {
+    const username = `${qui}-bascule-${sfx}`;
+    const [u] = await sql(`INSERT INTO users (tenant_id, username, email, password_hash, role, actif, custom_role_id) VALUES ($1, $2, $3, 'x', 'caissier', true, $4) RETURNING id`,
+      [C.tenant, username, `${username}@test.cm`, mode === 'compte' ? prof.id : null]);
+    if (mode === 'module') {
+      await sql(`INSERT INTO user_modules (user_id, module_code, tenant_id, role_id) VALUES ($1, 'caisse', $2, $3)
+                 ON CONFLICT (user_id, module_code) DO UPDATE SET role_id = EXCLUDED.role_id`, [u.id, C.tenant, prof.id]);
+    }
+    C.u[qui] = { id: u.id, token: jwt.sign({ sub: u.id, username, role: 'caissier', tenantId: C.tenant }, SECRET, { expiresIn: '1h' }) };
+  }
 });
 after(async () => {
   serveur?.kill();
@@ -91,6 +105,21 @@ test('PME : tout NJ FINANCE est ouvert, sauf la gestion des activités', async (
   assert.deepEqual([acces.ong, acces.visible], [false, false]);
   assert.equal((await appel('GET', '/projets/demandes', 'dir')).status, 403);
   assert.equal((await appel('GET', '/projets/rapport-financier', 'dir')).status, 403);
+});
+
+test('Client déjà inscrit : un profil métier créé avant NJ FINANCE ne cache plus Achats ni Facturation', async () => {
+  for (const qui of ['prof', 'profmod']) {
+    assert.equal((await appel('GET', '/finance/achats', qui)).status, 200, `${qui} : achats`);
+    assert.equal((await appel('GET', '/finance/ventes', qui)).status, 200, `${qui} : facturation`);
+    assert.equal((await appel('GET', '/journal', qui)).status === 403, false, `${qui} : la caisse reste ouverte`);
+    // Le profil garde la main sur la caisse : pas de droit de configuration hérité du rôle système.
+    assert.equal((await appel('GET', '/rubriques', qui)).status, 403, `${qui} : rubriques`);
+  }
+  // Un profil qui porte un droit finance.* décide seul de ce groupe.
+  const [{ role_id: r }] = await sql('SELECT custom_role_id AS role_id FROM users WHERE id = $1', [C.u.prof.id]);
+  await sql(`INSERT INTO role_permissions (role_id, permission_code) VALUES ($1, 'finance.achats.voir')`, [r]);
+  assert.equal((await appel('GET', '/finance/achats', 'prof')).status, 200);
+  assert.equal((await appel('GET', '/finance/ventes', 'prof')).status, 403);
 });
 
 test('La PME devient ONG : la gestion des activités apparaît ; redevenue PME, elle disparaît', async () => {

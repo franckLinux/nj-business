@@ -29,7 +29,19 @@ const { sequelize, Permission, TenantPermission } = require('../models');
 // Groupe d'une permission = module NJ BUSINESS auquel elle appartient. Toutes
 // les permissions historiques (journal, budget, contrôle…) forment « caisse ».
 // 064 : les permissions « entreprise » forment le SOCLE, indépendant des modules.
-const GROUPE = `CASE WHEN p.module IN ('commercial', 'comptabilite', 'dsf', 'revis', 'cg') THEN p.module
+//
+// 26/11/2026 — les droits de NJ FINANCE (module 'finance' : achats, facturation,
+// clients et fournisseurs, règlements…, lots F4 à F8) forment leur PROPRE groupe
+// pour la priorité profil / rôle système. Les profils métier créés pour la caisse
+// avant ces lots n'en portent aucun : sans cela, ils masquaient TOUT le groupe
+// « caisse » du rôle système, et les personnes ainsi profilées des clients déjà
+// inscrits ne voyaient ni Achats ni Facturation (les comptes de démonstration,
+// sans profil, les voyaient). Un profil qui porte au moins un droit finance.*
+// garde la main sur ce groupe. Côté modules (066), ces droits restent ceux du
+// module « caisse » (NJ FINANCE) : GROUPE_MODULE.
+const GROUPE = `CASE WHEN p.module IN ('commercial', 'comptabilite', 'dsf', 'revis', 'cg', 'finance') THEN p.module
+                     WHEN p.module = 'entreprise' THEN 'socle' ELSE 'caisse' END`;
+const GROUPE_MODULE = `CASE WHEN p.module IN ('commercial', 'comptabilite', 'dsf', 'revis', 'cg') THEN p.module
                      WHEN p.module = 'entreprise' THEN 'socle' ELSE 'caisse' END`;
 const SQL_BASE = `
   WITH u AS (
@@ -88,8 +100,8 @@ const PROFIL_MODULE = `
       FROM user_modules um
       JOIN role_permissions rp ON rp.role_id = um.role_id
       JOIN permissions p ON p.code = rp.permission_code
-     WHERE um.user_id = :userId AND um.actif AND um.role_id IS NOT NULL AND ${GROUPE} = um.module_code`;
-const PROFIL_MODULE_EXCLU = `WHERE ${GROUPE} NOT IN (
+     WHERE um.user_id = :userId AND um.actif AND um.role_id IS NOT NULL AND ${GROUPE_MODULE} = um.module_code`;
+const PROFIL_MODULE_EXCLU = `WHERE ${GROUPE_MODULE} NOT IN (
       SELECT module_code FROM user_modules WHERE user_id = :userId AND actif AND role_id IS NOT NULL)`;
 
 let modulesUtilisateursPresents = false;
