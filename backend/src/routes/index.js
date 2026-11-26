@@ -311,6 +311,8 @@ router.get   ('/projets/saisie',   authGuard, tenantGuard, requireAnyPermission(
 // sa DÉSIGNATION fixe son périmètre, contrôlé par le service à chaque appel.
 router.get   ('/projets/acces',        authGuard, tenantGuard, projCtrl.acces);
 router.get   ('/projets/utilisateurs', authGuard, tenantGuard, projCtrl.utilisateurs);
+router.get   ('/projets/equipe',       authGuard, tenantGuard, requirePermission('projets.gerer'), projCtrl.equipe);
+router.post  ('/projets/equipe',       authGuard, tenantGuard, requirePermission('projets.gerer'), requirePermission('users.create'), projCtrl.creerEquipier);
 // Lot P3 — routes fixes AVANT /projets/:id.
 router.get   ('/projets/bilan',                    authGuard, tenantGuard, projCtrl.bilan);
 router.get   ('/projets/controle/justificatifs',   authGuard, tenantGuard, projCtrl.aControler);

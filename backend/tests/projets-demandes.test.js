@@ -287,3 +287,28 @@ test('Solde insuffisant : décaissement refusé, manque porté à la Demande de 
   // La banque n'est pas concernée par le contrôle du solde (découvert possible) ni par la sollicitation.
   assert.equal((await appel('POST', `/projets/demandes/${gros.data.id}/solliciter`, 'cai', { journal_id: S.banque, rubrique_code: 'ACT' })).status, 400);
 });
+
+test('Équipe des projets : créer un chef de projet et un responsable d\'activité (ONG seulement)', async () => {
+  assert.equal((await appel('POST', '/projets/equipe', 'dir', { fonction: 'chef_projet', username: `x-${sfx}`, password: 'MotDePasse1' }, 'pme')).status, 403, 'PME');
+  assert.equal((await appel('POST', '/projets/equipe', 'cai', { fonction: 'chef_projet', username: `x-${sfx}`, password: 'MotDePasse1' })).status, 403, 'caissière');
+  assert.equal((await appel('POST', '/projets/equipe', 'dir', { fonction: 'chef_projet', username: `x-${sfx}`, password: 'court' })).status, 400);
+  const [{ id: p2 }] = await sql(`INSERT INTO activites (tenant_id, nom, type) VALUES ($1, 'Eau potable', 'projet') RETURNING id`, [C.ong.tenant]);
+  const [{ id: a2 }] = await sql(`INSERT INTO activites (tenant_id, nom, type, projet_id) VALUES ($1, 'Forage de Mfou', 'activite', $2) RETURNING id`, [C.ong.tenant, p2]);
+  const chef = await appel('POST', '/projets/equipe', 'dir', { fonction: 'chef_projet', username: `chef2-${sfx}`, email: `chef2-${sfx}@test.cm`, password: 'MotDePasse1', projet_id: p2 });
+  assert.equal(chef.status, 201, chef.message);
+  const resp = await appel('POST', '/projets/equipe', 'dir', { fonction: 'responsable_activite', username: `resp2-${sfx}`, password: 'MotDePasse1', activite_id: a2 });
+  assert.equal(resp.status, 201, resp.message);
+  assert.equal((await appel('POST', '/projets/equipe', 'dir', { fonction: 'chef_projet', username: `chef2-${sfx}`, password: 'MotDePasse1' })).status, 409);
+  const [u] = await sql(`SELECT u.role, r.nom, r.tenant_id FROM users u JOIN roles r ON r.id = u.custom_role_id WHERE u.id = $1`, [chef.data.id]);
+  assert.deepEqual([u.role, u.nom, u.tenant_id], ['collaborateur', 'Chef de projet', C.ong.tenant]);
+  const [{ chef_projet_id: cp }] = await sql('SELECT chef_projet_id FROM activites WHERE id = $1', [p2]);
+  assert.equal(cp, chef.data.id);
+  const [{ n }] = await sql(`SELECT count(*)::int AS n FROM user_modules WHERE user_id = $1 AND module_code = 'caisse' AND actif`, [resp.data.id]);
+  assert.equal(n, 1, 'rattaché à NJ FINANCE');
+  // Le responsable créé peut aussitôt demander des fonds pour son activité.
+  C.ong.u.resp2 = { token: jwt.sign({ sub: resp.data.id, username: `resp2-${sfx}`, role: 'collaborateur', tenantId: C.ong.tenant }, SECRET, { expiresIn: '1h' }) };
+  const ctx = (await appel('GET', '/projets/demandes/contexte', 'resp2')).data;
+  assert.deepEqual(ctx.activites.map((x) => x.id), [a2]);
+  const equipe = (await appel('GET', '/projets/equipe', 'dir')).data;
+  assert.ok(equipe.some((x) => x.username === `chef2-${sfx}` && x.fonction === 'chef_projet' && x.projets.length === 1));
+});
