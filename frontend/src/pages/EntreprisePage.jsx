@@ -187,6 +187,9 @@ export default function EntreprisePage() {
     setEnCours(true);
     const r = await api.put('/entreprise', corps);
     setEnCours(false);
+    // La forme juridique décide de la rubrique « Gestion des activités » (ONG, associations) :
+    // le menu se met à jour sans recharger la page.
+    if (!r?.error) window.dispatchEvent(new Event('nj:entite-modifiee'));
     apres(r, 'Configuration de l\'entreprise enregistrée.');
   };
 

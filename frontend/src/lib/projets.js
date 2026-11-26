@@ -40,13 +40,20 @@ export function useContexteProjets() {
 /** Accès au menu « Projets » (ONG / associations) : { ong, visible, a_valider, … }. */
 export function useAccesProjets(cle) {
   const [acces, setAcces] = useState(null);
+  // Forme juridique modifiée (PME ↔ ONG / association) : on relit l'accès aussitôt.
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    const relire = () => setVersion((v) => v + 1);
+    window.addEventListener('nj:entite-modifiee', relire);
+    return () => window.removeEventListener('nj:entite-modifiee', relire);
+  }, []);
   useEffect(() => {
     let annule = false;
     api.get('/projets/acces').then((r) => {
       if (!annule && r && !r.error) setAcces(r);
     });
     return () => { annule = true; };
-  }, [cle]);
+  }, [cle, version]);
   return acces;
 }
 
