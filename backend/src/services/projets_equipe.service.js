@@ -40,6 +40,10 @@ const profil = async (tenantId, fonction, transaction) => {
   if (r) return r.id;
   const [[n]] = await X(`INSERT INTO roles (nom, code, description, couleur, tenant_id, is_system) VALUES (:nom, :code, :d, :couleur, :t, false) RETURNING id`,
     { nom: f.nom, code: f.code, d: f.description, couleur: f.couleur, t: tenantId }, transaction);
+  // Missions (087) : chefs de projet et responsables partent en mission et la justifient.
+  await X(`INSERT INTO role_permissions (role_id, permission_code)
+           SELECT :r, code FROM permissions WHERE code IN ('finance.missions.voir', 'finance.missions.demander') ON CONFLICT DO NOTHING`,
+  { r: n.id }, transaction);
   return n.id;
 };
 

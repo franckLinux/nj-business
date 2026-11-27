@@ -588,24 +588,60 @@ function PaiementTiroir({ sens, facture, origine, reste, onFermer, onFait }) {
 }
 
 // Règlement hors caisse ni banque : compte au choix et motif ; le directeur seul le valide.
-function HorsCaisseTiroir({ sens, facture, origine, reste, directeur, onFermer, onFait }) {
+// Tiers payeur (087) : la facture fournisseur est réglée directement par un tiers
+// (bailleur, associé, maison mère…) ; D 401 / C compte du tiers payeur, validé par le directeur.
+function HorsCaisseTiroir({ sens, facture, origine, reste, directeur, tiersPayeur = false, onFermer, onFait }) {
   const C = CFG[sens];
   const toast = useToast();
-  const [v, setV] = useState({ date: aujourdhui(), montant: String(Number(reste)), compte: '', tiers_id: '', motif: '' });
+  const [v, setV] = useState({ date: aujourdhui(), montant: String(Number(reste)), compte: '', tiers_id: '', motif: '', reference: '',
+    ...(tiersPayeur ? { nature: 'tiers_payeur' } : {}) });
   const [tiers, setTiers] = useState([]);
   const [erreur, setErreur] = useState('');
   const [enCours, setEnCours] = useState(false);
   useEffect(() => { api.get('/finance/tiers?sens=').then((r) => { if (!r?.error) setTiers(r.tiers || []); }); }, []);
   const set = (k) => (e) => setV((x) => ({ ...x, [k]: e.target.value }));
+  // Tiers payeur : son compte individuel est proposé s'il en a un.
+  const choisirPayeur = (e) => {
+    const t = tiers.find((x) => String(x.id) === e.target.value);
+    setV((x) => ({ ...x, tiers_id: e.target.value, compte: x.compte || t?.compte_tiers || '' }));
+  };
   const envoyer = async (valider) => {
     setEnCours(true); setErreur('');
     const r = await api.post('/finance/reglements/hors-caisse', { ...v, facture_type: origine, facture_id: facture.id, valider });
     setEnCours(false);
     if (r?.error) { setErreur(r.error); return; }
-    toast(r.statut === 'valide' ? 'Règlement hors caisse validé : écriture d\'OD passée.' : 'Règlement proposé : il attend la décision du directeur.', 'success', 7000);
+    toast(r.statut === 'valide' ? `${tiersPayeur ? 'Règlement par le tiers payeur' : 'Règlement hors caisse'} validé : écriture d'OD passée.`
+      : 'Règlement proposé : il attend la décision du directeur.', 'success', 7000);
     onFait();
   };
   const compteTiers = /^4[01]/.test(v.compte);
+  if (tiersPayeur) {
+    const payeurs = tiers.filter((t) => String(t.id) !== String(facture.tiers_id));
+    return (
+      <Tiroir titre="Facture réglée par un tiers payeur" sousTitre={`${C.reste} : ${fmtCompta(reste)} — ${facture.tiers_nom}`} onFermer={onFermer} pied={<>
+        <button type="button" className="cm-btn cm-secondaire" onClick={onFermer}>Annuler</button>
+        <button type="button" className={`cm-btn ${directeur ? 'cm-secondaire' : 'cm-primaire'}`} disabled={enCours || !v.tiers_id || !v.compte} onClick={() => envoyer(false)}>Proposer</button>
+        {directeur && <button type="button" className="cm-btn cm-primaire" disabled={enCours || !v.tiers_id || !v.compte} onClick={() => envoyer(true)}>Enregistrer et valider</button>}
+      </>}>
+        <p className="cm-sous">Un bailleur, un associé, la maison mère… a payé directement le fournisseur. La dette fournisseur est éteinte et passe
+          au compte du tiers payeur (D 401 / C compte du tiers payeur). <b>Seul le directeur valide</b> : l'écriture n'est passée qu'à ce moment.</p>
+        <Erreur message={erreur} />
+        <div className="cm-grille">
+          <Champ label="Tiers payeur" requis id="tp-t">
+            <select id="tp-t" value={v.tiers_id} onChange={choisirPayeur}><option value="">— Choisir —</option>
+              {payeurs.map((t) => <option key={t.id} value={t.id}>{t.nom}</option>)}</select>
+          </Champ>
+          <Champ label="Compte du tiers payeur" requis id="tp-c" aide="Ex. 462 associé, 458 organisme, 4xx maison mère">
+            <ChampCompte id="tp-c" valeur={v.compte} url="/finance/config/comptes" onChange={(c) => setV((x) => ({ ...x, compte: c }))} />
+          </Champ>
+          <Champ label="Date du paiement" requis id="tp-d"><input id="tp-d" type="date" value={v.date} onChange={set('date')} /></Champ>
+          <Champ label="Montant payé" requis id="tp-m"><input id="tp-m" inputMode="decimal" value={v.montant} onChange={set('montant')} /></Champ>
+          <Champ label="Référence (virement, chèque…)" id="tp-r"><input id="tp-r" value={v.reference} maxLength={100} onChange={set('reference')} /></Champ>
+          <Champ label="Observation" pleine id="tp-o"><textarea id="tp-o" rows={2} maxLength={500} value={v.motif} onChange={set('motif')} placeholder="Facultatif" /></Champ>
+        </div>
+      </Tiroir>
+    );
+  }
   return (
     <Tiroir titre="Règlement hors caisse ni banque" sousTitre={`${C.reste} : ${fmtCompta(reste)} — ${facture.tiers_nom}`} onFermer={onFermer} pied={<>
       <button type="button" className="cm-btn cm-secondaire" onClick={onFermer}>Annuler</button>
@@ -800,6 +836,7 @@ export function AchatFichePage({ sens = 'fournisseur' }) {
               <button type="button" className="cm-btn cm-primaire" onClick={() => setTiroir('paiement')}>{sens === 'client' ? '💰 Enregistrer l\'encaissement' : '💸 Enregistrer le paiement'}</button>
             )}
             {can('finance.reglements.affecter') && <button type="button" className="cm-btn cm-secondaire" onClick={() => setTiroir('reglement')}>Relier un mouvement déjà saisi</button>}
+            {can('finance.reglements.hors_caisse') && sens !== 'client' && <button type="button" className="cm-btn cm-secondaire" onClick={() => setTiroir('tiers_payeur')}>Payée par un tiers payeur…</button>}
             {can('finance.reglements.hors_caisse') && <button type="button" className="cm-btn cm-secondaire" onClick={() => setTiroir('hors_caisse')}>Hors caisse ni banque…</button>}
           </div>
         </div>
@@ -848,8 +885,9 @@ export function AchatFichePage({ sens = 'fournisseur' }) {
                   ))}
                   {d.hors_caisse.map((h) => (
                     <tr key={`h${h.id}`} className={['rejete', 'annule'].includes(h.statut) ? 'fin-ligne-annulee' : ''}>
-                      <td>{fmtDate(h.date)}</td><td>Hors caisse · <span className="fin-mono">{h.compte}</span></td>
-                      <td>{h.motif}{h.tiers_nom && <div className="cm-sous">{h.tiers_nom}</div>}{h.motif_decision && <div className="cm-sous">Décision : {h.motif_decision}</div>}</td>
+                      <td>{fmtDate(h.date)}</td><td>{h.nature === 'tiers_payeur' ? 'Tiers payeur' : 'Hors caisse'} · <span className="fin-mono">{h.compte}</span></td>
+                      <td>{h.nature === 'tiers_payeur' ? <><b>{h.tiers_nom}</b>{h.reference && <div className="cm-sous">Réf. {h.reference}</div>}<div className="cm-sous">{h.motif}</div></>
+                        : <>{h.motif}{h.tiers_nom && <div className="cm-sous">{h.tiers_nom}</div>}</>}{h.motif_decision && <div className="cm-sous">Décision : {h.motif_decision}</div>}</td>
                       <td className="fin-num">{fmtCompta(h.montant)}</td>
                       <td>{h.propose_par_nom || '—'}{h.decide_par_nom && <div className="cm-sous">décidé par {h.decide_par_nom}</div>}</td>
                       <td><BadgeEtat etat={STATUTS_HC[h.statut]} /></td>
@@ -891,6 +929,7 @@ export function AchatFichePage({ sens = 'fournisseur' }) {
       </p>
       {tiroir === 'paiement' && <PaiementTiroir sens={sens} facture={f} origine={origine} reste={d.reste} onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />}
       {tiroir === 'reglement' && <ReglementTiroir sens={sens} facture={f} origine={origine} reste={d.reste} onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />}
+      {tiroir === 'tiers_payeur' && <HorsCaisseTiroir tiersPayeur sens={sens} facture={f} origine={origine} reste={d.reste} directeur={directeur} onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />}
       {tiroir === 'hors_caisse' && <HorsCaisseTiroir sens={sens} facture={f} origine={origine} reste={d.reste} directeur={directeur} onFermer={() => setTiroir(null)} onFait={() => { setTiroir(null); charger(); }} />}
       {tiroir === 'annulation' && <MotifTiroir titre={`Annuler ${f.numero}`} bouton="Annuler le document"
         aide={proforma ? 'La proforma ne pourra plus être transformée en facture.' : 'L\'écriture est extournée. Un document déjà réglé ou portant un avoir ne s\'annule pas : retirez d\'abord ses règlements ou annulez l\'avoir.'}

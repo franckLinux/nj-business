@@ -46,6 +46,33 @@ router.get   ('/achats/referentiels',         ...VOIR_ACHATS, c.getAchatsRef);
 router.get   ('/achats/echeancier',           ...VOIR_ACHATS, c.getEcheancier);
 router.get   ('/achats/ouvertes',             ...FACTURES_OUVERTES, c.getOuvertes);
 router.get   ('/achats/sorties-disponibles',  ...AFFECTER, c.getSorties);
+// Missions (087) : PME et ONG. Droits fins (directeur, comptable, caisse, auteur) contrôlés par le service.
+const mi = require('../controllers/missions.controller');
+const MISSIONS = [authGuard, tenantGuard, requireAnyPermission('finance.missions.voir', 'finance.missions.demander')];
+router.get   ('/missions/contexte',            ...MISSIONS, mi.contexte);
+router.get   ('/missions/compteurs',           ...MISSIONS, mi.compteurs);
+router.get   ('/missions/parametres',          ...MISSIONS, mi.parametres);
+router.put   ('/missions/parametres',          ...MISSIONS, mi.enregistrerParametres);
+router.get   ('/missions',                     ...MISSIONS, mi.lister);
+router.post  ('/missions',                     ...MISSIONS, mi.creer);
+router.get   ('/missions/:id',                 ...MISSIONS, mi.lire);
+router.put   ('/missions/:id',                 ...MISSIONS, mi.modifier);
+router.delete('/missions/:id',                 ...MISSIONS, mi.supprimer);
+router.get   ('/missions/:id/pdf',             ...MISSIONS, mi.pdf);
+router.post  ('/missions/:id/soumettre',       ...MISSIONS, mi.soumettre);
+router.post  ('/missions/:id/decider',         ...MISSIONS, mi.decider);
+router.post  ('/missions/:id/annuler',         ...MISSIONS, mi.annuler);
+router.post  ('/missions/:id/depenses',        ...MISSIONS, mi.declarer);
+router.delete('/missions/:id/depenses/:depenseId', ...MISSIONS, mi.retirerDepense);
+router.get   ('/missions/:id/depenses/:depenseId/piece', ...MISSIONS, mi.piece);
+router.put   ('/missions/:id/rapport',         ...MISSIONS, mi.rapport);
+router.post  ('/missions/:id/justifier',       ...MISSIONS, mi.justifier);
+router.post  ('/missions/:id/controler',       ...MISSIONS, mi.controler);
+router.post  ('/missions/:id/cloturer',        ...MISSIONS, mi.cloturer);
+router.post  ('/missions/:id/avance',          authGuard, tenantGuard, requirePermission('journal.create'), mi.avance);
+router.post  ('/missions/:id/complement',      authGuard, tenantGuard, requirePermission('journal.create'), mi.complement);
+router.post  ('/missions/:id/reliquat',        authGuard, tenantGuard, requirePermission('journal.create'), mi.reliquat);
+
 // Lot F10 : tableau des immobilisations.
 const VOIR_IMMOS = P('finance.immos.voir');
 const GERER_IMMOS = P('finance.immos.gerer');
@@ -100,6 +127,19 @@ router.get   ('/ventes/referentiels',         ...VOIR_VENTES, c.getVentesRef);
 router.get   ('/ventes/echeancier',           ...VOIR_VENTES, c.getVentesEcheancier);
 router.get   ('/ventes/ouvertes',             ...ENTREES_OUVERTES, c.getVentesOuvertes);
 router.get   ('/ventes/entrees-disponibles',  ...AFFECTER, c.getEntreesDisponibles);
+// Règlements reçus des clients et tableau des contrôles (27/11/2026).
+const controles = require('../services/finance/controles.service');
+const servir = (nom, fn) => async (req, res) => {
+  try { res.json(await fn(req)); } catch (err) {
+    if (err instanceof controles.ErreurControles) return res.status(err.status).json({ error: err.message });
+    console.error(`[NJ FINANCE] ${nom} :`, err.message);
+    return res.status(500).json({ error: 'Erreur serveur.' });
+  }
+};
+router.get   ('/ventes/reglements-recus',     ...VOIR_VENTES, servir('règlements reçus', controles.reglementsRecus));
+router.get   ('/controles/tableau', authGuard, tenantGuard,
+  requireAnyPermission('controle.view', 'finance.achats.valider', 'finance.ventes.valider', 'journal.validate', 'journal.create',
+    'justificatifs.valider', 'finance.missions.voir'), servir('tableau des contrôles', controles.tableau));
 router.get   ('/ventes',                      ...VOIR_VENTES, c.getVentes);
 router.post  ('/ventes',                      ...FACTURER, c.postVente);
 router.get   ('/ventes/:id/pdf',              ...VOIR_VENTES, c.getVentePdf);

@@ -266,3 +266,15 @@ tr.fin-annule td { color: #94a3b8; text-decoration: line-through; }
 .fin-page a.cm-btn { text-decoration: none; }
 .fin-tableau-immos td, .fin-tableau-immos th { padding-left: 8px; padding-right: 8px; }
 .fin-bandeau-alerte { background: #fef2f2; border-color: #fecaca; color: #7f1d1d; }
+
+/* Missions (087) et tableau des contrôles (27/11/2026) */
+.fin-ligne-annulee td { text-decoration: line-through; color: var(--muted, #64748b); }
+.fin-ctrl-groupe { margin-bottom: 16px; }
+.fin-ctrl-groupe h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted, #64748b); margin: 0 0 8px; }
+.fin-ctrl-liste { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.fin-ctrl-tuile { display: flex; gap: 12px; align-items: flex-start; padding: 14px; border: 1px solid var(--border, #e2e8f0); border-left: 4px solid #d97706;
+  border-radius: 12px; background: #fff; color: inherit; text-decoration: none; transition: box-shadow .15s, transform .15s; }
+.fin-ctrl-tuile:hover, .fin-ctrl-tuile:focus-visible { box-shadow: 0 4px 14px rgba(15, 23, 42, .08); transform: translateY(-1px); }
+.fin-ctrl-nombre { font-size: 26px; font-weight: 800; line-height: 1; min-width: 38px; color: #b45309; }
+.fin-ctrl-texte b { display: block; font-size: 14px; }
+.fin-ctrl-texte span { display: block; font-size: 12px; color: var(--muted, #64748b); margin-top: 3px; }

@@ -294,3 +294,17 @@ test('Fournisseur : « Enregistrer le paiement » crée la sortie de caisse (D 4
     assert.equal(Number((await appel('GET', `/finance/achats/fin/${f.data.id}`, 'a', 'cpt')).data.reste), 150000);
   }
 });
+
+test('Règlements reçus (27/11) : encaissements en caisse et règlements hors caisse validés, par mode, filtrés par client', async () => {
+  const r = await appel('GET', `/finance/ventes/reglements-recus?du=${JOUR.slice(0, 4)}-01-01&au=${JOUR.slice(0, 4)}-12-31`, 'a', 'cpt');
+  assert.equal(r.status, 200, r.message);
+  const caisse = r.data.lignes.filter((l) => l.mode === 'caisse');
+  const hc = r.data.lignes.filter((l) => l.mode === 'hors_caisse');
+  assert.equal(caisse.some((l) => l.montant === 200000 && l.facture_id === F.fac), true, 'encaissement de la facture');
+  assert.equal(hc.some((l) => l.montant === 50000 && l.compte === '462'), true, 'règlement hors caisse validé');
+  assert.equal(r.data.total, r.data.lignes.reduce((s, l) => s + l.montant, 0));
+  assert.equal(Object.values(r.data.par_mode).reduce((s, v) => s + v, 0), r.data.total);
+  const autre = await appel('GET', `/finance/ventes/reglements-recus?tiers_id=999999999`, 'a', 'cpt');
+  assert.equal(autre.data.lignes.length, 0);
+  assert.equal((await appel('GET', '/finance/ventes/reglements-recus', 'b', 'cpt')).data.lignes.length, 0, 'isolement');
+});

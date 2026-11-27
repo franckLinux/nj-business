@@ -54,6 +54,10 @@ const TITLES = {
   '/finance/ventes/nouvelle': 'Facturation — Nouveau document',
   '/finance/ventes/echeancier': 'Facturation — Échéancier clients',
   '/controle/passerelle': 'Contrôle — Régularité formelle',
+  '/finance/ventes/reglements-recus': 'Facturation — Règlements reçus',
+  '/finance/missions': 'Missions',
+  '/finance/missions/nouvelle': 'Missions — Nouvel ordre de mission',
+  '/finance/controles': 'Contrôle — Tableau des contrôles',
 };
 
 export default function Layout() {
@@ -107,7 +111,8 @@ export default function Layout() {
     : location.pathname.startsWith('/finance/tiers/') ? 'Configuration — Fiche client / fournisseur'
       : location.pathname.startsWith('/finance/achats/') ? 'Achats — Facture fournisseur'
         : location.pathname.startsWith('/finance/ventes/') ? 'Facturation — Document client'
-          : location.pathname.startsWith('/finance/immobilisations/') ? 'Inventaire — Fiche d\'immobilisation' : 'Tableau de bord');
+          : location.pathname.startsWith('/finance/immobilisations/') ? 'Inventaire — Fiche d\'immobilisation'
+            : location.pathname.startsWith('/finance/missions/') ? 'Missions — Ordre de mission' : 'Tableau de bord');
   if (location.pathname.startsWith('/journal/')) {
     const j = journaux.find((x) => String(x.id) === String(params.id));
     title = j ? `${j.nom} (${j.code})` : 'Journal de caisse';

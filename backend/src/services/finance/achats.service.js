@@ -280,7 +280,7 @@ const affectationsDe = async (tenantId, type, fid) => Q(
 // Règlements hors caisse ni banque d'une facture.
 const horsCaisseDe = async (tenantId, type, fid) => Q(
   `SELECT h.id::text AS id, h.date_reglement::text AS date, h.montant, h.compte, h.motif, h.statut, h.motif_decision,
-          t.nom AS tiers_nom, up.username AS propose_par_nom, ud.username AS decide_par_nom, h.propose_le, h.decide_le
+          h.nature, h.reference, t.nom AS tiers_nom, up.username AS propose_par_nom, ud.username AS decide_par_nom, h.propose_le, h.decide_le
      FROM fin_reglements_hors_caisse h LEFT JOIN registre_tiers t ON t.id = h.tiers_id
      LEFT JOIN users up ON up.id = h.propose_par LEFT JOIN users ud ON ud.id = h.decide_par
     WHERE h.tenant_id = :tenantId AND h.facture_type = :type AND h.facture_id = :fid ORDER BY h.id`, { tenantId, type, fid });
@@ -1023,13 +1023,24 @@ const payer = async ({ tenantId, userId, body, creerMouvement }) => {
 const proposerHorsCaisse = async ({ tenantId, userId, role, body }) => {
   const type = body?.facture_type === 'com_ff' ? 'com_ff' : 'fin';
   const fid = id(body?.facture_id, 'Facture');
+  // Tiers payeur (087, décision de Franck) : une facture FOURNISSEUR réglée directement
+  // par un tiers (bailleur, associé, maison mère…) ; le compte est celui du tiers payeur.
+  const tiersPayeur = body?.nature === 'tiers_payeur';
+  const tiers = id(body?.tiers_id, tiersPayeur ? 'Tiers payeur' : 'Tiers', { obligatoire: tiersPayeur });
+  if (tiersPayeur) {
+    const [f] = type === 'fin' ? await Q('SELECT sens, tiers_id FROM fin_factures WHERE id = :fid AND tenant_id = :tenantId', { fid, tenantId })
+      : [{ sens: 'fournisseur' }];
+    if (f?.sens !== 'fournisseur') throw new ErreurAchat(400, 'Le règlement par un tiers payeur concerne les factures fournisseurs.');
+    if (f.tiers_id && String(f.tiers_id) === String(tiers)) throw new ErreurAchat(400, 'Le tiers payeur est une autre personne que le fournisseur.');
+  }
   const r = await enTransaction(async (transaction) => {
     const [[h]] = await X(
-      `INSERT INTO fin_reglements_hors_caisse (tenant_id, facture_type, facture_id, date_reglement, montant, compte, tiers_id, motif, propose_par)
-       VALUES (:tenantId, :type, :fid, :d, :montant, :compte, :tiers, :motif, :userId) RETURNING id`,
+      `INSERT INTO fin_reglements_hors_caisse (tenant_id, facture_type, facture_id, date_reglement, montant, compte, tiers_id, motif, propose_par, nature, reference)
+       VALUES (:tenantId, :type, :fid, :d, :montant, :compte, :tiers, :motif, :userId, :nature, :reference) RETURNING id`,
       { tenantId, type, fid, d: date(body?.date, 'Date', { obligatoire: true }), montant: nombre(body?.montant, 'Montant', { min: 0.01 }).toFixed(2),
-        compte: texte(body?.compte, 20, 'Compte de contrepartie', { obligatoire: true }), tiers: id(body?.tiers_id, 'Tiers', { obligatoire: false }),
-        motif: texte(body?.motif, 500, 'Motif', { obligatoire: true }), userId }, { transaction });
+        compte: texte(body?.compte, 20, tiersPayeur ? 'Compte du tiers payeur' : 'Compte de contrepartie', { obligatoire: true }), tiers,
+        motif: texte(body?.motif, 500, 'Motif', { obligatoire: !tiersPayeur }) || 'Règlement direct par le tiers payeur', userId,
+        nature: tiersPayeur ? 'tiers_payeur' : 'hors_caisse', reference: texte(body?.reference, 100, 'Référence du paiement') }, { transaction });
     return { id: String(h.id), statut: 'propose' };
   });
   // Le directeur qui propose peut valider dans la foulée.
@@ -1061,7 +1072,10 @@ const deciderHorsCaisse = async ({ tenantId, userId, role, id: idBrut, body }) =
       : await Q(`SELECT 'fournisseur' AS sens, c.numero, c.fournisseur_id AS tiers_id, i.compte_tiers FROM com_factures_fournisseurs c
                   JOIN fin_imputations_externes i ON i.com_ff_id = c.id WHERE c.id = :id`, { id: h.facture_id }, { transaction });
     const m = cts(h.montant);
-    const libelle = `Règlement hors caisse ${f.numero} : ${h.motif}`.slice(0, 300);
+    const [tp] = h.nature === 'tiers_payeur' ? await Q('SELECT nom FROM registre_tiers WHERE id = :t', { t: h.tiers_id }, { transaction }) : [];
+    const libelle = (h.nature === 'tiers_payeur'
+      ? `Facture ${f.numero} réglée par ${tp?.nom || 'le tiers payeur'}${h.reference ? ` (réf. ${h.reference})` : ''}`
+      : `Règlement hors caisse ${f.numero} : ${h.motif}`).slice(0, 300);
     const lTiers = { compte: f.compte_tiers, tiers_id: String(f.tiers_id), activite_id: null, libelle };
     const lContre = { compte: h.compte, tiers_id: h.tiers_id ? String(h.tiers_id) : null, activite_id: null, libelle };
     // Fournisseur : la dette est éteinte (D 401) ; client : la créance est éteinte (C 411).
@@ -1089,11 +1103,13 @@ const retirerHorsCaisse = ({ tenantId, userId, role, id: idBrut }) => enTransact
 // Règlements hors caisse en attente du directeur.
 const horsCaisseEnAttente = (tenantId) => Q(
   `SELECT h.id::text AS id, h.facture_type, h.facture_id::text AS facture_id, h.date_reglement::text AS date, h.montant, h.compte, h.motif,
+          h.nature, h.reference, tp.nom AS tiers_payeur_nom,
           coalesce(f.numero, c.numero) AS numero, coalesce(f.sens, 'fournisseur') AS sens, t.nom AS tiers_nom, u.username AS propose_par_nom
      FROM fin_reglements_hors_caisse h
      LEFT JOIN fin_factures f ON h.facture_type = 'fin' AND f.id = h.facture_id
      LEFT JOIN com_factures_fournisseurs c ON h.facture_type = 'com_ff' AND c.id = h.facture_id
      LEFT JOIN registre_tiers t ON t.id = coalesce(f.tiers_id, c.fournisseur_id) LEFT JOIN users u ON u.id = h.propose_par
+     LEFT JOIN registre_tiers tp ON h.nature = 'tiers_payeur' AND tp.id = h.tiers_id
     WHERE h.tenant_id = :tenantId AND h.statut = 'propose' ORDER BY h.propose_le`, { tenantId });
 
 module.exports = {
@@ -1101,4 +1117,6 @@ module.exports = {
   imputer, synchroniserCommercial, reglerParCaisse, retirerReglement, sortiesDisponibles, facturesOuvertes, echeancier,
   emettreProforma, transformerProforma, payer, proposerHorsCaisse, deciderHorsCaisse, retirerHorsCaisse, horsCaisseEnAttente,
   calculLigne, SENS,
+  // Briques comptables réutilisées par les missions (087).
+  ecrireEcriture, extournerOrigine, journalDe, preparerComptabilite,
 };

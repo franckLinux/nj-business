@@ -38,6 +38,12 @@ export const PAGE_PERMS = {
   '/finance/ventes':            'finance.ventes.voir',
   '/finance/ventes/nouvelle':   'finance.ventes.facturer',
   '/finance/ventes/echeancier': 'finance.ventes.voir',
+  '/finance/ventes/reglements-recus': 'finance.ventes.voir',   // 27/11/2026
+  // Missions (087) : PME et ONG.
+  '/finance/missions':          { any: ['finance.missions.voir', 'finance.missions.demander'] },
+  '/finance/missions/nouvelle': 'finance.missions.demander',
+  // Tableau des contrôles (27/11/2026) : qui contrôle ou valide quelque chose.
+  '/finance/controles': { any: ['controle.view', 'finance.achats.valider', 'finance.ventes.valider', 'journal.validate', 'justificatifs.valider', 'finance.missions.voir'] },
 };
 
 // Onglets de la page Configuration.
@@ -81,7 +87,9 @@ export const voitOngletConfig = (user, can, id) => {
 export const voitConfiguration = (user, can) => Object.keys(CONFIG_TABS).some((id) => voitOngletConfig(user, can, id));
 
 // can() étendu aux listes de codes (tous requis).
-export const peut = (can, code) => (Array.isArray(code) ? code.every((c) => can(c)) : can(code));
+// Tableau = toutes les permissions ; { any: [...] } = au moins une (27/11/2026).
+export const peut = (can, code) => (Array.isArray(code) ? code.every((c) => can(c))
+  : code && typeof code === 'object' ? (code.any || []).some((c) => can(c)) : can(code));
 
 // Prospects et démonstrations : super_admin, ou membre du cabinet (sans client
 // de rattachement) titulaire de « prospects.gerer ». La permission accordée

@@ -326,3 +326,24 @@ test('Échéancier et isolement des clients', async () => {
   const autre = await appel('POST', '/finance/reglements', 'b', 'dir', { mouvement_id: F.m3, affectations: [{ facture_type: 'fin', facture_id: F.immo, montant: 1 }] });
   assert.equal(autre.status, 400);
 });
+
+test('Tiers payeur (087) : la facture est réglée par un tiers, le directeur valide, D 401 / C compte du tiers payeur', async () => {
+  const [{ id: bailleur }] = await sql(`INSERT INTO registre_tiers (tenant_id, type, nom) VALUES ($1, 'client', 'Fondation Partenaire') RETURNING id::text`, [C.a.tenant]);
+  const r = await appel('POST', '/finance/achats', 'a', 'cai', facture({ reference: 'FA-TP1' }));
+  await appel('POST', `/finance/achats/fin/${r.data.id}/soumettre`, 'a', 'cai');
+  assert.equal((await appel('POST', `/finance/achats/fin/${r.data.id}/valider`, 'a', 'dir')).status, 200);
+  const base = { nature: 'tiers_payeur', facture_type: 'fin', facture_id: r.data.id, date: `${AN}-03-20`, montant: 119250, compte: '458', reference: 'VIR-778' };
+  assert.equal((await appel('POST', '/finance/reglements/hors-caisse', 'a', 'cpt', { ...base })).status, 400, 'tiers payeur obligatoire');
+  assert.equal((await appel('POST', '/finance/reglements/hors-caisse', 'a', 'cpt', { ...base, tiers_id: F.fourn })).status, 400, 'pas le fournisseur lui-même');
+  const p = await appel('POST', '/finance/reglements/hors-caisse', 'a', 'cpt', { ...base, tiers_id: bailleur });
+  assert.equal(p.status, 201, p.message);
+  const attente = (await appel('GET', '/finance/reglements/hors-caisse', 'a', 'dir')).data;
+  assert.equal((attente.lignes || attente).find((h) => h.id === p.data.id).tiers_payeur_nom, 'Fondation Partenaire');
+  assert.equal((await appel('POST', `/finance/reglements/hors-caisse/${p.data.id}/decision`, 'a', 'cpt', { decision: 'valider' })).status, 403);
+  const v = await appel('POST', `/finance/reglements/hors-caisse/${p.data.id}/decision`, 'a', 'dir', { decision: 'valider' });
+  assert.equal(v.status, 200, v.message);
+  assert.deepEqual(await lignesEcriture('fin_reglement_hc', p.data.id), ['401 D119250 T', '458 C119250 T']);
+  const d = (await appel('GET', `/finance/achats/fin/${r.data.id}`, 'a', 'cpt')).data;
+  assert.equal(Number(d.reste), 0);
+  assert.equal(d.hors_caisse[0].nature, 'tiers_payeur');
+});

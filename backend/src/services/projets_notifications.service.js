@@ -19,12 +19,12 @@ const T = sequelize.QueryTypes;
 const echapper = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const urlFront = () => (process.env.APP_URL || '').split(',')[0].trim().replace(/\/+$/, '');
 
-const gabarit = (entite, titre, lignes, lien) => `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/></head>
+const gabarit = (entite, titre, lignes, lien, rubrique = 'Gestion des activités') => `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/></head>
 <body style="font-family:Arial,sans-serif;background:#f8fafc;margin:0;padding:0">
 <div style="max-width:600px;margin:30px auto;background:#fff;border-radius:12px;border:1px solid #e2e8f0;overflow:hidden">
   <div style="background:#0f172a;padding:20px 28px">
     <div style="color:#fff;font-size:18px;font-weight:bold">NJ FINANCE — ${echapper(entite)}</div>
-    <div style="color:rgba(255,255,255,.7);font-size:13px;margin-top:4px">Gestion des activités</div>
+    <div style="color:rgba(255,255,255,.7);font-size:13px;margin-top:4px">${echapper(rubrique)}</div>
   </div>
   <div style="padding:24px 28px;font-size:14px;color:#1e293b;line-height:1.6">
     <h2 style="font-size:16px;margin:0 0 12px">${echapper(titre)}</h2>
@@ -71,7 +71,7 @@ const notifier = async (o) => {
       if (canal === 'plateforme') continue;
       const adr = String(u.email || '').trim();
       if (!adr) { bilan.mails.push({ dest: u.username, ok: false, raison: 'pas d\'e-mail sur la fiche' }); continue; }
-      const m = await envoyer({ to: adr, subject: `[NJ FINANCE] ${o.titre}`, html: gabarit(t?.nom || '', o.titre, o.lignes, lien) });
+      const m = await envoyer({ to: adr, subject: `[NJ FINANCE] ${o.titre}`, html: gabarit(t?.nom || '', o.titre, o.lignes, lien, o.rubrique) });
       bilan.mails.push({ dest: adr, ok: m.statut === 'envoye', raison: m.erreur || null });
     }
   } catch (err) {

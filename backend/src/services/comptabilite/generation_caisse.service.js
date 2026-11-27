@@ -111,8 +111,8 @@ const attendue = (m, compteVirements, reglements = []) => {
   // Parts réglant des factures, regroupées par compte et fournisseur.
   const groupes = new Map();
   for (const r of reglements) {
-    const k = `${r.compte}|${r.tiers_id}`;
-    groupes.set(k, { compte: r.compte, tiers_id: r.tiers_id, montant: (groupes.get(k)?.montant || 0) + r.montant });
+    const k = `${r.compte}|${r.tiers_id || ''}`;
+    groupes.set(k, { compte: r.compte, tiers_id: r.tiers_id || null, montant: (groupes.get(k)?.montant || 0) + r.montant });
   }
   for (const g of [...groupes.values()].sort((a, b) => (`${a.compte}|${a.tiers_id}`).localeCompare(`${b.compte}|${b.tiers_id}`))) {
     contreparties.push({ compte: g.compte, montant: g.montant, tiers_id: g.tiers_id, activite_id: null });
@@ -197,6 +197,18 @@ const reglementsParMouvement = async (tenantId) => {
     const k = String(r.mouvement_id);
     if (!parMouvement.has(k)) parMouvement.set(k, []);
     parMouvement.get(k).push({ compte: norm(r.compte), tiers_id: String(r.tiers_id), montant: cts(r.montant) });
+  }
+  // Missions (087) : avance, complément et reliquat passent au compte d'avance
+  // au personnel (42x) de la mission, et non au compte de la rubrique ; les
+  // charges sont constatées à la clôture de la mission.
+  const missions = await Q(
+    `SELECT mm.journal_id, abs(coalesce(j.entree, 0) - coalesce(j.sortie, 0)) AS montant, m.compte_avance
+       FROM fin_mission_mouvements mm JOIN fin_missions m ON m.id = mm.mission_id JOIN journal j ON j.id = mm.journal_id
+      WHERE mm.tenant_id = :tenantId`, { tenantId });
+  for (const r of missions) {
+    const k = String(r.journal_id);
+    if (!parMouvement.has(k)) parMouvement.set(k, []);
+    parMouvement.get(k).push({ compte: norm(r.compte_avance), tiers_id: null, montant: cts(r.montant) });
   }
   return parMouvement;
 };

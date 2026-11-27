@@ -91,7 +91,7 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         {/* NJ FINANCE — menu réorganisé le 25/11/2026 (cahier de Franck) : Tableau de bord,
             Configuration (entité, clients, fournisseurs, paramètres), 1 Achats, 2 Gestion des
             activités (ONG / associations), 4 Facturation, 5 Caisse Pro, 7 Contrôle, 8 Reporting.
-            Missions (3) et Inventaire (6) viendront avec leurs lots. Les adresses et les droits des
+            3 Missions (087), 6 Inventaire (F10). Les adresses et les droits des
             pages ne changent pas. */}
         {voitConfiguration(user, can) && (
         <NavLink to="/config" className={navClass}>
@@ -193,6 +193,45 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
         </NavGroup>
         )}
 
+        {/* 3. MISSIONS (087, 27/11/2026) : PME et ONG. Ordre de mission approuvé par le directeur,
+            avance facultative, justification et régularisation. */}
+        {voit('/finance/missions') && (
+        <NavGroup
+          name="missions"
+          label="Missions"
+          icon={<svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>}
+        >
+          <NavLink to="/finance/missions" className={() => subClass({ isActive: surPage('/finance/missions', '') || /^\/finance\/missions\/\d+/.test(location.pathname) })}>
+            <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><circle cx="4" cy="6" r="1" /><circle cx="4" cy="12" r="1" /><circle cx="4" cy="18" r="1" /></svg>
+            Ordres de mission
+          </NavLink>
+          {user?.role === 'directeur' && (
+          <NavLink to="/finance/missions?vue=a_approuver" className={() => subClass({ isActive: surPage('/finance/missions', 'vue=a_approuver') })}>
+            <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>
+            À approuver
+          </NavLink>
+          )}
+          {(user?.role === 'directeur' || can('justificatifs.valider')) && (
+          <NavLink to="/finance/missions?vue=a_controler" className={() => subClass({ isActive: surPage('/finance/missions', 'vue=a_controler') })}>
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><polyline points="9 15 11 17 15 13" /></svg>
+            Justifications à contrôler
+          </NavLink>
+          )}
+          {can('journal.create') && (
+          <NavLink to="/finance/missions?vue=a_regulariser" className={() => subClass({ isActive: surPage('/finance/missions', 'vue=a_regulariser') })}>
+            <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+            À régulariser (caisse)
+          </NavLink>
+          )}
+          {voit('/finance/missions/nouvelle') && (
+          <NavLink to="/finance/missions/nouvelle" className={subClass}>
+            <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+            Nouvel ordre de mission
+          </NavLink>
+          )}
+        </NavGroup>
+        )}
+
         {/* 4. FACTURATION (F8, 081) : proformas, factures définitives, avoirs, créances. Le paiement
             par caisse se fait depuis la facture (mouvement créé et relié, sans deuxième saisie). */}
         {voit('/finance/ventes') && (
@@ -237,6 +276,10 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
             Suivi des créances clients
           </NavLink>
           )}
+          <NavLink to="/finance/ventes/reglements-recus" className={subClass}>
+            <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2" /><line x1="1" y1="10" x2="23" y2="10" /></svg>
+            Règlements reçus
+          </NavLink>
         </NavGroup>
         )}
 
@@ -342,12 +385,18 @@ export default function Sidebar({ badgeAttente = 0, badgeDepassements = 0, open 
 
         {/* 7. CONTRÔLE : contrôles financiers et comptables existants, regroupés. */}
         {(voit('/controle/passerelle') || voit('/controle/regularite') || voit('/controle/registre') || voit('/controle/arretes') || voit('/controle/ecarts')
-          || can('finance.achats.valider') || can('finance.ventes.valider') || accesProjets?.visible) && (
+          || can('finance.achats.valider') || can('finance.ventes.valider') || accesProjets?.visible || voit('/finance/controles')) && (
         <NavGroup
           name="controle"
           label="Contrôle"
           icon={<svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>}
         >
+          {voit('/finance/controles') && (
+          <NavLink to="/finance/controles" className={subClass}>
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+            Tableau des contrôles
+          </NavLink>
+          )}
           {voit('/controle/passerelle') && (
           <NavLink to="/controle/passerelle" className={subClass}>
             <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12" /></svg>

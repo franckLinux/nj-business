@@ -73,6 +73,8 @@ import EcrituresCaissePage from '@/pages/comptabilite/EcrituresCaissePage';
 import { EtatTiersPage, TiersFichePage, TiersListePage } from '@/pages/finance/TiersPages';
 import { AchatFichePage, AchatSaisiePage, AchatsListePage, EcheancierPage } from '@/pages/finance/AchatsPages';
 import { ImmobilisationsPage, ImmoSaisiePage, ImmoFichePage, TableauImmosPage } from '@/pages/finance/ImmobilisationsPages';
+import { MissionsPage, MissionSaisiePage, MissionFichePage } from '@/pages/finance/MissionsPages';
+import { TableauControlesPage, ReglementsRecusPage } from '@/pages/finance/ControlesPages';
 import LectureFacturesPage from '@/pages/finance/LectureFacturesPage';
 import OffreFournisseurPage from '@/pages/OffreFournisseurPage';
 import { ConsultationsPage, ConsultationFormPage, ConsultationPage, ComparatifPage } from '@/pages/commercial/ConsultationsPages';
@@ -356,6 +358,12 @@ function AuthenticatedApp() {
         <Route path="finance/ventes"                 element={<Autorise code={PAGE_PERMS['/finance/ventes']}><AchatsListePage key="v" sens="client" /></Autorise>} />
         <Route path="finance/ventes/nouvelle"        element={<Autorise code={PAGE_PERMS['/finance/ventes/nouvelle']}><AchatSaisiePage key="vn" sens="client" /></Autorise>} />
         <Route path="finance/ventes/echeancier"      element={<Autorise code={PAGE_PERMS['/finance/ventes/echeancier']}><EcheancierPage key="ve" sens="client" /></Autorise>} />
+        <Route path="finance/ventes/reglements-recus" element={<Autorise code={PAGE_PERMS['/finance/ventes/reglements-recus']}><ReglementsRecusPage /></Autorise>} />
+        <Route path="finance/missions"               element={<Autorise code={PAGE_PERMS['/finance/missions']}><MissionsPage /></Autorise>} />
+        <Route path="finance/missions/nouvelle"      element={<Autorise code={PAGE_PERMS['/finance/missions/nouvelle']}><MissionSaisiePage key="mn" /></Autorise>} />
+        <Route path="finance/missions/:id/modifier"  element={<Autorise code={PAGE_PERMS['/finance/missions/nouvelle']}><MissionSaisiePage key="mm" /></Autorise>} />
+        <Route path="finance/missions/:id"           element={<Autorise code={PAGE_PERMS['/finance/missions']}><MissionFichePage /></Autorise>} />
+        <Route path="finance/controles"              element={<Autorise code={PAGE_PERMS['/finance/controles']}><TableauControlesPage /></Autorise>} />
         <Route path="finance/ventes/:id/modifier"    element={<Autorise code={PAGE_PERMS['/finance/ventes/nouvelle']}><AchatSaisiePage key="vm" sens="client" /></Autorise>} />
         <Route path="finance/ventes/:id"             element={<Autorise code={PAGE_PERMS['/finance/ventes']}><AchatFichePage key="vf" sens="client" /></Autorise>} />
         <Route path="config"         element={<Autorise ok={voitConfiguration(user, can)}><ConfigPage /></Autorise>} />

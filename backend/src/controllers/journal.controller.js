@@ -8,6 +8,7 @@ const { resoudreActivite } = require('./activites.controller');
 const hebdoSvc = require('../services/budget_hebdo.service');
 const projetsSvc = require('../services/projets.service');
 const demandesSvc = require('../services/projets_demandes.service');
+const missionsSvc = require('../services/finance/missions.service');
 const ecartsSvc = require('../services/ecarts_caisse.service');
 
 // ── Activité / projet obligatoire (039) ───────────────────────────────────
@@ -173,6 +174,19 @@ const createMouvement = async (req, res) => {
       return res.status(500).json({ error: 'Erreur serveur.' });
     }
   }
+  // Missions (087) : avance, complément ou reliquat d'une mission ; lien écrit
+  // dans la transaction de la saisie (plafonds contrôlés en base).
+  let lienMission = null;
+  if (req.body.mission_id) {
+    try {
+      lienMission = await missionsSvc.lienCaisse(req.tenantId, req.body.mission_id, { entree, sortie, sens: req.body.mission_sens });
+      if (lienMission.activiteId) activiteId = lienMission.activiteId;
+    } catch (e) {
+      if (e instanceof projetsSvc.ErreurProjet) return res.status(e.status).json({ error: e.message, code: e.code });
+      console.error('[Journal] mission :', e.message);
+      return res.status(500).json({ error: 'Erreur serveur.' });
+    }
+  }
   // ONG / association (069) : projet bénéficiaire d'un financement affecté,
   // activité de projet d'une remise de fonds. null pour une PME.
   let projetCtx = null;
@@ -237,8 +251,13 @@ const createMouvement = async (req, res) => {
   // RG-05 : les contrôles ne s'appliquent qu'aux SORTIES (entrées exemptées).
   // Sortie vers une activité de projet (ONG, 069) : contrôlée par le budget du
   // projet au moment de l'enregistrement, pas par le budget de fonctionnement.
-  const sortieProjet = montantSortie > 0 && Boolean(projetCtx?.activiteProjet);
-  if (montantSortie > 0 && !sortieProjet) {
+  // Une sortie de mission imputée à une activité de projet reste contrôlée par l'ordre
+  // de mission approuvé (087), pas par l'ancien budget de projet en versions.
+  const sortieProjet = montantSortie > 0 && Boolean(projetCtx?.activiteProjet) && !lienMission;
+  // Une sortie de mission (avance, complément) est déjà autorisée par le directeur,
+  // qui a approuvé l'ordre de mission et ses frais (plafond contrôlé en base) :
+  // pas de second contrôle par la Demande de fonds.
+  if (montantSortie > 0 && !sortieProjet && !lienMission) {
     let ctrl;
     try {
       ctrl = await controleBudgetSortie(req.tenantId, {
@@ -295,7 +314,7 @@ const createMouvement = async (req, res) => {
     };
     let mouvement;
     let projetInfo = null;
-    if (projetCtx?.imputation || sortieProjet || lienDemande) {
+    if (projetCtx?.imputation || sortieProjet || lienDemande || lienMission) {
       // Écriture + lien projet (ou contrôle du budget du projet, ou lien à la
       // demande de fonds — plafonds contrôlés en base) dans UNE transaction.
       mouvement = await sequelize.transaction(async (t) => {
@@ -304,6 +323,10 @@ const createMouvement = async (req, res) => {
             { activiteId: projetCtx.activiteProjet.id, montant: montantSortie }, t);
         }
         const m = await Mouvement.create(valeurs, { transaction: t });
+        if (lienMission) {
+          await missionsSvc.relierMouvement(req.tenantId, lienMission, m.id, req.user.id, t);
+          projetInfo = { ...(projetInfo || {}), mission_id: String(lienMission.missionId), mission_sens: lienMission.sens };
+        }
         if (lienDemande) {
           await demandesSvc.relierMouvement(req.tenantId, lienDemande, m.id, req.user.id, t);
           projetInfo = { demande_fonds_id: String(lienDemande.demandeId), sens: lienDemande.sens };
